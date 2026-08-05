@@ -4,7 +4,7 @@ import { MessageConnector } from './types';
 /** Development-only connector. It performs no network or credential operations. */
 export class MockEmailConnector implements MessageConnector {
   capabilities = {
-    source: 'imap' as const,
+    source: 'icloud' as const,
     read: true,
     send: false,
     realtime: false,
