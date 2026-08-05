@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "Convo",
+    "slug": "convo",
+    "version": "1.0.0",
+    "icon": "./assets/icon.png",
+    "scheme": "convo",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.mihirkavi.convo"
+    },
+    "android": {
+      "package": "com.mihirkavi.convo",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-status-bar",
+      "expo-font"
+    ]
+  }
+}
