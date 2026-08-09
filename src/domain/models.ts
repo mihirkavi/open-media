@@ -30,6 +30,8 @@ export interface Person {
   avatarColor: string;
   identities: Identity[];
   favorite?: boolean;
+  /** True only when the person and phone number are saved in the device contacts. */
+  isPhoneContact?: boolean;
 }
 
 export interface EmailContext {

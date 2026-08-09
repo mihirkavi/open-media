@@ -36,12 +36,15 @@ export function ThreadView({ conversation, isCompact, onBack }: ThreadViewProps)
       <View style={styles.header}>
         <View style={styles.headerLeading}>
           {isCompact ? (
-            <Pressable accessibilityLabel="Back to people" onPress={onBack} style={styles.iconButton}><Ionicons name="chevron-back" size={22} color={colors.accent} /></Pressable>
+            <Pressable accessibilityRole="button" accessibilityLabel="Back to people" onPress={onBack} style={styles.iconButton}><Ionicons name="chevron-back" size={22} color={colors.accent} /></Pressable>
           ) : null}
           <View style={styles.headerAvatarStack}>
             {conversation.participants.slice(0, 2).map((person, index) => (
-              <View key={person.id} style={[styles.headerAvatar, { backgroundColor: person.avatarColor, marginLeft: index ? -10 : 0, zIndex: 2 - index }]}>
-                <Text style={styles.headerAvatarText}>{person.initials}</Text>
+              <View key={person.id} style={[styles.headerAvatarWrap, { marginLeft: index ? -10 : 0, zIndex: 2 - index }]}>
+                <View style={[styles.headerAvatar, { backgroundColor: person.avatarColor }]}><Text style={styles.headerAvatarText}>{person.initials}</Text></View>
+                {person.isPhoneContact && conversation.participants.length === 1 ? (
+                  <View accessibilityLabel="Saved phone contact" style={styles.headerContactTick}><Ionicons name="checkmark" size={9} color={colors.surface} /></View>
+                ) : null}
               </View>
             ))}
           </View>
@@ -159,8 +162,10 @@ const styles = StyleSheet.create({
   header: { minHeight: 74, paddingHorizontal: 18, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: 'rgba(255,255,255,0.96)', borderBottomWidth: 1, borderBottomColor: colors.border },
   headerLeading: { minWidth: 0, flex: 1, flexDirection: 'row', alignItems: 'center', gap: 11 },
   headerAvatarStack: { flexDirection: 'row', paddingLeft: 1 },
+  headerAvatarWrap: { width: 39, height: 39 },
   headerAvatar: { width: 37, height: 37, borderRadius: 19, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: colors.surface },
   headerAvatarText: { color: colors.surface, fontSize: 10, fontWeight: '700' },
+  headerContactTick: { position: 'absolute', right: 0, bottom: 0, width: 15, height: 15, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.accent, borderWidth: 2, borderColor: colors.surface },
   headerCopy: { flex: 1, minWidth: 0 },
   headerTitle: { color: colors.text, fontSize: 15, fontWeight: '700' },
   headerMeta: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 3 },

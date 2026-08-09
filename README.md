@@ -2,7 +2,7 @@
 
 Convo is a people-first, cross-platform unified messenger foundation. Its goal is to make every conversation with a person feel coherent and immediate, even when individual messages arrive through different addresses or services.
 
-The initial MVP is a fictional, local demo. It runs from one Expo/React Native codebase on iPhone, iPad, Android, and the web, including Mac-class browsers. There are no credentials, personal message imports, background sync jobs, or live sends.
+The app now includes the first production-oriented integrations: configurable IMAP/POP email import through a separate secure service, on-device Apple Contacts cleanup, and private semantic search through Apple Foundation Models. The social conversations remain fictional demo data and live sending is still disabled.
 
 ## Product idea
 
@@ -33,6 +33,10 @@ Source remains visible on every message, but it never fragments the relationship
 - Realistic but entirely fictional mock identities and messages
 - Confidence-scored identity-match suggestions that cannot merge until explicitly accepted
 - TypeScript validation, domain tests, Expo dependency checks, and static web export validation
+- Immediate traditional message search plus a separately labeled Apple Intelligence result section
+- Review-before-write Apple Contacts normalization using Expo SDK 56's current Contacts API
+- User-configurable iCloud and standards-based IMAP/POP setup with real connection testing and mailbox import
+- Supabase Auth/database scaffold with encrypted mailbox credentials kept in a private schema
 
 ## Architecture
 
@@ -46,6 +50,9 @@ src/
   connectors/
     types.ts                    provider capability and normalized sync contracts
     mockEmailConnector.ts       safe local adapter; no credentials or network access
+    mailApiConnector.ts         authenticated client for the separate mail-sync service
+  contacts/                     on-device Contacts scan and reviewed updates
+  search/                       Apple Foundation Models adapter and availability fallback
   data/
     mockData.ts                 fictional people, linked identities, and timelines
   ui/
@@ -54,6 +61,9 @@ src/
     ThreadView.tsx              merged timeline, email topics, composer
     SourceMarker.tsx            small generic/local provider indicators
   theme.ts                      shared color and shape tokens
+modules/apple-foundation-search native iOS 26+ Expo module; content stays on-device
+services/mail-sync/             separate IMAP/POP test, import, auth, and encrypted storage service
+supabase/migrations/            private mail-account/message schema with RLS defense-in-depth
 ```
 
 ### Identity resolution rules
@@ -76,13 +86,14 @@ Each normalized message stores both a canonical `senderPersonId` and the precise
 
 Requirements:
 
-- Node.js 20.19 or newer
+- Node.js 22 or newer
 - npm
 - Xcode for an iOS simulator, or Android Studio for an Android emulator
 
 ```bash
 npm install
 npm run web
+npm run mail:server
 ```
 
 Other development targets:
@@ -91,6 +102,32 @@ Other development targets:
 npm run ios
 npm run android
 ```
+
+The regular `npm run ios` path can use Expo Go for UI work. Apple Foundation Models is custom native code, so use `npm run ios:native` for AI search. It requires iOS 26 or later, supported Apple Intelligence hardware, Apple Intelligence enabled, and a downloaded model. When unavailable, exact search still works immediately and the app explains why the AI section is unavailable.
+
+## Try iCloud Mail locally
+
+1. Copy `services/mail-sync/.env.example` to the ignored `services/mail-sync/.env`, or export the values in your shell. For local in-memory testing, set `NODE_ENV=development` and `CONVO_ALLOW_INSECURE_LOCAL_AUTH=true`.
+2. Start the mail service with `npm run mail:server`.
+3. Start/reload Convo, open **Settings → iCloud Mail**, and enter the iCloud address plus an Apple app-specific password. The preset uses `imap.mail.me.com`, TLS, and port `993`.
+4. Tap **Test & connect**. Convo verifies the login, imports up to the latest 100 Inbox messages, normalizes them into people-first conversations, and never writes the password to device storage.
+
+POP over TLS (`995`) is supported for providers that require it, but is intentionally labeled **import** because POP does not provide folder/read-state synchronization. Unencrypted IMAP/POP is rejected.
+
+For the iOS simulator, the development app defaults to `http://127.0.0.1:8787`. Override it with `EXPO_PUBLIC_CONVO_API_URL`. Android emulators generally need a host-reachable address rather than `127.0.0.1`.
+
+## Public deployment boundary
+
+The dedicated Supabase project is provisioned in the Convo organization at `https://sgqrkbsmroytevkgogoy.supabase.co`, and `supabase/migrations/202608090001_mail_sync.sql` has been applied and verified. Copy `.env.example` to the ignored `.env.local`, insert the active publishable key, and deploy `services/mail-sync` behind HTTPS. Configure:
+
+```text
+App: EXPO_PUBLIC_SUPABASE_URL, EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY, EXPO_PUBLIC_CONVO_API_URL
+Service: SUPABASE_URL, DATABASE_URL, MAIL_CREDENTIALS_KEY, CONVO_APP_ORIGIN, NODE_ENV=production
+```
+
+`MAIL_CREDENTIALS_KEY` must be a server-only base64 32-byte key (`openssl rand -base64 32`). The service authenticates Supabase JWTs, blocks private/reserved mailbox targets, requires TLS, encrypts passwords with AES-256-GCM, avoids credential logging, and stores mail tables in an unexposed `private` schema. Never put the database URL or credential-encryption key in an `EXPO_PUBLIC_` variable.
+
+Before testing magic-link sign-in, add `convo://auth` to **Supabase Dashboard → Authentication → URL Configuration → Redirect URLs**. This dashboard-only callback setting has not been applied by repository automation.
 
 Run the local validation suite:
 
@@ -103,12 +140,13 @@ The web export is written to `.expo-dist/`, which is ignored and remains inside 
 
 ## Connector and platform reality
 
-Convo does **not** currently connect to any messaging provider. The Instagram, LinkedIn, Snapchat, SMS, Gmail, iCloud, and generic email indicators in the demo are local generic visuals, not official brand assets and not evidence of provider integration.
+Convo now has a working standards-based email path. The Instagram, LinkedIn, Snapchat, SMS, and Gmail OAuth indicators remain local generic visuals, not official brand assets and not evidence of those providers' private-message APIs.
 
 | Source | Practical integration path | Important constraints |
 | --- | --- | --- |
 | Gmail | Gmail API with OAuth and narrowly scoped access | Google verification, secure token storage, quotas, push-notification infrastructure, and user consent are required. |
-| iCloud Mail / generic IMAP | User-authorized IMAP for reading and SMTP for sending | Apple may require an app-specific password; IMAP is not a complete realtime messaging API and server behavior differs. Credentials must never ship in the client or repository. |
+| iCloud Mail / generic IMAP | Implemented connection test and Inbox import/sync through the separate service | iCloud requires an app-specific password. Sending, attachments, background scheduling, and IMAP IDLE are not implemented yet. |
+| Generic POP | Implemented TLS-only import fallback | POP has no folder/read-state sync and should not be presented as equivalent to IMAP. |
 | LinkedIn | Approved LinkedIn APIs only | LinkedIn does not provide broad public personal-inbox access for a general unified messenger. Do not depend on scraping or claim full support. |
 | Meta services | Product-specific, approved Meta APIs | Consumer Instagram and Messenger access differs from business messaging APIs. App review, policy compliance, and account eligibility may be required; broad personal inbox access is not guaranteed. |
 | Snapchat | Approved Snap integrations only | A general personal-message inbox API should not be assumed. The current marker is purely demonstrative. |
@@ -128,7 +166,7 @@ Native iOS and Android builds are supported by the Expo foundation, and responsi
 
 ## Status and limitations
 
-This repository is an early product and interface MVP, not a production messaging client. The people-first domain, UI, and mock connector boundary are runnable; authentication, durable storage, identity-review UI, sync orchestration, notifications, attachments, encryption strategy, and production connectors remain unimplemented. Composer interactions clear local demo text but transmit nothing.
+This repository is an early product and integration foundation, not yet a store-ready messaging client. Email login testing/import, credential encryption, Supabase Auth hooks, Contacts cleanup, private AI search, and the hosted Supabase schema are implemented. The separate mail service is not hosted yet, so durable production sync is not live. Background scheduling, notifications, attachments, SMTP sending, deletion/retention controls, account removal, privacy disclosures, abuse controls, and production observability remain release blockers. Composer interactions still transmit nothing.
 
 ## License
 

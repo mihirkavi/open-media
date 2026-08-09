@@ -15,7 +15,7 @@ export const currentUser: Person = {
 
 export const mockPeople = {
   maya: {
-    id: 'maya', name: 'Maya Chen', initials: 'MC', avatarColor: '#7B61FF', favorite: true,
+    id: 'maya', name: 'Maya Chen', initials: 'MC', avatarColor: '#7B61FF', favorite: true, isPhoneContact: true,
     identities: [
       { id: 'maya-gmail', personId: 'maya', kind: 'email', value: 'maya.chen@example.com', source: 'gmail', label: 'Work email', verifiedByUser: true },
       { id: 'maya-icloud', personId: 'maya', kind: 'email', value: 'maya.weekends@example.com', source: 'icloud', label: 'Personal email', verifiedByUser: true },
@@ -37,7 +37,7 @@ export const mockPeople = {
     ],
   },
   alex: {
-    id: 'alex', name: 'Alex Morgan', initials: 'AM', avatarColor: '#27AE60',
+    id: 'alex', name: 'Alex Morgan', initials: 'AM', avatarColor: '#27AE60', isPhoneContact: true,
     identities: [
       { id: 'alex-snapchat', personId: 'alex', kind: 'handle', value: 'alex-demo', source: 'snapchat', label: 'Snapchat', verifiedByUser: true },
       { id: 'alex-sms', personId: 'alex', kind: 'phone', value: '+1 555 010 0142', source: 'sms', label: 'Mobile', verifiedByUser: true },

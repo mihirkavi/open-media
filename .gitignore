@@ -32,7 +32,9 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
+services/mail-sync/.env
 
 # typescript
 *.tsbuildinfo

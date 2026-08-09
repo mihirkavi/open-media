@@ -26,7 +26,14 @@
     },
     "plugins": [
       "expo-status-bar",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Allow Convo to match message senders and review contact cleanup suggestions."
+        }
+      ],
+      "expo-secure-store"
     ]
   }
 }

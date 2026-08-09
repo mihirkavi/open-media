@@ -4,13 +4,19 @@
   "main": "index.ts",
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
-    "expo": "~56.0.0",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@supabase/supabase-js": "2.109.0",
+    "expo": "~56.0.19",
+    "expo-contacts": "~56.0.12",
     "expo-font": "~56.0.7",
+    "expo-linking": "~56.0.16",
+    "expo-secure-store": "~56.0.4",
     "expo-status-bar": "~56.0.4",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.85.3",
     "react-native-safe-area-context": "~5.7.0",
+    "react-native-url-polyfill": "^4.0.0",
     "react-native-web": "^0.21.2"
   },
   "devDependencies": {
@@ -23,14 +29,20 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
+    "ios:native": "expo run:ios",
     "web": "expo start --web",
+    "mail:server": "npm start --prefix services/mail-sync",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test src/**/*.test.ts",
     "export:web": "expo export --platform web --output-dir .expo-dist",
-    "check": "npm run typecheck && npm test && npm run export:web"
+    "check": "npm run typecheck && npm test && npm run typecheck --prefix services/mail-sync && npm test --prefix services/mail-sync && npm run export:web"
   },
   "private": true,
+  "overrides": {
+    "image-size": "2.0.2",
+    "uuid": "11.1.1"
+  },
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=22.0.0"
   }
 }

@@ -8,6 +8,7 @@ interface PeopleRailProps {
   conversations: Conversation[];
   selectedFilter: PeopleFilter;
   onSelectFilter: (filter: PeopleFilter) => void;
+  onOpenSettings: () => void;
 }
 
 const filters: Array<{ id: PeopleFilter; label: string; icon: keyof typeof Ionicons.glyphMap }> = [
@@ -17,7 +18,7 @@ const filters: Array<{ id: PeopleFilter; label: string; icon: keyof typeof Ionic
   { id: 'favorites', label: 'Favorites', icon: 'star-outline' },
 ];
 
-export function PeopleRail({ conversations, selectedFilter, onSelectFilter }: PeopleRailProps) {
+export function PeopleRail({ conversations, selectedFilter, onSelectFilter, onOpenSettings }: PeopleRailProps) {
   const unreadCount = conversations.reduce((total, conversation) => total + conversation.unreadCount, 0);
   const favoritePeople = conversations
     .flatMap((conversation) => conversation.participants)
@@ -60,7 +61,7 @@ export function PeopleRail({ conversations, selectedFilter, onSelectFilter }: Pe
           <Ionicons name="git-merge-outline" size={15} color={colors.textSecondary} />
           <Text style={styles.privacyText}>Identity matches always need review</Text>
         </View>
-        <RailButton icon="settings-outline" label="Settings" active={false} onPress={() => {}} />
+        <RailButton icon="settings-outline" label="Settings" active={false} onPress={onOpenSettings} />
         <View style={styles.profile}>
           <View style={styles.profileAvatar}><Text style={styles.profileInitials}>MK</Text></View>
           <View style={styles.profileCopy}>
