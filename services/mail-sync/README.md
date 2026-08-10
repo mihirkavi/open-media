@@ -1,6 +1,6 @@
 # Convo mail-sync service
 
-This separate Node service is the only component allowed to handle reusable mailbox credentials. The mobile/web client sends a configuration over HTTPS, the service validates it against the real IMAP or POP server, encrypts the password with AES-256-GCM, and imports recent messages into Convo's normalized client flow.
+This separate service is the only component allowed to handle reusable mailbox credentials. The mobile/web client sends a configuration over HTTPS, the service validates it against the real IMAP or POP server, encrypts the password with AES-256-GCM, and imports recent messages into Convo's normalized client flow.
 
 ## Local run
 
@@ -13,7 +13,23 @@ curl http://127.0.0.1:8787/health
 
 Without `DATABASE_URL`, development uses an in-memory repository and an ephemeral encryption key. Restarting the service intentionally forgets those accounts. This mode binds only to `127.0.0.1` and cannot be enabled when `NODE_ENV=production`.
 
-For local durable or production use, set the variables in `.env.example`, apply the repository's Supabase migration, and run the service from an HTTPS platform that supports normal outbound TCP/TLS connections. Production defaults to `0.0.0.0`; set `HOST` explicitly when your platform requires another bind address. Do not deploy this as a browser bundle or place `DATABASE_URL`/`MAIL_CREDENTIALS_KEY` in the Expo environment.
+For local durable use, set the variables in `.env.example` and apply the repository's Supabase migrations. The Node entry point defaults to `0.0.0.0` in production; set `HOST` explicitly when another bind address is required.
+
+## Cloudflare Worker production
+
+The production entry point is `src/worker.ts`, configured by `wrangler.jsonc`. It uses Cloudflare's outbound TCP/TLS support for IMAP and POP, validates the Supabase JWT itself, and calls three authenticated PostgREST RPCs. Those RPCs run as the caller and enforce ownership again through RLS; the Worker never receives a database password or service-role key.
+
+Configure these Worker secrets before deployment:
+
+```text
+SUPABASE_URL
+SUPABASE_PUBLISHABLE_KEY
+MAIL_CREDENTIALS_KEY
+```
+
+`MAIL_CREDENTIALS_KEY` must be a base64-encoded 32-byte key and must never be placed in Expo configuration. Generate Worker types and validate the bundle with `npm run worker:types` and `npm run worker:check`. Deploy with `npm run worker:deploy`.
+
+The current production health endpoint is `https://convo-mail-sync.convo-mail-sync.workers.dev/health`.
 
 ## Endpoints
 

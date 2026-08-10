@@ -118,16 +118,17 @@ For the iOS simulator, the development app defaults to `http://127.0.0.1:8787`. 
 
 ## Public deployment boundary
 
-The dedicated Supabase project is provisioned in the Convo organization at `https://sgqrkbsmroytevkgogoy.supabase.co`, and `supabase/migrations/202608090001_mail_sync.sql` has been applied and verified. Copy `.env.example` to the ignored `.env.local`, insert the active publishable key, and deploy `services/mail-sync` behind HTTPS. Configure:
+The dedicated Supabase project is provisioned in the Convo organization at `https://sgqrkbsmroytevkgogoy.supabase.co`, and the mail-sync migrations have been applied and verified. The production mail service is deployed as a Cloudflare Worker at `https://convo-mail-sync.convo-mail-sync.workers.dev`; its health endpoint returns 200 and mailbox routes require a valid Supabase session. Configure:
 
 ```text
 App: EXPO_PUBLIC_SUPABASE_URL, EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY, EXPO_PUBLIC_CONVO_API_URL
-Service: SUPABASE_URL, DATABASE_URL, MAIL_CREDENTIALS_KEY, CONVO_APP_ORIGIN, NODE_ENV=production
+Node service: SUPABASE_URL, DATABASE_URL, MAIL_CREDENTIALS_KEY, CONVO_APP_ORIGIN, NODE_ENV=production
+Cloudflare Worker: SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, MAIL_CREDENTIALS_KEY
 ```
 
-`MAIL_CREDENTIALS_KEY` must be a server-only base64 32-byte key (`openssl rand -base64 32`). The service authenticates Supabase JWTs, blocks private/reserved mailbox targets, requires TLS, encrypts passwords with AES-256-GCM, avoids credential logging, and stores mail tables in an unexposed `private` schema. Never put the database URL or credential-encryption key in an `EXPO_PUBLIC_` variable.
+`MAIL_CREDENTIALS_KEY` must be a server-only base64 32-byte key (`openssl rand -base64 32`). The service authenticates Supabase JWTs, blocks private/reserved mailbox targets, requires TLS, encrypts passwords with AES-256-GCM, avoids credential logging, and stores mail tables in an unexposed `private` schema. The Worker uses authenticated RPCs plus RLS and does not receive a database password or service-role key. Never put the database URL or credential-encryption key in an `EXPO_PUBLIC_` variable.
 
-Before testing magic-link sign-in, add `convo://auth` to **Supabase Dashboard → Authentication → URL Configuration → Redirect URLs**. This dashboard-only callback setting has not been applied by repository automation.
+`convo://auth` is configured in **Supabase Dashboard → Authentication → URL Configuration → Redirect URLs** for native magic-link sign-in.
 
 Run the local validation suite:
 
