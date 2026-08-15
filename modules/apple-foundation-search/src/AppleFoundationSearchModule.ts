@@ -11,7 +11,7 @@ const nativeModule = requireOptionalNativeModule<AppleFoundationSearchModule>('A
 
 export default nativeModule ?? {
   async availabilityAsync(): Promise<AppleFoundationAvailability> {
-    return { available: false, reason: 'AI search needs a Convo development or release build, not Expo Go.' };
+    return { available: false, reason: 'AI search needs an Open Media development or release build, not Expo Go.' };
   },
   async searchAsync(): Promise<AppleFoundationSearchResponse> {
     throw new Error('Apple Foundation Search native module is not installed in this build.');

@@ -100,13 +100,13 @@ export function SettingsView({ isCompact, onClose, onMailSynced }: SettingsViewP
       <View style={styles.header}>
         <View style={styles.headerLeading}>
           {isCompact ? <IconButton label="Back to people" icon="chevron-back" onPress={onClose} /> : null}
-          <View><Text style={styles.eyebrow}>CONVO</Text><Text style={styles.title}>Settings</Text></View>
+          <View><Text style={styles.eyebrow}>OPEN MEDIA</Text><Text style={styles.title}>Email & connections</Text></View>
         </View>
         {!isCompact ? <IconButton label="Close settings" icon="close" onPress={onClose} /> : null}
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
-        <SectionTitle title="Convo account" copy={authStatus} />
+        <SectionTitle title="Open Media account" copy={authStatus} />
         {getSupabaseClient() && authStatus !== 'Signed in' ? <View style={styles.authRow}><View style={styles.authField}><Field label="Email" value={authEmail} onChangeText={setAuthEmail} autoCapitalize="none" keyboardType="email-address" /></View><Pressable disabled={authBusy || !authEmail} onPress={requestSignIn} style={styles.authButton}>{authBusy ? <ActivityIndicator color={colors.surface} /> : <Text style={styles.authButtonText}>Send link</Text>}</Pressable></View> : null}
         <View style={styles.sectionGap} />
         <SectionTitle title="Email" copy="Connect any standards-based mailbox. IMAP keeps folders and read state in sync; POP imports messages only." />
@@ -118,7 +118,7 @@ export function SettingsView({ isCompact, onClose, onMailSynced }: SettingsViewP
         <View style={styles.note}><Ionicons name="lock-closed-outline" size={17} color={colors.textSecondary} /><Text style={styles.noteText}>Your password goes over HTTPS to the mail-sync service, is encrypted there, and is never saved in the app or logs.</Text></View>
 
         <View style={styles.sectionGap} />
-        <SectionTitle title="Apple Contacts" copy="Convo can privately normalize email and phone formatting. Every phone update stays reviewable—nothing is silently changed." />
+        <SectionTitle title="Apple Contacts" copy="Open Media can privately normalize email and phone formatting. Every phone update stays reviewable—nothing is silently changed." />
         <View style={styles.card}>
           <View style={styles.connectionRow}>
             <View style={[styles.providerIcon, { backgroundColor: colors.accent }]}><Ionicons name="person" size={19} color={colors.surface} /></View>

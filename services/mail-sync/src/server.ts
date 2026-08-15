@@ -50,4 +50,4 @@ function corsHeaders() { return { 'access-control-allow-origin': process.env.CON
 function json(response: ServerResponse, status: number, body: unknown) { response.writeHead(status, { 'content-type': 'application/json', ...corsHeaders() }); response.end(JSON.stringify(body)); }
 
 const host = process.env.HOST ?? (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1');
-server.listen(Number(process.env.PORT ?? 8787), host, () => { console.log(`Convo mail sync listening on ${host}:${process.env.PORT ?? 8787}`); });
+server.listen(Number(process.env.PORT ?? 8787), host, () => { console.log(`Open Media mail sync listening on ${host}:${process.env.PORT ?? 8787}`); });

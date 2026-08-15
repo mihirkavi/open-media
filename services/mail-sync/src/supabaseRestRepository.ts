@@ -70,8 +70,8 @@ export class SupabaseRestRepository {
       body: JSON.stringify(body),
     });
     if (!response.ok) {
-      if (response.status === 401 || response.status === 403) throw new Error('A valid Convo session is required.');
-      throw new Error('Convo mail storage is temporarily unavailable.');
+      if (response.status === 401 || response.status === 403) throw new Error('A valid Open Media session is required.');
+      throw new Error('Open Media mail storage is temporarily unavailable.');
     }
     if (response.status === 204) return undefined as T;
     return await response.json() as T;

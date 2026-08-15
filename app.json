@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Convo",
+    "name": "Open Media",
     "slug": "convo",
     "version": "1.0.0",
     "icon": "./assets/icon.png",
@@ -37,7 +37,7 @@
       [
         "expo-contacts",
         {
-          "contactsPermission": "Allow Convo to match message senders and review contact cleanup suggestions."
+          "contactsPermission": "Allow Open Media to match message senders and review contact cleanup suggestions."
         }
       ],
       "expo-secure-store"

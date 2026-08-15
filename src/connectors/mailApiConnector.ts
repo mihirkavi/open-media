@@ -32,7 +32,7 @@ export interface SyncedMailMessage {
 export async function connectMailAccount(configuration: MailAccountConfiguration): Promise<ConnectedMailAccount> {
   const apiURL = getAPIURL();
 
-  const token = await SecureStore.getItemAsync('convo.sessionToken');
+  const token = await SecureStore.getItemAsync('open-media.sessionToken') ?? await SecureStore.getItemAsync('convo.sessionToken');
   const response = await fetch(`${apiURL}/v1/mail-accounts`, {
     method: 'POST',
     headers: {
@@ -50,7 +50,7 @@ export async function connectMailAccount(configuration: MailAccountConfiguration
 
 export async function syncMailAccount(accountId: string): Promise<SyncedMailMessage[]> {
   const apiURL = getAPIURL();
-  const token = await SecureStore.getItemAsync('convo.sessionToken');
+  const token = await SecureStore.getItemAsync('open-media.sessionToken') ?? await SecureStore.getItemAsync('convo.sessionToken');
   const response = await fetch(`${apiURL}/v1/mail-accounts/${encodeURIComponent(accountId)}/sync`, {
     method: 'POST',
     headers: {
@@ -64,8 +64,8 @@ export async function syncMailAccount(accountId: string): Promise<SyncedMailMess
 }
 
 function getAPIURL(): string {
-  const configured = process.env.EXPO_PUBLIC_CONVO_API_URL?.replace(/\/$/, '');
+  const configured = (process.env.EXPO_PUBLIC_OPEN_MEDIA_API_URL ?? process.env.EXPO_PUBLIC_CONVO_API_URL)?.replace(/\/$/, '');
   if (configured) return configured;
   if (__DEV__) return 'http://127.0.0.1:8787';
-  throw new Error('The Convo mail service is not configured for this build.');
+  throw new Error('The Open Media mail service is not configured for this build.');
 }

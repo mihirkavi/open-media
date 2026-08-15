@@ -25,12 +25,13 @@ export function getSupabaseClient(): SupabaseClient | undefined {
 export async function syncAPISession(): Promise<string | undefined> {
   const supabase = getSupabaseClient();
   if (!supabase) {
+    await SecureStore.deleteItemAsync('open-media.sessionToken');
     await SecureStore.deleteItemAsync('convo.sessionToken');
     return undefined;
   }
   const token = (await supabase.auth.getSession()).data.session?.access_token;
-  if (token) await SecureStore.setItemAsync('convo.sessionToken', token);
-  else await SecureStore.deleteItemAsync('convo.sessionToken');
+  if (token) await SecureStore.setItemAsync('open-media.sessionToken', token);
+  else await SecureStore.deleteItemAsync('open-media.sessionToken');
   return token;
 }
 

@@ -32,7 +32,7 @@ test('keeps group conversations distinct from direct conversations', () => {
 
 test('searches identity values and email subjects inside unified timelines', () => {
   const byHandle = filterConversations(mockConversations, { peopleFilter: 'all', query: '@mayawanders', unreadOnly: false });
-  const byTopic = filterConversations(mockConversations, { peopleFilter: 'all', query: 'Convo interface notes', unreadOnly: false });
+  const byTopic = filterConversations(mockConversations, { peopleFilter: 'all', query: 'Open Media interface notes', unreadOnly: false });
 
   assert.equal(byHandle[0].id, 'maya-direct');
   assert.equal(byTopic[0].id, 'maya-direct');

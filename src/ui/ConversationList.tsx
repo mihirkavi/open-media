@@ -41,7 +41,7 @@ export function ConversationList(props: ConversationListProps) {
       <View style={styles.header}>
         <View style={styles.titleRow}>
           <View>
-            <Text style={styles.eyebrow}>CONVO</Text>
+            <Text style={styles.eyebrow}>OPEN MEDIA</Text>
             <Text style={styles.title}>People</Text>
           </View>
           <Pressable accessibilityRole="button" accessibilityLabel="Open settings" onPress={onOpenSettings} style={[styles.headerButton, compactPeoplePicker && styles.headerButtonCompact]}>
@@ -80,7 +80,7 @@ export function ConversationList(props: ConversationListProps) {
         ) : null}
         {query.trim() ? (
           <View style={styles.aiSection}>
-            <SearchSectionHeader title="Ask Convo" detail="Private, on-device Apple Intelligence" />
+            <SearchSectionHeader title="Ask Open Media" detail="Private, on-device Apple Intelligence" />
             {aiSearch.status === 'loading' ? <SearchNotice icon="sparkles-outline" text="Understanding your search…" /> : null}
             {aiSearch.status === 'unavailable' || aiSearch.status === 'error' ? <SearchNotice icon="information-circle-outline" text={aiSearch.reason} /> : null}
             {aiSearch.status === 'ready' ? (

@@ -71,12 +71,12 @@ export const mockConversations: Conversation[] = [
       {
         id: 'maya-1', sourceMessageId: 'mock-maya-mail-1', conversationId: 'maya-direct', senderPersonId: 'maya', senderIdentityId: 'maya-gmail', recipientPersonIds: ['me'],
         sentAt: '2026-08-04T09:08:00-07:00', body: 'The quieter hierarchy is working. I left two notes on the conversation header.', source: 'gmail', channel: 'email',
-        emailContext: { providerThreadId: 'mock-design-thread', subject: 'Convo interface notes' }, direction: 'inbound', deliveryState: 'received',
+        emailContext: { providerThreadId: 'mock-design-thread', subject: 'Open Media interface notes' }, direction: 'inbound', deliveryState: 'received',
       },
       {
         id: 'maya-2', sourceMessageId: 'mock-maya-mail-2', conversationId: 'maya-direct', senderPersonId: 'me', senderIdentityId: 'me-gmail', recipientPersonIds: ['maya'],
         sentAt: '2026-08-04T09:31:00-07:00', body: 'Saw them. I’m making people the stable layer and treating providers as message metadata.', source: 'gmail', channel: 'email',
-        emailContext: { providerThreadId: 'mock-design-thread', subject: 'Convo interface notes' }, direction: 'outbound', deliveryState: 'sent',
+        emailContext: { providerThreadId: 'mock-design-thread', subject: 'Open Media interface notes' }, direction: 'outbound', deliveryState: 'sent',
       },
       {
         id: 'maya-3', sourceMessageId: 'mock-maya-ig-1', conversationId: 'maya-direct', senderPersonId: 'maya', senderIdentityId: 'maya-instagram', recipientPersonIds: ['me'],

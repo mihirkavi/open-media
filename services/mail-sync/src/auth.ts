@@ -12,5 +12,5 @@ export async function authenticate(request: IncomingMessage): Promise<string> {
   }
   const localUser = request.headers['x-convo-local-user'];
   if (process.env.NODE_ENV !== 'production' && process.env.CONVO_ALLOW_INSECURE_LOCAL_AUTH === 'true' && typeof localUser === 'string') return localUser;
-  throw new Error('A valid Convo session is required.');
+  throw new Error('A valid Open Media session is required.');
 }

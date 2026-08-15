@@ -1,6 +1,6 @@
-# Convo mail-sync service
+# Open Media mail-sync service
 
-This separate service is the only component allowed to handle reusable mailbox credentials. The mobile/web client sends a configuration over HTTPS, the service validates it against the real IMAP or POP server, encrypts the password with AES-256-GCM, and imports recent messages into Convo's normalized client flow.
+This separate service is the only component allowed to handle reusable mailbox credentials. The mobile/web client sends a configuration over HTTPS, the service validates it against the real IMAP or POP server, encrypts the password with AES-256-GCM, and imports recent messages into Open Media's normalized client flow.
 
 ## Local run
 
