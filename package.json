@@ -6,15 +6,18 @@
     "@expo/vector-icons": "^15.0.2",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@supabase/supabase-js": "2.109.0",
-    "expo": "~56.0.19",
-    "expo-contacts": "~56.0.12",
-    "expo-font": "~56.0.7",
-    "expo-linking": "~56.0.16",
-    "expo-secure-store": "~56.0.4",
-    "expo-status-bar": "~56.0.4",
+    "expo": "^57.0.14",
+    "expo-contacts": "~57.0.4",
+    "expo-dev-client": "~57.0.13",
+    "expo-font": "~57.0.1",
+    "expo-linking": "~57.0.6",
+    "expo-secure-store": "~57.0.1",
+    "expo-splash-screen": "~57.0.7",
+    "expo-status-bar": "~57.0.1",
+    "expo-system-ui": "~57.0.2",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "react-native": "0.85.3",
+    "react-native": "0.86.2",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-url-polyfill": "^4.0.0",
     "react-native-web": "^0.21.2"
@@ -22,27 +25,29 @@
   "devDependencies": {
     "@types/node": "^26.1.2",
     "@types/react": "~19.2.2",
+    "supabase": "2.114.0",
     "tsx": "^4.23.6",
     "typescript": "~6.0.3"
   },
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
     "ios:native": "expo run:ios",
     "web": "expo start --web",
     "mail:server": "npm start --prefix services/mail-sync",
+    "matrix:server": "node --import tsx services/matrix-bridge/src/server.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test src/**/*.test.ts",
+    "test:db": "supabase test db",
     "export:web": "expo export --platform web --output-dir .expo-dist",
     "check": "npm run typecheck && npm test && npm run typecheck --prefix services/mail-sync && npm test --prefix services/mail-sync && npm run export:web"
   },
   "private": true,
   "overrides": {
-    "image-size": "2.0.2",
     "uuid": "11.1.1"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.13.0"
   }
 }

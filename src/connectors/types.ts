@@ -17,7 +17,7 @@ export interface ConnectorDescriptor {
   id: string;
   displayName: string;
   kind: ConnectorKind;
-  authentication: 'none' | 'oauth2-pkce' | 'app-password' | 'protocol-key';
+  authentication: 'none' | 'passwordless-pkce' | 'oauth2-pkce' | 'app-password' | 'protocol-key';
   status: 'available' | 'connected' | 'planned' | 'unavailable';
   capabilities: CapabilityState[];
 }

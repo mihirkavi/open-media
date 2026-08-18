@@ -1,3 +1,4 @@
+-- Timestamp matches the migration already applied to the production project.
 create or replace function public.convo_save_mail_account(
   p_email text,
   p_protocol text,

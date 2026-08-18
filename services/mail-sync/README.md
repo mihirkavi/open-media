@@ -17,7 +17,7 @@ For local durable use, set the variables in `.env.example` and apply the reposit
 
 ## Cloudflare Worker production
 
-The production entry point is `src/worker.ts`, configured by `wrangler.jsonc`. It uses Cloudflare's outbound TCP/TLS support for IMAP and POP, validates the Supabase JWT itself, and calls three authenticated PostgREST RPCs. Those RPCs run as the caller and enforce ownership again through RLS; the Worker never receives a database password or service-role key.
+The production entry point is `src/worker.ts`, configured by `wrangler.jsonc`. It uses Cloudflare's outbound TCP/TLS support for IMAP and POP, validates the Supabase JWT itself, and calls authenticated PostgREST RPCs. Those RPCs run as the caller and enforce ownership again through RLS; the Worker never receives a database password or service-role key.
 
 Configure these Worker secrets before deployment:
 
@@ -34,10 +34,14 @@ The current production health endpoint is `https://convo-mail-sync.convo-mail-sy
 ## Endpoints
 
 - `GET /health`
+- `GET /v1/mail-accounts` — list only safe mailbox metadata for the authenticated owner
 - `POST /v1/mail-accounts` — authenticate, validate a TLS mailbox, encrypt its password, return a safe account record
 - `POST /v1/mail-accounts/:id/sync` — import the latest 100 IMAP Inbox messages or latest 50 POP messages for the authenticated owner
+- `DELETE /v1/mail-accounts/:id` — delete the authenticated owner's encrypted credential and imported messages
 
 Production requests require a Supabase bearer JWT. `x-convo-local-user` is accepted only when the explicit local-development flag is enabled. Mailbox hostnames are resolved and rejected if any answer points to loopback, link-local, private, multicast, or reserved space.
+
+The deployed Worker rate-limits each authenticated user before contacting an upstream mail server: five connection tests and twelve syncs per minute per Cloudflare location. Database ownership checks remain the authorization boundary; rate limits are an additional abuse-control layer rather than billing-grade accounting.
 
 ## Known limits
 

@@ -1,25 +1,25 @@
 # Convo → Open Media migration
 
-This document records the repository as inspected on 2026-08-15 and the incremental path to Open Media. Planned capabilities are not presented as live.
+This document records the repository through the 2026-08-18 private-beta hardening pass and the incremental path to Open Media. Planned capabilities are not presented as live.
 
 ## Current Architecture
 
 | Area | Current implementation | Boundary or limitation |
 | --- | --- | --- |
-| Frontend | Expo SDK 56, React Native 0.85, React 19, TypeScript; shared iOS/Android/web app | No router; `App.tsx` owns in-memory navigation and data composition |
+| Frontend | Expo SDK 57, React Native 0.86, React 19, TypeScript; shared iOS/Android/web app | No router; `App.tsx` owns in-memory navigation and data composition |
 | Domain | Canonical people, reviewed identities, conversations, messages, email context; now canonical social posts and feed selectors | Post state remains fictional/local; identity merge persistence and undo are not implemented |
-| Auth | Supabase magic-link client; JWT forwarded to the mail service; OS SecureStore for the app session | No full onboarding/session UI; local development bypass exists only behind an explicit development flag |
-| Backend | `services/mail-sync`: Cloudflare Worker plus Node server paths for TLS-only IMAP/POP test and import | No general Open Media API, post service, realtime message service, job scheduler, SMTP, or provider OAuth |
-| Database | Supabase private-schema mail accounts/messages, encrypted credentials, RLS and authenticated RPCs | No public post, persona, graph, conversation, delivery, connector grant, or audit tables |
+| Auth | Supabase PKCE magic-link onboarding; chunked OS SecureStore session storage; strict callback validation; JWT forwarded to the mail service | CAPTCHA is not configured; local development bypass exists only behind an explicit development flag |
+| Backend | Supabase native messaging plus `services/mail-sync`, deployed as a rate-limited Cloudflare Worker with TLS-only IMAP/POP import | No post service, background job scheduler, SMTP, or provider OAuth |
+| Database | Supabase profiles, conversations, membership, native messages, blocks/reports, private-schema mail data, encrypted credentials, account export/deletion, RLS and authenticated RPCs | No public post, graph, connector-grant, delivery-receipt, moderator-action, or audit tables |
 | APIs/connectors | Normalized mail client, mock mail connector, capability-negotiated connector catalog | IMAP import is the only live external content path; social/Gmail/Outlook operations are unavailable until authorized implementations exist |
-| Realtime/messaging | Canonical people-first local timelines | No websocket/subscription delivery, background sync, receipts, retries, push notifications, or E2E implementation |
+| Realtime/messaging | Canonical people-first Supabase conversations with persistence, realtime inserts, reversible blocks/reports, sender integrity and flood limits | No receipts, offline retry queue, push notifications, operator report-review console, or E2E implementation |
 | Media | Canonical post media metadata and accessible placeholder presentation | No upload, transcoding, object storage, moderation, thumbnailing, streaming, or malware scanning |
-| Deployment | Expo/EAS configuration; static web export; Supabase schema; Cloudflare mail worker configuration | Existing app identifiers and EAS project remain for update continuity; production post/messaging services do not exist |
-| Tests | Node TypeScript domain tests, worker tests, typechecks, Expo export, Expo Doctor | No component interaction, visual regression, connector contract, database integration, or end-to-end tests yet |
+| Deployment | Expo/EAS production environment; signed iOS Store builds; static web export; deployed Supabase migrations; deployed Cloudflare mail worker | Existing app identifiers and EAS project remain for update continuity |
+| Tests | App/mail typechecks and unit tests, Worker tests, web export, Expo Doctor, 36 database security tests, local browser onboarding/messaging/export checks, signed native cloud build | No automated native UI or visual-regression suite yet |
 
-Expo Doctor currently passes 21 of 22 checks. Its remaining warning is the known Hermes V1 memory regression in Expo 56/React Native 0.85. Repository policy pins Expo 56, so upgrading to Expo 57 is a separate migration that needs native regression and release testing.
+Expo Doctor passes all package/configuration checks. On the current development Mac it additionally reports that CocoaPods 1.15.2+ is not installed; signed EAS native builds are the native compile gate until that local tool is installed.
 
-`npm audit --omit=dev` reports 11 high-severity advisories in the Expo/Metro/React Native toolchain. The offered automatic remediation downgrades Expo to 53 and React Native to 0.72, which is incompatible with this SDK 56 application and was not applied. Resolve through a separately tested supported Expo upgrade, not `npm audit fix --force`.
+`npm audit --omit=dev` reports 11 high-severity advisories in the Expo/Metro build-tool chain through `image-size`; the published advisory currently has no patched release. The mail service audit is clean. Do not use `npm audit fix --force`, because its proposed downgrade breaks the supported Expo SDK 57 dependency set.
 
 ## Target Architecture
 
@@ -95,7 +95,9 @@ All user-owned tables require RLS, ownership indexes, explicit grants, bounded r
 - [x] Add capability-negotiated connector contracts and an honest catalog for Open Media, IMAP, Gmail, Outlook, ActivityPub, and AT Protocol.
 - [x] Retain the working people-first conversation model, email import normalization, Supabase auth, mail connection UI, and Contacts flow.
 - [x] Add unit coverage for post reuse/ranking transparency, connector capabilities, and search.
-- [ ] Next: create additive core database tables and a local Open Media post service.
+- [x] Add production profiles, direct conversations, native messages, realtime delivery, reversible blocks/reports, RLS, account export/deletion, and message flood controls through additive database migrations.
+- [x] Harden onboarding callbacks/session storage and deploy a rate-limited, observable mail Worker with credential-safe account management.
+- [ ] Next: create a persistent Open Media post service and a content moderation/reporting workflow before public Feed/Clips publishing.
 - [ ] Next: implement provider OAuth authorization-code + PKCE and token lifecycle, starting with one email provider.
 - [ ] Next: implement media upload/transcode/storage and connector contract tests before enabling Publish.
 

@@ -1,3 +1,4 @@
+-- Timestamp matches the migration already applied to the production project.
 create extension if not exists pgcrypto;
 create schema if not exists private;
 revoke all on schema private from public, anon, authenticated;

@@ -1,4 +1,4 @@
-import * as SecureStore from 'expo-secure-store';
+import { getAPIAccessToken } from '../auth/supabase';
 
 export type MailProtocol = 'imap' | 'pop3';
 
@@ -32,7 +32,7 @@ export interface SyncedMailMessage {
 export async function connectMailAccount(configuration: MailAccountConfiguration): Promise<ConnectedMailAccount> {
   const apiURL = getAPIURL();
 
-  const token = await SecureStore.getItemAsync('open-media.sessionToken') ?? await SecureStore.getItemAsync('convo.sessionToken');
+  const token = await getAPIAccessToken();
   const response = await fetch(`${apiURL}/v1/mail-accounts`, {
     method: 'POST',
     headers: {
@@ -47,10 +47,23 @@ export async function connectMailAccount(configuration: MailAccountConfiguration
   return payload;
 }
 
+export async function listMailAccounts(): Promise<ConnectedMailAccount[]> {
+  const response = await fetch(`${getAPIURL()}/v1/mail-accounts`, { headers: await authHeaders() });
+  const payload = await response.json() as { accounts?: ConnectedMailAccount[]; error?: string };
+  if (!response.ok) throw new Error(payload.error ?? 'Could not load connected mailboxes.');
+  return payload.accounts ?? [];
+}
+
+export async function disconnectMailAccount(accountId: string): Promise<void> {
+  const response = await fetch(`${getAPIURL()}/v1/mail-accounts/${encodeURIComponent(accountId)}`, { method: 'DELETE', headers: await authHeaders() });
+  const payload = await response.json() as { error?: string };
+  if (!response.ok) throw new Error(payload.error ?? 'Could not disconnect this mailbox.');
+}
+
 
 export async function syncMailAccount(accountId: string): Promise<SyncedMailMessage[]> {
   const apiURL = getAPIURL();
-  const token = await SecureStore.getItemAsync('open-media.sessionToken') ?? await SecureStore.getItemAsync('convo.sessionToken');
+  const token = await getAPIAccessToken();
   const response = await fetch(`${apiURL}/v1/mail-accounts/${encodeURIComponent(accountId)}/sync`, {
     method: 'POST',
     headers: {
@@ -68,4 +81,12 @@ function getAPIURL(): string {
   if (configured) return configured;
   if (__DEV__) return 'http://127.0.0.1:8787';
   throw new Error('The Open Media mail service is not configured for this build.');
+}
+
+async function authHeaders(): Promise<Record<string, string>> {
+  const token = await getAPIAccessToken();
+  return {
+    ...(token ? { authorization: `Bearer ${token}` } : {}),
+    ...(__DEV__ ? { 'x-convo-local-user': 'expo-development-user' } : {}),
+  };
 }

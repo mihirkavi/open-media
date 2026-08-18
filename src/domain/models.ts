@@ -1,5 +1,5 @@
-export type MessageSource = 'gmail' | 'icloud' | 'imap' | 'instagram' | 'linkedin' | 'snapchat' | 'sms';
-export type MessageChannel = 'email' | 'social' | 'sms';
+export type MessageSource = 'open_media' | 'matrix' | 'gmail' | 'icloud' | 'imap' | 'instagram' | 'linkedin' | 'snapchat' | 'sms';
+export type MessageChannel = 'native' | 'email' | 'social' | 'sms';
 export type IdentityKind = 'email' | 'handle' | 'phone';
 
 export type ConnectorStatus = 'mock' | 'disconnected' | 'connected' | 'syncing' | 'error';

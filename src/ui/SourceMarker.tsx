@@ -5,6 +5,8 @@ import { MessageSource } from '../domain/models';
 import { colors } from '../theme';
 
 const sourceDetails: Record<MessageSource, { icon: keyof typeof Ionicons.glyphMap; label: string; color: string }> = {
+  open_media: { icon: 'radio-outline', label: 'Open Media', color: '#111111' },
+  matrix: { icon: 'git-network-outline', label: 'Matrix', color: '#0D9488' },
   gmail: { icon: 'mail-outline', label: 'Gmail', color: '#D84B40' },
   icloud: { icon: 'mail-outline', label: 'iCloud Mail', color: '#1687FF' },
   imap: { icon: 'mail-outline', label: 'Email', color: '#6D7179' },

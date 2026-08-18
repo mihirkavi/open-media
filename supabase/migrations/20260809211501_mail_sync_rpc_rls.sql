@@ -1,3 +1,4 @@
+-- Timestamp matches the migration already applied to the production project.
 grant usage on schema private to authenticated;
 grant select, insert on private.mail_accounts to authenticated;
 grant select, insert, update on private.mail_messages to authenticated;

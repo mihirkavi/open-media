@@ -1,4 +1,4 @@
-import { MailAccountInput, StoredMailAccount, SyncedMessage } from './types.js';
+import { MailAccountInput, PublicMailAccount, StoredMailAccount, SyncedMessage } from './types.js';
 
 interface AccountRow {
   id: string;
@@ -53,6 +53,14 @@ export class SupabaseRestRepository {
       encryptedSecret: row.encrypted_secret,
       status: row.status,
     };
+  }
+
+  async listAccounts(_userId: string): Promise<PublicMailAccount[]> {
+    return await this.rpc<PublicMailAccount[]>('open_media_list_mail_accounts', {});
+  }
+
+  async deleteAccount(_userId: string, accountId: string): Promise<boolean> {
+    return await this.rpc<boolean>('open_media_delete_mail_account', { p_account_id: accountId });
   }
 
   async saveMessages(_userId: string, accountId: string, messages: SyncedMessage[]): Promise<void> {

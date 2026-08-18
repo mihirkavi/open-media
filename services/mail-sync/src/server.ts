@@ -20,6 +20,10 @@ const server = createServer(async (request, response) => {
   try {
     if (request.method === 'OPTIONS') { response.writeHead(204, corsHeaders()); return response.end(); }
     if (request.method === 'GET' && request.url === '/health') return json(response, 200, { ok: true });
+    if (request.method === 'GET' && request.url === '/v1/mail-accounts') {
+      const userId = await authenticate(request);
+      return json(response, 200, { accounts: await repository.listAccounts(userId) });
+    }
     if (request.method === 'POST' && request.url === '/v1/mail-accounts') {
       const userId = await authenticate(request);
       const input = schema.parse(await readJSON(request)) as MailAccountInput;
@@ -36,6 +40,12 @@ const server = createServer(async (request, response) => {
       await repository.saveMessages(userId, account.id, messages);
       return json(response, 200, { messages, count: messages.length, mode: account.protocol === 'imap' ? 'sync' : 'import' });
     }
+    const deleteMatch = request.method === 'DELETE' && request.url?.match(/^\/v1\/mail-accounts\/([^/]+)$/);
+    if (deleteMatch) {
+      const userId = await authenticate(request);
+      const deleted = await repository.deleteAccount(userId, deleteMatch[1]);
+      return deleted ? json(response, 200, { deleted: true }) : json(response, 404, { error: 'Mailbox not found.' });
+    }
     return json(response, 404, { error: 'Not found.' });
   } catch (error) {
     const message = error instanceof Error ? error.message.replace(/password[^ ]*/gi, 'credential') : 'Request failed.';
@@ -46,7 +56,7 @@ const server = createServer(async (request, response) => {
 async function testConnection(input: MailAccountInput) { return input.protocol === 'imap' ? testImap(input) : testPop3(input); }
 async function connectionInput(input: MailAccountInput): Promise<MailAccountInput> { return { ...input, host: await resolvePublicMailHost(input.host), tlsServername: input.host }; }
 async function readJSON(request: IncomingMessage) { const chunks: Buffer[] = []; let size = 0; for await (const chunk of request) { const buffer = Buffer.from(chunk); size += buffer.length; if (size > 16_384) { request.destroy(); throw new Error('Request too large.'); } chunks.push(buffer); } return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
-function corsHeaders() { return { 'access-control-allow-origin': process.env.CONVO_APP_ORIGIN ?? 'http://localhost:3200', 'access-control-allow-methods': 'GET,POST,OPTIONS', 'access-control-allow-headers': 'authorization,content-type,x-convo-local-user', 'cache-control': 'no-store' }; }
+function corsHeaders() { return { 'access-control-allow-origin': process.env.CONVO_APP_ORIGIN ?? 'http://localhost:3200', 'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS', 'access-control-allow-headers': 'authorization,content-type,x-convo-local-user', 'cache-control': 'no-store' }; }
 function json(response: ServerResponse, status: number, body: unknown) { response.writeHead(status, { 'content-type': 'application/json', ...corsHeaders() }); response.end(JSON.stringify(body)); }
 
 const host = process.env.HOST ?? (process.env.NODE_ENV === 'production' ? '0.0.0.0' : '127.0.0.1');

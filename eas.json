@@ -7,6 +7,7 @@
     "production": {
       "autoIncrement": true,
       "environment": "production",
+      "node": "22.13.1",
       "ios": {
         "image": "latest"
       }

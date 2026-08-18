@@ -19,6 +19,13 @@ export interface StoredMailAccount extends Omit<MailAccountInput, 'password'> {
   status: 'connected' | 'error';
 }
 
+export interface PublicMailAccount {
+  id: string;
+  email: string;
+  protocol: MailProtocol;
+  status: 'connected' | 'error';
+}
+
 export interface SyncedMessage {
   sourceMessageId: string;
   mailbox: string;

@@ -2,12 +2,26 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "convo-mail-sync",
   "main": "src/worker.ts",
-  "compatibility_date": "2026-08-09",
+  "compatibility_date": "2026-08-18",
   "compatibility_flags": ["nodejs_compat"],
   "vars": {
     "CONVO_APP_ORIGIN": "*"
   },
+  "ratelimits": [
+    {
+      "name": "MAIL_CONNECT_RATE_LIMITER",
+      "namespace_id": "10001",
+      "simple": { "limit": 5, "period": 60 }
+    },
+    {
+      "name": "MAIL_SYNC_RATE_LIMITER",
+      "namespace_id": "10002",
+      "simple": { "limit": 12, "period": 60 }
+    }
+  ],
   "observability": {
-    "enabled": true
+    "enabled": true,
+    "logs": { "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.01 }
   }
 }

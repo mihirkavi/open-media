@@ -4,10 +4,13 @@
     "slug": "convo",
     "version": "1.0.0",
     "icon": "./assets/icon.png",
-    "scheme": "convo",
+    "scheme": ["openmedia", "convo"],
+    "description": "One app for your social world. Message people on Open Media and connect supported accounts without losing identity or provenance.",
+    "backgroundColor": "#F7F5F0",
     "userInterfaceStyle": "automatic",
     "ios": {
       "supportsTablet": true,
+      "icon": "./assets/icon.png",
       "bundleIdentifier": "com.mihirkavi.convo",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
@@ -16,9 +19,8 @@
     "android": {
       "package": "com.mihirkavi.convo",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#F7F5F0",
         "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
@@ -34,6 +36,19 @@
     "plugins": [
       "expo-status-bar",
       "expo-font",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#F7F5F0",
+          "dark": {
+            "image": "./assets/splash-icon.png",
+            "backgroundColor": "#111111"
+          }
+        }
+      ],
       [
         "expo-contacts",
         {
