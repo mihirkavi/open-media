@@ -111,3 +111,11 @@ The iOS/Android application identifiers, legacy `convo://` callback, EAS project
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+<!-- project-artwork:start -->
+## Project artwork
+
+![Conceptual artwork for Open Media](assets/brand/cover.png)
+
+Conceptual project artwork. [Asset files, design notes, and generation prompts](assets/brand/README.md).
+<!-- project-artwork:end -->
