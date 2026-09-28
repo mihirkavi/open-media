@@ -37,11 +37,12 @@
     "web": "expo start --web",
     "mail:server": "npm start --prefix services/mail-sync",
     "matrix:server": "node --import tsx services/matrix-bridge/src/server.ts",
+    "public-api:server": "npm start --prefix services/public-api",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test src/**/*.test.ts",
     "test:db": "supabase test db",
     "export:web": "expo export --platform web --output-dir .expo-dist",
-    "check": "npm run typecheck && npm test && npm run typecheck --prefix services/mail-sync && npm test --prefix services/mail-sync && npm run export:web"
+    "check": "npm run typecheck && npm test && npm run typecheck --prefix services/mail-sync && npm test --prefix services/mail-sync && npx tsc --noEmit -p services/public-api && npm test --prefix services/public-api && npm run export:web"
   },
   "private": true,
   "overrides": {

@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ActivityIndicator,
   Image,
   Modal,
   Pressable,
@@ -31,13 +32,21 @@ import {
   subscribeToOpenMediaMessages,
   unsubscribeFromOpenMediaMessages,
 } from "../data/openMediaService";
+import {
+  deletePost,
+  publishPost,
+  reportPost,
+} from "../data/postService";
+import { createClientId } from "../data/openMediaService";
 import { normalizeSyncedEmail } from "../domain/emailNormalization";
 import { Conversation } from "../domain/models";
-import { FeedMode } from "../domain/posts";
+import { FeedMode, SocialPost } from "../domain/posts";
+import { initialsFor, maxPostLength } from "../domain/publicPosts";
 import { ThemeColors } from "../theme";
 import { useOpenMediaTheme } from "../themeContext";
 import { FeedView, ClipsView } from "./OpenMediaFeed";
 import { OpenMediaMessages } from "./OpenMediaMessages";
+import { usePublicFeed } from "./usePublicFeed";
 import {
   OpenMediaProfile,
   OpenMediaSearch,
@@ -88,6 +97,19 @@ export function OpenMediaApp({
   );
   const [feedMode, setFeedMode] = useState<FeedMode>("relevant");
   const [composeOpen, setComposeOpen] = useState(false);
+  const feed = usePublicFeed(currentUserId);
+  const canPost = messageMode === "open_media";
+  const viewer = useMemo(
+    () => ({ id: currentUserId, initials: initialsFor(profile.displayName) }),
+    [currentUserId, profile.displayName],
+  );
+  const removeOwnPost = useCallback(
+    async (postId: string) => {
+      await deletePost(postId);
+      feed.removePost(postId);
+    },
+    [feed.removePost],
+  );
   const [syncedConversations, setSyncedConversations] = useState<
     Conversation[]
   >([]);
@@ -169,9 +191,9 @@ export function OpenMediaApp({
   const updateBlock = useCallback(
     async (personId: string, blocked: boolean) => {
       await setUserBlocked(personId, blocked);
-      await refreshMessages();
+      await Promise.all([refreshMessages(), feed.refresh()]);
     },
-    [refreshMessages],
+    [refreshMessages, feed.refresh],
   );
   const onMailSynced = (
     account: ConnectedMailAccount,
@@ -213,7 +235,16 @@ export function OpenMediaApp({
           <FeedView
             mode={feedMode}
             onModeChange={setFeedMode}
-            onCompose={() => setComposeOpen(true)}
+            posts={feed.posts}
+            loading={feed.loading}
+            error={feed.error}
+            hasMore={feed.hasMore}
+            onRetry={feed.refresh}
+            onLoadMore={feed.loadMore}
+            viewer={viewer}
+            onCompose={canPost ? () => setComposeOpen(true) : undefined}
+            onDeletePost={canPost ? removeOwnPost : undefined}
+            onReportPost={canPost ? reportPost : undefined}
           />
         ) : null}
         {destination === "clips" ? <ClipsView /> : null}
@@ -234,6 +265,7 @@ export function OpenMediaApp({
         ) : null}
         {destination === "search" ? (
           <OpenMediaSearch
+            posts={feed.posts}
             conversations={conversations}
             onNavigate={navigate}
           />
@@ -263,7 +295,13 @@ export function OpenMediaApp({
       ) : null}
       <ComposeModal
         visible={composeOpen}
+        canPublish={canPost}
         onClose={() => setComposeOpen(false)}
+        onPublished={(post) => {
+          feed.addPost(post);
+          setComposeOpen(false);
+          navigate("feed");
+        }}
       />
     </View>
   );
@@ -499,14 +537,40 @@ function MobileTabs({
 
 function ComposeModal({
   visible,
+  canPublish,
   onClose,
+  onPublished,
 }: {
   visible: boolean;
+  canPublish: boolean;
   onClose: () => void;
+  onPublished: (post: SocialPost) => void;
 }) {
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [body, setBody] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  // One client ID per draft keeps retries idempotent on the server.
+  const clientId = useRef(createClientId());
+  const length = body.trim().length;
+  const ready = canPublish && !busy && length > 0 && length <= maxPostLength;
+  const publish = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const post = await publishPost(body, clientId.current);
+      setBody("");
+      clientId.current = createClientId();
+      onPublished(post);
+    } catch (reason) {
+      setError(
+        reason instanceof Error ? reason.message : "Publishing failed.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <Modal
       visible={visible}
@@ -524,26 +588,48 @@ function ComposeModal({
             accessibilityLabel="Post text"
             multiline
             autoFocus
+            maxLength={maxPostLength + 200}
             value={body}
             onChangeText={setBody}
             placeholder="What’s happening?"
             placeholderTextColor={colors.textTertiary}
             style={styles.input}
           />
+          {error ? (
+            <Text accessibilityLiveRegion="assertive" style={styles.composeError}>
+              {error}
+            </Text>
+          ) : null}
           <View style={styles.publishRow}>
-            <View>
-              <Text style={styles.sharing}>Sharing to: Open Media</Text>
-              <Text style={styles.draftOnly}>
-                Draft only · publishing is not deployed
+            <View style={styles.publishCopy}>
+              <Text style={styles.sharing}>
+                {canPublish
+                  ? "Public · anyone can read this, with or without an account, including search engines and AI agents"
+                  : "Publishing is available with an Open Media account"}
+              </Text>
+              <Text
+                style={[
+                  styles.draftOnly,
+                  length > maxPostLength && styles.overLimit,
+                ]}
+              >
+                {length}/{maxPostLength}
               </Text>
             </View>
             <Pressable
-              disabled
+              disabled={!ready}
               accessibilityRole="button"
-              accessibilityState={{ disabled: true }}
-              style={styles.publish}
+              accessibilityState={{ disabled: !ready, busy }}
+              onPress={publish}
+              style={[styles.publish, ready && styles.publishReady]}
             >
-              <Text style={styles.publishText}>Publish</Text>
+              {busy ? (
+                <ActivityIndicator color={colors.surface} />
+              ) : (
+                <Text style={[styles.publishText, ready && styles.publishTextReady]}>
+                  Publish
+                </Text>
+              )}
             </Pressable>
           </View>
         </View>
@@ -713,5 +799,10 @@ function createStyles(colors: ThemeColors) {
       fontSize: 12,
       fontWeight: "700",
     },
+    publishReady: { backgroundColor: colors.text },
+    publishTextReady: { color: colors.surface },
+    publishCopy: { flex: 1 },
+    overLimit: { color: "#B42318" },
+    composeError: { marginTop: 8, color: "#B42318", fontSize: 12 },
   });
 }

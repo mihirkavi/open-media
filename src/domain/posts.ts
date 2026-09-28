@@ -26,7 +26,8 @@ export interface SocialPost {
   media?: PostMedia[];
   topics: string[];
   provenance: { connectorId: string; externalId?: string; canonicalURL?: string };
-  engagement: { replies: number; reposts: number; likes: number };
+  /** Present only where a source actually reports counts; Open Media has no reactions yet. */
+  engagement?: { replies: number; reposts: number; likes: number };
   relevance: { followsAuthor: boolean; selectedInterestMatches: string[]; communityMatch?: string };
 }
 

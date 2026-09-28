@@ -1,0 +1,20 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "open-media-public-api",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-09-27",
+  // SUPABASE_URL and SUPABASE_PUBLISHABLE_KEY are set with `wrangler secret put`.
+  // Only the publishable (anon) key is used: the API can reach nothing the
+  // open_media_public_* database functions do not already expose to anyone.
+  "ratelimits": [
+    {
+      "name": "PUBLIC_API_RATE_LIMITER",
+      "namespace_id": "10003",
+      "simple": { "limit": 120, "period": 60 }
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "logs": { "head_sampling_rate": 0.1 }
+  }
+}

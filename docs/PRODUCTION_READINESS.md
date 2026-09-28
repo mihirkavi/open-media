@@ -17,9 +17,19 @@ This checklist defines “production ready” for the current onboarding private
 - [x] Local browser flow: magic-link onboarding, callback cleanup, profile creation, profile search, direct conversation, send, realtime receive, account export, and responsive layout.
 - [x] Latest signed iOS Store build finished successfully: build 9, EAS `f5916bd3-c316-487a-bbed-f6085bc38fcc`.
 
+## Public posts and open read API (2026-09-27, not yet in production)
+
+- [x] `20260927120000_public_posts.sql` applies cleanly to a local stack and passes `supabase db lint`.
+- [x] 27 new database assertions: idempotent/validated/rate-limited publishing, no anonymous table access, public projection without emails or client IDs, keyset pagination, report idempotency, three-reporter auto-hide, blocked-author filtering, and author deletion (63 total with the existing suite).
+- [x] Public API unit tests, typecheck, and `wrangler deploy --dry-run`; local end-to-end read of posts/profiles against the local database.
+- [x] Local browser flow: signed-out public feed, sign-in, publish, report, confirmed delete (reflected in the API), phone and desktop layouts.
+- [ ] Apply the migration to production. This makes existing beta profiles publicly readable; notify beta testers first.
+- [ ] Deploy `services/public-api`, set its secrets, set `EXPO_PUBLIC_OPEN_MEDIA_PUBLIC_API_URL`, and probe `/v1/posts` and `/health`.
+- [ ] Decide who handles community-hidden posts until an operator console exists.
+
 ## Explicitly out of scope for this release
 
-Feed and Clips remain labeled fictional data. Publishing, media upload, provider OAuth, outbound email, production Matrix, push notifications, message E2E encryption, and public-content moderation are disabled or absent and must not be advertised as working. Native-chat block/report intake is live; a public social release still requires content persistence, an operator moderation console, media safety, and automated native UI coverage.
+Clips remain labeled fictional data. Media upload, provider OAuth, outbound email, production Matrix, push notifications, message E2E encryption, and operator moderation tooling are disabled or absent and must not be advertised as working. Native-chat block/report intake is live; post reports and community auto-hide are implemented; a broad public launch still requires an operator moderation console, media safety, and automated native UI coverage.
 
 ## Known external/tooling constraints
 

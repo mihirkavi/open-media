@@ -385,7 +385,7 @@ function mapMessage(
   };
 }
 
-function createClientId(): string {
+export function createClientId(): string {
   if (typeof globalThis.crypto?.randomUUID === "function")
     return globalThis.crypto.randomUUID();
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(

@@ -7,15 +7,15 @@ This document records the repository through the 2026-08-18 private-beta hardeni
 | Area | Current implementation | Boundary or limitation |
 | --- | --- | --- |
 | Frontend | Expo SDK 57, React Native 0.86, React 19, TypeScript; shared iOS/Android/web app | No router; `App.tsx` owns in-memory navigation and data composition |
-| Domain | Canonical people, reviewed identities, conversations, messages, email context; now canonical social posts and feed selectors | Post state remains fictional/local; identity merge persistence and undo are not implemented |
+| Domain | Canonical people, reviewed identities, conversations, messages, email context; canonical social posts and feed selectors | Live posts are text-only; Clips remain fictional sample media; identity merge persistence and undo are not implemented |
 | Auth | Supabase PKCE magic-link onboarding; chunked OS SecureStore session storage; strict callback validation; JWT forwarded to the mail service | CAPTCHA is not configured; local development bypass exists only behind an explicit development flag |
-| Backend | Supabase native messaging plus `services/mail-sync`, deployed as a rate-limited Cloudflare Worker with TLS-only IMAP/POP import | No post service, background job scheduler, SMTP, or provider OAuth |
-| Database | Supabase profiles, conversations, membership, native messages, blocks/reports, private-schema mail data, encrypted credentials, account export/deletion, RLS and authenticated RPCs | No public post, graph, connector-grant, delivery-receipt, moderator-action, or audit tables |
+| Backend | Supabase native messaging and public posts; `services/mail-sync` deployed as a rate-limited Cloudflare Worker with TLS-only IMAP/POP import; `services/public-api` read-only Worker (not yet deployed) | No background job scheduler, SMTP, or provider OAuth |
+| Database | Supabase profiles, public posts, conversations, membership, native messages, blocks, message/post reports, private-schema mail data, encrypted credentials, account export/deletion, RLS, authenticated RPCs, and anonymous-safe public read functions | No graph, connector-grant, delivery-receipt, moderator-action log, or audit tables |
 | APIs/connectors | Normalized mail client, mock mail connector, capability-negotiated connector catalog | IMAP import is the only live external content path; social/Gmail/Outlook operations are unavailable until authorized implementations exist |
 | Realtime/messaging | Canonical people-first Supabase conversations with persistence, realtime inserts, reversible blocks/reports, sender integrity and flood limits | No receipts, offline retry queue, push notifications, operator report-review console, or E2E implementation |
 | Media | Canonical post media metadata and accessible placeholder presentation | No upload, transcoding, object storage, moderation, thumbnailing, streaming, or malware scanning |
 | Deployment | Expo/EAS production environment; signed iOS Store builds; static web export; deployed Supabase migrations; deployed Cloudflare mail worker | Existing app identifiers and EAS project remain for update continuity |
-| Tests | App/mail typechecks and unit tests, Worker tests, web export, Expo Doctor, 36 database security tests, local browser onboarding/messaging/export checks, signed native cloud build | No automated native UI or visual-regression suite yet |
+| Tests | App/mail/public-API typechecks and unit tests, Worker tests, web export, Expo Doctor, 63 database security tests, local browser onboarding/messaging/export checks, signed native cloud build | No automated native UI or visual-regression suite yet |
 
 Expo Doctor passes all package/configuration checks. On the current development Mac it additionally reports that CocoaPods 1.15.2+ is not installed; signed EAS native builds are the native compile gate until that local tool is installed.
 
@@ -97,7 +97,9 @@ All user-owned tables require RLS, ownership indexes, explicit grants, bounded r
 - [x] Add unit coverage for post reuse/ranking transparency, connector capabilities, and search.
 - [x] Add production profiles, direct conversations, native messages, realtime delivery, reversible blocks/reports, RLS, account export/deletion, and message flood controls through additive database migrations.
 - [x] Harden onboarding callbacks/session storage and deploy a rate-limited, observable mail Worker with credential-safe account management.
-- [ ] Next: create a persistent Open Media post service and a content moderation/reporting workflow before public Feed/Clips publishing.
+- [x] Persist public Open Media text posts with idempotent, rate-limited publishing, author deletion, post reporting, community auto-hide, blocked-author filtering, and account export/deletion coverage.
+- [x] Make posts and profiles readable without an account, in the app and through the read-only `services/public-api` JSON API ([ADR 0004](adrs/0004-public-posts-and-open-read-api.md)).
+- [ ] Next: operator moderation console, public profile pages, replies/likes/follows, and optional RSS/ActivityPub outputs.
 - [ ] Next: implement provider OAuth authorization-code + PKCE and token lifecycle, starting with one email provider.
 - [ ] Next: implement media upload/transcode/storage and connector contract tests before enabling Publish.
 
