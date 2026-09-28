@@ -5,6 +5,17 @@ export interface AuthCallback {
 
 const nativeSchemes = new Set(['convo:', 'openmedia:']);
 
+export function createAuthRedirectURL(platform: 'web' | 'native', webOrigin?: string): string {
+  if (platform === 'native') return 'openmedia://auth';
+  if (!webOrigin) throw new Error('A web origin is required for web authentication.');
+
+  const origin = new URL(webOrigin);
+  if (origin.protocol !== 'https:' && origin.protocol !== 'http:') {
+    throw new Error('Web authentication requires an HTTP or HTTPS origin.');
+  }
+  return new URL('/auth', origin.origin).toString();
+}
+
 export function parseAuthCallbackURL(value: string): AuthCallback | undefined {
   let url: URL;
   try {

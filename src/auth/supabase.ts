@@ -1,11 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Linking from 'expo-linking';
 import * as SecureStore from 'expo-secure-store';
 import 'react-native-url-polyfill/auto';
 import { AppState, Platform } from 'react-native';
 import { createClient, processLock, SupabaseClient, SupportedStorage } from '@supabase/supabase-js';
 
-import { parseAuthCallbackURL } from '../domain/authCallback';
+import { createAuthRedirectURL, parseAuthCallbackURL } from '../domain/authCallback';
 
 let client: SupabaseClient | undefined;
 let nativeStorage: ChunkedSecureStorage | undefined;
@@ -43,7 +42,8 @@ export async function getAPIAccessToken(): Promise<string | undefined> {
 export async function sendSignInLink(email: string): Promise<void> {
   const supabase = getSupabaseClient();
   if (!supabase) throw new Error('Supabase Auth is not configured for this build.');
-  const emailRedirectTo = Platform.OS === 'web' ? Linking.createURL('auth') : Linking.createURL('auth', { scheme: 'openmedia' });
+  const webOrigin = Platform.OS === 'web' && typeof window !== 'undefined' ? window.location.origin : undefined;
+  const emailRedirectTo = createAuthRedirectURL(Platform.OS === 'web' ? 'web' : 'native', webOrigin);
   const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo } });
   if (error) throw error;
 }

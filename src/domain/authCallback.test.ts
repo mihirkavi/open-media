@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { parseAuthCallbackURL } from './authCallback';
+import { createAuthRedirectURL, parseAuthCallbackURL } from './authCallback';
+
+test('creates platform-specific auth callback URLs', () => {
+  assert.equal(createAuthRedirectURL('web', 'http://localhost:8081'), 'http://localhost:8081/auth');
+  assert.equal(createAuthRedirectURL('web', 'https://openmedia.example/settings'), 'https://openmedia.example/auth');
+  assert.equal(createAuthRedirectURL('native'), 'openmedia://auth');
+  assert.throws(() => createAuthRedirectURL('web'), /web origin is required/i);
+  assert.throws(() => createAuthRedirectURL('web', 'openmedia://app'), /HTTP or HTTPS origin/i);
+});
 
 test('accepts only Open Media auth callback routes', () => {
   assert.deepEqual(parseAuthCallbackURL('openmedia://auth?code=one'), { code: 'one' });

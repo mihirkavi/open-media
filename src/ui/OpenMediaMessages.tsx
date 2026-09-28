@@ -129,6 +129,7 @@ export function OpenMediaMessages({
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
+          style={styles.filterBar}
           contentContainerStyle={styles.filters}
         >
           {(["all", "direct", "groups", "favorites"] as PeopleFilter[]).map(
@@ -798,9 +799,10 @@ function createStyles(colors: ThemeColors) {
       fontSize: 13,
       outlineStyle: "none",
     } as object,
-    filters: { paddingHorizontal: 18, paddingVertical: 10, gap: 7 },
+    filterBar: { flexGrow: 0, flexShrink: 0 },
+    filters: { paddingHorizontal: 18, paddingVertical: 10, gap: 7, alignItems: "center" },
     chip: {
-      minHeight: 34,
+      height: 34,
       justifyContent: "center",
       paddingHorizontal: 13,
       borderRadius: 17,
