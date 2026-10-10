@@ -14,7 +14,7 @@ Open Media content was only visible after sign-in, and Feed/Clips used fictional
 - Writes go through authenticated RPCs with validation, idempotent client IDs, and a 30-posts-per-hour limit. Authors can delete their own posts.
 - Basic moderation: signed-in people can report a post (shared 20-per-day report limit). A post reported by three distinct people is hidden from all public reads and kept for operator review. `app_private.moderate_post` (service role only) removes or restores a post and closes its reports.
 - Signed-out visitors land on the public feed and can read it without an account; publishing, reporting, and messaging require sign-in.
-- `services/public-api` is a read-only Cloudflare Worker exposing a versioned JSON API (`/v1/posts`, `/v1/posts/{id}`, `/v1/profiles/{handle}`, `/v1/profiles/{handle}/posts`) with an OpenAPI 3.1 document, keyset pagination, permissive CORS, a crawl-allowing `robots.txt`, and per-IP rate limiting. It uses only the publishable key, so it cannot reach anything the public database functions do not already expose.
+- The read-only public API (`services/mail-sync/src/publicApi.ts`) is served by Open Media's single production Worker, routed before mail authentication, rather than by a second permanent Worker. It exposes a versioned JSON API (`/v1/posts`, `/v1/posts/{id}`, `/v1/profiles/{handle}`, `/v1/profiles/{handle}/posts`) with an OpenAPI 3.1 document, keyset pagination, permissive CORS, a crawl-allowing `robots.txt`, and per-IP rate limiting. It uses only the publishable key, so it cannot reach anything the public database functions do not already expose.
 
 ## Consequences
 

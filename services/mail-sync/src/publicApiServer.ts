@@ -1,7 +1,7 @@
 // Local development server for the public API. Production runs src/worker.ts on Cloudflare.
 import { createServer } from 'node:http';
 
-import { handlePublicApiRequest } from './api.js';
+import { handlePublicApiRequest } from './publicApi.js';
 
 const port = Number(process.env.PUBLIC_API_PORT ?? 8790);
 const host = process.env.PUBLIC_API_HOST ?? '127.0.0.1';

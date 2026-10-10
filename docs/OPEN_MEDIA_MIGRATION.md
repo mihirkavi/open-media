@@ -9,7 +9,7 @@ This document records the repository through the 2026-08-18 private-beta hardeni
 | Frontend | Expo SDK 57, React Native 0.86, React 19, TypeScript; shared iOS/Android/web app | No router; `App.tsx` owns in-memory navigation and data composition |
 | Domain | Canonical people, reviewed identities, conversations, messages, email context; canonical social posts and feed selectors | Live posts are text-only; Clips remain fictional sample media; identity merge persistence and undo are not implemented |
 | Auth | Supabase PKCE magic-link onboarding; chunked OS SecureStore session storage; strict callback validation; JWT forwarded to the mail service | CAPTCHA is not configured; local development bypass exists only behind an explicit development flag |
-| Backend | Supabase native messaging and public posts; `services/mail-sync` deployed as a rate-limited Cloudflare Worker with TLS-only IMAP/POP import; `services/public-api` read-only Worker (not yet deployed) | No background job scheduler, SMTP, or provider OAuth |
+| Backend | Supabase native messaging and public posts; `services/mail-sync` deployed as a rate-limited Cloudflare Worker with TLS-only IMAP/POP import, which also serves the read-only public API routes (rollout pending) | No background job scheduler, SMTP, or provider OAuth |
 | Database | Supabase profiles, public posts, conversations, membership, native messages, blocks, message/post reports, private-schema mail data, encrypted credentials, account export/deletion, RLS, authenticated RPCs, and anonymous-safe public read functions | No graph, connector-grant, delivery-receipt, moderator-action log, or audit tables |
 | APIs/connectors | Normalized mail client, mock mail connector, capability-negotiated connector catalog | IMAP import is the only live external content path; social/Gmail/Outlook operations are unavailable until authorized implementations exist |
 | Realtime/messaging | Canonical people-first Supabase conversations with persistence, realtime inserts, reversible blocks/reports, sender integrity and flood limits | No receipts, offline retry queue, push notifications, operator report-review console, or E2E implementation |
@@ -98,10 +98,10 @@ All user-owned tables require RLS, ownership indexes, explicit grants, bounded r
 - [x] Add production profiles, direct conversations, native messages, realtime delivery, reversible blocks/reports, RLS, account export/deletion, and message flood controls through additive database migrations.
 - [x] Harden onboarding callbacks/session storage and deploy a rate-limited, observable mail Worker with credential-safe account management.
 - [x] Persist public Open Media text posts with idempotent, rate-limited publishing, author deletion, post reporting, community auto-hide, blocked-author filtering, and account export/deletion coverage.
-- [x] Make posts and profiles readable without an account, in the app and through the read-only `services/public-api` JSON API ([ADR 0004](adrs/0004-public-posts-and-open-read-api.md)).
+- [x] Make posts and profiles readable without an account, in the app and through the read-only public JSON API served by the production Worker ([ADR 0004](adrs/0004-public-posts-and-open-read-api.md)).
 - [ ] Next: operator moderation console, public profile pages, replies/likes/follows, and optional RSS/ActivityPub outputs.
 - [ ] Next: implement provider OAuth authorization-code + PKCE and token lifecycle, starting with one email provider.
-- [ ] Next: implement media upload/transcode/storage and connector contract tests before enabling Publish.
+- [ ] Next: implement media upload/transcode/storage and connector contract tests before enabling image/video posts and Clips publishing.
 
 ## Research-backed UI constraints
 

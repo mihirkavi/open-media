@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { decodeCursor, encodeCursor, handlePublicApiRequest, PublicApiEnv } from './api.js';
+import { decodeCursor, encodeCursor, handlePublicApiRequest, PublicApiEnv } from './publicApi.js';
 
 const env: PublicApiEnv = { SUPABASE_URL: 'https://db.example.test/', SUPABASE_PUBLISHABLE_KEY: 'publishable-key' };
 const postId = '0f8fad5b-d9cb-469f-a165-70867728950e';
@@ -106,4 +106,14 @@ test('describes itself for agents and allows crawling', async () => {
   const openapi = await (await handlePublicApiRequest(get('/v1/openapi.json'), env, fakeUpstream({}))).json() as { openapi: string };
   assert.equal(openapi.openapi, '3.1.0');
   assert.equal(await (await handlePublicApiRequest(get('/robots.txt'), env, fakeUpstream({}))).text(), 'User-agent: *\nAllow: /\n');
+});
+
+test('routes only public paths to the public API', async () => {
+  const { isPublicApiPath } = await import('./publicApi.js');
+  for (const path of ['/', '/robots.txt', '/v1', '/v1/', '/v1/openapi.json', '/v1/posts', '/v1/posts/abc', '/v1/profiles/maya/posts']) {
+    assert.equal(isPublicApiPath(path), true, path);
+  }
+  for (const path of ['/health', '/v1/mail-accounts', '/v1/mail-accounts/1/sync', '/v1/postsX', '/v2/posts']) {
+    assert.equal(isPublicApiPath(path), false, path);
+  }
 });

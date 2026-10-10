@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "node --watch --env-file-if-exists=.env --import tsx src/server.ts",
     "start": "node --env-file-if-exists=.env --import tsx src/server.ts",
+    "public-api": "node --env-file-if-exists=.env --import tsx src/publicApiServer.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test src/*.test.ts",
     "worker:types": "wrangler types",

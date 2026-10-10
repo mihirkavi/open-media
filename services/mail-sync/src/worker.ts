@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { decryptSecret, encryptSecret } from './crypto.js';
 import { syncImap, testImap } from './imap.js';
 import { resolvePublicMailHost } from './networkSafety.js';
+import { handlePublicApiRequest, isPublicApiPath } from './publicApi.js';
 import { syncPop3, testPop3 } from './pop3.js';
 import { SupabaseRestRepository } from './supabaseRestRepository.js';
 import { MailAccountInput } from './types.js';
@@ -29,6 +30,9 @@ const schema = z.object({
 
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
+    // Public, unauthenticated read API for posts and profiles (open CORS).
+    if (isPublicApiPath(new URL(request.url).pathname)) return handlePublicApiRequest(request, env);
+
     const headers = corsHeaders(env.CONVO_APP_ORIGIN);
     let path = '/';
     try {

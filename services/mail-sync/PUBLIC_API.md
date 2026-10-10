@@ -2,7 +2,9 @@
 
 A read-only JSON API over public Open Media posts and profiles. No account or API key is needed. People, scrapers, and AI agents are welcome to use it.
 
-It runs as a Cloudflare Worker (`src/worker.ts`) and only relays the `open_media_public_*` database functions using the Supabase publishable key. Private data (messages, email, contacts, blocks, reports) is not reachable through it.
+It is served by Open Media's single production Cloudflare Worker (the same Worker as mail sync, `src/worker.ts`). Public paths are routed to `src/publicApi.ts` before any mail authentication; that module only relays the `open_media_public_*` database functions with the Supabase publishable key. Private data (messages, email, contacts, blocks, reports) is not reachable through it, and the authenticated mail routes are unchanged.
+
+Production host: `https://convo-mail-sync.convo-mail-sync.workers.dev` (the hostname is kept for installed-app continuity).
 
 ## Endpoints
 
@@ -19,7 +21,7 @@ It runs as a Cloudflare Worker (`src/worker.ts`) and only relays the `open_media
 `limit` is 1–50 (default 20). Follow `pagination.next`, or the `Link: rel="next"` header, until it is `null`. Removed posts, and posts hidden after community reports, disappear from every endpoint.
 
 ```bash
-curl https://<your-api-host>/v1/posts?limit=2
+curl "https://convo-mail-sync.convo-mail-sync.workers.dev/v1/posts?limit=2"
 ```
 
 ```json
@@ -30,12 +32,12 @@ curl https://<your-api-host>/v1/posts?limit=2
       "type": "post",
       "text": "Hello from Open Media!",
       "createdAt": "2026-09-28T05:24:34.195608+00:00",
-      "url": "https://<your-api-host>/v1/posts/21a32464-edf1-4987-a1ed-a9447b1254cb",
+      "url": "https://<api-host>/v1/posts/21a32464-edf1-4987-a1ed-a9447b1254cb",
       "author": {
         "handle": "tester",
         "displayName": "tester",
         "avatarUrl": null,
-        "url": "https://<your-api-host>/v1/profiles/tester"
+        "url": "https://<api-host>/v1/profiles/tester"
       }
     }
   ],
@@ -47,11 +49,10 @@ Errors use `{ "error": { "code", "message" } }` with `400`, `404`, `405`, `429` 
 
 ## Run locally
 
-With the local Supabase stack running (`npx supabase start` from the repository root):
+With the local Supabase stack running (`npx supabase start` from the repository root), put the local `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` in `services/mail-sync/.env`, then:
 
 ```bash
-cp services/public-api/.env.example services/public-api/.env   # add the local publishable key
-npm run public-api:server                                       # http://127.0.0.1:8790
+npm run public-api:server   # http://127.0.0.1:8790
 ```
 
 Set `EXPO_PUBLIC_OPEN_MEDIA_PUBLIC_API_URL` in the app environment to show the open-data link to signed-out visitors.
@@ -59,21 +60,18 @@ Set `EXPO_PUBLIC_OPEN_MEDIA_PUBLIC_API_URL` in the app environment to show the o
 ## Test
 
 ```bash
-npm test --prefix services/public-api
-npx tsc --noEmit -p services/public-api
+npm test --prefix services/mail-sync
+npm run typecheck --prefix services/mail-sync
 ```
 
 ## Deploy
 
-Not deployed yet. After the `20260927120000_public_posts.sql` migration is applied to the production database:
+The public routes ship with the mail Worker. The Worker already holds `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`; no new secrets are needed. Apply `supabase/migrations/20260927120000_public_posts.sql` to production first, otherwise public routes return `502`.
 
 ```bash
-cd services/public-api
-npm install
-npx wrangler secret put SUPABASE_URL
-npx wrangler secret put SUPABASE_PUBLISHABLE_KEY
+cd services/mail-sync
 npm run worker:check
 npm run worker:deploy
 ```
 
-The Worker applies a per-IP limit of 120 requests per minute (`PUBLIC_API_RATE_LIMITER`).
+The public routes apply a per-IP limit of 120 requests per minute (`PUBLIC_API_RATE_LIMITER`).

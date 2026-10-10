@@ -17,6 +17,11 @@
       "name": "MAIL_SYNC_RATE_LIMITER",
       "namespace_id": "10002",
       "simple": { "limit": 12, "period": 60 }
+    },
+    {
+      "name": "PUBLIC_API_RATE_LIMITER",
+      "namespace_id": "10003",
+      "simple": { "limit": 120, "period": 60 }
     }
   ],
   "observability": {

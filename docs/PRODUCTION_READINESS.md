@@ -17,14 +17,16 @@ This checklist defines “production ready” for the current onboarding private
 - [x] Local browser flow: magic-link onboarding, callback cleanup, profile creation, profile search, direct conversation, send, realtime receive, account export, and responsive layout.
 - [x] Latest signed iOS Store build finished successfully: build 9, EAS `f5916bd3-c316-487a-bbed-f6085bc38fcc`.
 
-## Public posts and open read API (2026-09-27, not yet in production)
+## Public posts and open read API (2026-10-09, not yet in production)
 
 - [x] `20260927120000_public_posts.sql` applies cleanly to a local stack and passes `supabase db lint`.
 - [x] 27 new database assertions: idempotent/validated/rate-limited publishing, no anonymous table access, public projection without emails or client IDs, keyset pagination, report idempotency, three-reporter auto-hide, blocked-author filtering, and author deletion (63 total with the existing suite).
-- [x] Public API unit tests, typecheck, and `wrangler deploy --dry-run`; local end-to-end read of posts/profiles against the local database.
+- [x] Public API routes consolidated into the single production Worker (`convo-mail-sync`) instead of a second Worker; unit tests (including route isolation from mail paths), typecheck, regenerated binding types, and `wrangler deploy --dry-run` pass. No new secrets are required.
 - [x] Local browser flow: signed-out public feed, sign-in, publish, report, confirmed delete (reflected in the API), phone and desktop layouts.
-- [ ] Apply the migration to production. This makes existing beta profiles publicly readable; notify beta testers first.
-- [ ] Deploy `services/public-api`, set its secrets, set `EXPO_PUBLIC_OPEN_MEDIA_PUBLIC_API_URL`, and probe `/v1/posts` and `/health`.
+- [ ] Restore the paused production Supabase project (found `INACTIVE` on 2026-10-09; the live app backend is unavailable until it is restored).
+- [ ] Apply the migration to production (`npx supabase db push --linked`). This makes existing beta profiles publicly readable; notify beta testers first.
+- [ ] Deploy the Worker (`npm run worker:deploy --prefix services/mail-sync`); previous production version `05ff616e-a628-4670-9ceb-980a7626b5d6` is the rollback target.
+- [ ] Set `EXPO_PUBLIC_OPEN_MEDIA_PUBLIC_API_URL=https://convo-mail-sync.convo-mail-sync.workers.dev` in the EAS production environment, then probe `/v1/posts`, `/v1/openapi.json`, and `/health`.
 - [ ] Decide who handles community-hidden posts until an operator console exists.
 
 ## Explicitly out of scope for this release

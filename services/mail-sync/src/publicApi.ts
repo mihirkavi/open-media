@@ -2,6 +2,7 @@
  * Open Media public read API (v1).
  *
  * Read-only, unauthenticated, and intended for people, scrapers, and AI agents.
+ * Served by the same production Worker as mail sync (see isPublicApiPath).
  * It only relays the explicit public projection returned by the
  * `open_media_public_*` database functions: public posts and public profiles.
  * Messages, email, contacts, blocks, and reports are never reachable here.
@@ -48,6 +49,13 @@ const baseHeaders: Record<string, string> = {
   'x-content-type-options': 'nosniff',
   'x-robots-tag': 'all',
 };
+
+/** Paths served by the public API. Everything else stays on the authenticated mail routes. */
+export function isPublicApiPath(pathname: string): boolean {
+  const path = pathname.replace(/\/+$/, '') || '/';
+  return path === '/' || path === '/robots.txt' || path === '/v1' || path === '/v1/openapi.json'
+    || /^\/v1\/(posts|profiles)(\/|$)/.test(path);
+}
 
 export async function handlePublicApiRequest(request: Request, env: PublicApiEnv, fetchImpl: Fetch = fetch): Promise<Response> {
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { ...baseHeaders, 'access-control-max-age': '86400' } });
