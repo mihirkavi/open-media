@@ -1,0 +1,16 @@
+# Portable workflow specification. Any agent can implement it with the
+# Open Media Events tools. The server enforces the permission rules itself.
+workflow: plan_event
+version: 1.0
+steps:
+  - tool: get_event
+  - tool: check_schedule
+  - evaluate: conflicts, travel estimate, other plans that day
+  - propose: exact local block, travel minutes marked as an estimate
+  - request_user_approval: "Hold <block> for <title>?"
+  - tool: plan_event
+    with: { state: held, user_approved: true }
+  - verify: response.calendar.status == "tentative hold"
+permissions:
+  calendar_write: user_approval_required   # enforced: plan_event rejects held without user_approved
+  registration: never_inferred_from_hold

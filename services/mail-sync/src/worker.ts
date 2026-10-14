@@ -1,5 +1,10 @@
+import { OAuthProvider } from '@cloudflare/workers-oauth-provider';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { z } from 'zod';
+
+import { handleAuthorization } from './events/auth.js';
+import { handleProtectedEventsRequest, handlePublicEventsRequest, runScheduledRefresh, type EventsEnv } from './events/http.js';
+import { SUPPORTED_SCOPES } from './events/tools.js';
 
 import { decryptSecret, encryptSecret } from './crypto.js';
 import { syncImap, testImap } from './imap.js';
@@ -15,7 +20,7 @@ interface WorkerSecrets {
   MAIL_CREDENTIALS_KEY: string;
 }
 
-type WorkerEnv = Env & WorkerSecrets;
+type WorkerEnv = Env & WorkerSecrets & EventsEnv;
 
 const noNewlines = z.string().min(1).max(1024).refine((value) => !/[\r\n]/.test(value), 'Credentials cannot contain line breaks.');
 const schema = z.object({
@@ -28,7 +33,8 @@ const schema = z.object({
   password: noNewlines,
 });
 
-export default {
+/** Mail sync and the public read API, unchanged; served behind the OAuth wrapper's default route. */
+const legacyHandler = {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     // Public, unauthenticated read API for posts and profiles (open CORS).
     if (isPublicApiPath(new URL(request.url).pathname)) return handlePublicApiRequest(request, env);
@@ -80,6 +86,52 @@ export default {
       console.error(JSON.stringify({ event: 'mail_request_failed', method: request.method, path, status, errorType: error instanceof Error ? error.name : 'UnknownError' }));
       return json(status, { error: message }, headers);
     }
+  },
+};
+
+/** Public routes: OAuth owner sign-in, the signed plan calendar, event API docs, then everything else. */
+const defaultHandler = {
+  async fetch(request: Request, env: WorkerEnv): Promise<Response> {
+    return (await handleAuthorization(request, env))
+      ?? (await handlePublicEventsRequest(request, env))
+      ?? legacyHandler.fetch(request, env);
+  },
+};
+
+/** OAuth-protected Open Media Events routes: MCP for agents and REST for apps. */
+const eventsApiHandler = {
+  async fetch(request: Request, env: WorkerEnv, ctx: ExecutionContext): Promise<Response> {
+    return handleProtectedEventsRequest(request, env, (ctx as ExecutionContext & { props?: unknown }).props);
+  },
+};
+
+const oauth = new OAuthProvider<WorkerEnv>({
+  apiRoute: ['/mcp', '/v1/events/tools/'],
+  apiHandler: eventsApiHandler as never,
+  defaultHandler: defaultHandler as never,
+  authorizeEndpoint: '/authorize',
+  tokenEndpoint: '/oauth/token',
+  clientRegistrationEndpoint: '/oauth/register',
+  clientIdMetadataDocumentEnabled: true,
+  scopesSupported: [...SUPPORTED_SCOPES],
+  accessTokenTTL: 60 * 60,
+  refreshTokenTTL: 60 * 60 * 24 * 90,
+  allowPlainPKCE: false,
+  clientRegistrationCallback: ({ clientMetadata }) => {
+    const name = clientMetadata.client_name;
+    if (typeof name !== 'string' || !name.trim() || name.length > 120) {
+      return { code: 'invalid_client_metadata', description: 'A concise client_name is required.', status: 400 };
+    }
+  },
+  onError: ({ code, status }) => {
+    console.error(JSON.stringify({ event: 'oauth_error', code, status }));
+  },
+});
+
+export default {
+  fetch: (request: Request, env: WorkerEnv, ctx: ExecutionContext) => oauth.fetch(request, env, ctx),
+  scheduled: async (_controller: ScheduledController, env: WorkerEnv, ctx: ExecutionContext) => {
+    ctx.waitUntil(runScheduledRefresh(env));
   },
 } satisfies ExportedHandler<WorkerEnv>;
 

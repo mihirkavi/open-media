@@ -1,0 +1,9 @@
+workflow: update_preferences
+version: 1.0
+classify:
+  temporary: search filters only; store nothing
+  explicit_long_term: confirm scope, then update_event_preferences(scope=permanent, user_confirmed=true)
+  behavioral: weak evidence; never stored as a stated preference without confirmation
+permissions:
+  permanent_preference_change: user_confirmation_required   # enforced server-side
+  delete_history: explicit_confirmation_required             # enforced server-side

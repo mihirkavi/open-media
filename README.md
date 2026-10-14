@@ -24,6 +24,7 @@ Open Media is a cross-platform beta for bringing a person’s social world toget
 - Real TLS-only IMAP/POP mailbox connection testing, import, resync, listing, and credential-safe disconnection through the separate mail-sync service
 - Supabase auth/database backend, encrypted mailbox credentials, RLS on every exposed user table, reversible message blocking/reporting, in-app data export and account deletion, Contacts review flow, and Apple Foundation Models search boundary
 - Capability-negotiated connector contracts that keep unavailable publishing, sending, OAuth, realtime, and attachment features disabled
+- **Open Media Events (Layer 1)**: an agent-agnostic event discovery and planning service for ChatGPT, Claude and other MCP clients. It searches Luma, Meetup, Eventbrite and your own ICS or schema.org feeds in parallel, de-duplicates and ranks results with reasons, checks your schedule, places calendar holds you approve on a subscribed iCloud calendar, and hands off registration to the official page. It is served over MCP with OAuth 2.1 at `/mcp`, with a REST/OpenAPI mirror. See [docs/events](docs/events/README.md)
 
 Feed shows live public posts. Clips still shows clearly labeled fictional sample videos because media upload is not implemented. Open Media profiles, posts, and native messages are live data.
 
@@ -59,6 +60,12 @@ services/mail-sync Worker + private Supabase mail schema
 People & agents (no account)
             │
 same Worker, public /v1/posts and /v1/profiles routes → open_media_public_* functions → public posts/profiles
+
+ChatGPT / Claude / other MCP clients (OAuth 2.1)
+            │
+same Worker, /mcp and /v1/events/tools/* → src/events engine → D1 (open-media-events)
+            │
+luma-discovery · structured-event-feeds · calcom-availability (separate public repos)
 ```
 
 Important boundaries:
@@ -67,6 +74,8 @@ Important boundaries:
 - `src/connectors`: provider-neutral capabilities, safe mock adapter, and mail-service client
 - `src/ui`: adaptive Open Media surfaces plus preserved connection/contact UI
 - `services/mail-sync`: the single production Worker: mailbox network safety, TLS connection tests, encrypted credentials, import, and the unauthenticated read-only public API (`src/publicApi.ts`)
+- `services/mail-sync/src/events`: Open Media Events (Layer 1): provider router, de-duplication, ranking, plan lifecycle, calendar feed, D1 store, MCP/REST tools and OAuth owner sign-in
+- `skills`: portable agent skills and YAML workflows for event discovery, planning, registration and personalization
 - `services/matrix-bridge`: server-side Matrix authentication, room synchronization, and text sending
 - `supabase/migrations`: private mail storage plus Open Media profiles, conversations, messages, realtime, and authenticated RPC/RLS policies
 - `docs/OPEN_MEDIA_MIGRATION.md`: current/target architecture, database changes, risks, and phased plan
@@ -106,7 +115,7 @@ npm run test:db # requires the local Supabase stack
 npx expo-doctor@latest
 ```
 
-The check runs app and Worker (mail sync plus public API) typechecks/tests plus a production web export. Generated output stays inside `.expo-dist/` and is ignored.
+The check runs app and Worker (mail sync, public API and events) typechecks/tests plus a production web export. `services/mail-sync/scripts/events-e2e.ts` exercises the events service end to end over OAuth and MCP. Generated output stays inside `.expo-dist/` and is ignored.
 
 ## Honest limitations
 
@@ -114,7 +123,7 @@ This is a beta, not a finished public social network. Posts are text-only; Clips
 
 Most consumer social networks do not expose universal private-message access to ordinary third-party apps. Instagram has a narrower professional-account messaging API, LinkedIn messaging access is restricted, Snapchat Login Kit excludes private messages, and approved TikTok Data Portability access is an export workflow rather than live DM sending. Those connectors remain disabled until Open Media implements and receives approval for an applicable official capability. Open protocols and supported email connections are the honest interoperability path.
 
-Open Media only reads other providers through approved APIs and standard protocols; it does not scrape them. The reverse is intentional: Open Media’s own public posts and profiles may be freely read and scraped by people and agents, preferably through the public API. See [the migration plan](docs/OPEN_MEDIA_MIGRATION.md) for the next additive steps and security boundaries.
+For messaging and social accounts, Open Media only reads other providers through approved APIs and standard protocols. For events, it reads only public, unauthenticated data: iCalendar feeds, schema.org Event data that platforms publish on public pages, and the public JSON behind Luma's website. It follows robots.txt and never signs in, registers or buys tickets on anyone's behalf. Registration is always a handoff to the official page; see [docs/events](docs/events/README.md) for the verified capability matrix. The reverse is intentional: Open Media’s own public posts and profiles may be freely read and scraped by people and agents, preferably through the public API. See [the migration plan](docs/OPEN_MEDIA_MIGRATION.md) for the next additive steps and security boundaries.
 
 ## Compatibility note
 
