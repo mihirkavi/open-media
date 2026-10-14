@@ -51,7 +51,7 @@ Clips remain labeled fictional data. Media upload, provider OAuth, outbound emai
 
 - [x] D1 database `open-media-events` created and migration `0001` applied remotely; OAuth KV, Workers AI binding and the 4-hour refresh cron configured on the single production Worker.
 - [x] Secrets `EVENTS_OWNER_CODE_SHA256` and `EVENTS_FEED_SIGNING_KEY` set; owner code stored only in the owner's macOS Keychain.
-- [x] Production end-to-end check passed on 2026-10-13 (`scripts/events-e2e.ts --write`): unauthenticated MCP rejected, OAuth + PKCE, 21 tools listed, live search across Luma, Meetup and Eventbrite, hold refused without approval, hold placed and released, registration handoff, signed feed and tamper rejection, REST mirror and audience separation.
+- [x] Production end-to-end check passed on 2026-10-13 (`scripts/events-e2e.ts --write`): unauthenticated MCP rejected, OAuth + PKCE, 22 tools listed, live search across Luma, Meetup and Eventbrite, hold refused without approval, hold placed and released, registration handoff, signed feed and tamper rejection, REST mirror and audience separation.
 - [ ] Add `CALCOM_API_KEY` (owner action) and verify `calcom_list_calendars` and busy times against the live iCloud connection.
 - [ ] Subscribe to the plan calendar in Apple Calendar (owner action).
 - [ ] Connect ChatGPT (Developer mode connector) and confirm whether connector tools are available in voice conversations.

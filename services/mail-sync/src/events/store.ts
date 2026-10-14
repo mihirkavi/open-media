@@ -187,8 +187,9 @@ export class EventStore {
 
   // ----- Provider cache and health -----
 
-  async cached<T>(key: string, ttlSeconds: number, load: () => Promise<T>): Promise<T> {
-    const row = await this.db.prepare('SELECT payload, expires_at FROM provider_cache WHERE cache_key = ?').bind(key).first<{ payload: string; expires_at: number }>();
+  /** Returns a cached provider response, or loads and caches it. `fresh` skips the read but still refreshes the cache. */
+  async cached<T>(key: string, ttlSeconds: number, load: () => Promise<T>, fresh = false): Promise<T> {
+    const row = fresh ? null : await this.db.prepare('SELECT payload, expires_at FROM provider_cache WHERE cache_key = ?').bind(key).first<{ payload: string; expires_at: number }>();
     if (row && row.expires_at > Date.now()) return JSON.parse(row.payload) as T;
     const value = await load();
     await this.db

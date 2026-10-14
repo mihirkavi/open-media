@@ -93,6 +93,10 @@ test('ranking applies hard constraints', () => {
   assert.equal(rankEvent(canonical({ registration: { availability: 'closed', url: 'x' } }), context()).excluded, 'registration closed');
   assert.equal(rankEvent(canonical({ startsAt: '2026-11-01T02:00:00.000Z', endsAt: undefined }), context()).excluded, 'outside the requested dates');
   assert.match(rankEvent(canonical({ price: { isFree: false, minCents: 9000 } }), context({ maxPriceUsd: 40 })).excluded ?? '', /costs more/);
+  // Unknown prices fail strict price filters instead of passing as free.
+  assert.equal(rankEvent(canonical({ price: undefined }), context({ freeOnly: true })).excluded, 'price not listed');
+  assert.equal(rankEvent(canonical({ price: undefined }), context({ maxPriceUsd: 20 })).excluded, 'price not listed');
+  assert.equal(rankEvent(canonical({ price: { isFree: true } }), context({ freeOnly: true, maxPriceUsd: 0 })).excluded, undefined);
 });
 
 test('ranking explains interest, format and schedule fit', () => {
@@ -210,6 +214,8 @@ test('tool contract: unique names, scopes, JSON-schema-able inputs, write tools 
   for (const required of ['search_events', 'get_event', 'compare_events', 'get_event_options', 'get_my_events', 'save_event', 'check_schedule', 'plan_event', 'register_event', 'get_registration_status', 'cancel_registration', 'update_event_preferences', 'submit_event_feedback', 'list_event_sources']) {
     assert.ok(names.has(required), required);
   }
+  assert.equal(TOOLS.find((tool) => tool.name === 'rotate_calendar_feed')?.scope, 'events:write', 'rotating the feed is a write');
+  assert.equal(TOOLS.find((tool) => tool.name === 'get_calendar_feed')?.annotations.readOnlyHint, true);
   const plan = TOOLS.find((tool) => tool.name === 'plan_event')!;
   assert.equal(plan.input.safeParse({ event_id: 'evt_00000000000000000001', state: 'registered' }).success, false, 'registration states cannot be set by plan_event');
 });

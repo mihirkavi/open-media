@@ -138,7 +138,7 @@ export class EventsEngine {
 
   async getEvent(userId: string, eventId: string, refresh = false) {
     let event = await this.requireEvent(eventId);
-    if (refresh) event = await this.refreshEvent(event);
+    if (refresh) event = await this.refreshEvent(event, true);
     const preferences = await this.store.getPreferences(userId);
     const plan = await this.store.getPlan(userId, eventId);
     const registration = await this.store.getRegistration(userId, eventId);
@@ -187,7 +187,7 @@ export class EventsEngine {
   }
 
   async getEventOptions(userId: string, eventId: string) {
-    const event = await this.refreshEvent(await this.requireEvent(eventId));
+    const event = await this.refreshEvent(await this.requireEvent(eventId), true);
     const preferences = await this.store.getPreferences(userId);
     const provider = event.sources[0]?.provider ?? 'web';
     const capability = PROVIDER_CAPABILITIES.find((item) => item.provider === provider) ?? PROVIDER_CAPABILITIES.find((item) => item.provider === 'feeds')!;
@@ -455,6 +455,7 @@ export class EventsEngine {
   }
 
   async calendarFeed(userId: string, rotate: boolean) {
+    // Rotation invalidates the subscribed URL, so callers must hold write scope (see rotate_calendar_feed).
     await this.store.ensureUser(userId);
     if (!this.calendar.feedConfigured) throw new UserError('The plan calendar is not configured on the server yet (EVENTS_FEED_SIGNING_KEY is missing).');
     const version = rotate ? await this.store.rotateFeed(userId) : await this.store.feedVersion(userId);
@@ -640,7 +641,7 @@ export class EventsEngine {
     for (const event of events.values()) {
       if (Date.parse(event.startsAt) < Date.now() - 86_400_000) continue;
       const before = JSON.stringify([event.startsAt, event.status, event.venue?.address, event.registration?.availability]);
-      const after = await this.refreshEvent(event).catch(() => event);
+      const after = await this.refreshEvent(event, true).catch(() => event);
       if (JSON.stringify([after.startsAt, after.status, after.venue?.address, after.registration?.availability]) !== before) changed += 1;
     }
     return { refreshed: events.size, changed };
@@ -744,11 +745,13 @@ export class EventsEngine {
     return updated;
   }
 
-  private async refreshEvent(event: CanonicalEvent): Promise<CanonicalEvent> {
+  /** Re-reads the event's source. `fresh` bypasses provider caches (explicit refresh, monitoring). */
+  private async refreshEvent(event: CanonicalEvent, fresh = false): Promise<CanonicalEvent> {
     const luma = event.sources.find((source) => source.provider === 'luma');
     const page = event.sources.find((source) => source.provider !== 'luma' && /^https?:/.test(source.url));
     try {
-      const listing = luma ? await this.router.lumaEvent(luma.providerEventId) : page ? (await this.router.readEventPage(page.url)).find((item) => item.url === page.url || item.providerEventId === page.providerEventId) ?? (await this.router.readEventPage(page.url))[0] : undefined;
+      const pageEvents = !luma && page ? await this.router.readEventPage(page.url, fresh) : [];
+      const listing = luma ? await this.router.lumaEvent(luma.providerEventId, fresh) : pageEvents.find((item) => item.url === page!.url || item.providerEventId === page!.providerEventId) ?? pageEvents[0];
       if (!listing) return event;
       const refreshed = mergeCluster(event.id, [{ ...listing, provider: luma ? 'luma' : page!.provider, providerEventId: luma ? luma.providerEventId : page!.providerEventId }], event);
       await this.store.upsertEvents([refreshed], new Map([[event.id, event]]));

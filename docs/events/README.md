@@ -28,7 +28,7 @@ Whether a connector can be used during ChatGPT **voice** conversations depends o
 
 ### Subscribe to the plan calendar once
 
-Ask the assistant to "give me my plan calendar link" (`get_calendar_feed`). In Apple Calendar on Mac, choose File → New Calendar Subscription, paste the URL, set the location to **iCloud** so it syncs to your iPhone, and set auto-refresh to every 5 or 15 minutes. Holds appear as `Hold: …` (tentative) and confirmed plans as normal events. Anyone with the URL can read your plan titles and times. Ask to rotate it if it leaks.
+Ask the assistant to "give me my plan calendar link" (`get_calendar_feed`; `rotate_calendar_feed` issues a new one). In Apple Calendar on Mac, choose File → New Calendar Subscription, paste the URL, set the location to **iCloud** so it syncs to your iPhone, and set auto-refresh to every 5 or 15 minutes. Holds appear as `Hold: …` (tentative) and confirmed plans as normal events. Anyone with the URL can read your plan titles and times. Ask to rotate it if it leaks.
 
 ### Optional: let it see your existing calendar
 
@@ -78,7 +78,7 @@ ChatGPT · Claude · other agents          apps / scripts
             └──────────────┬───────────────────┘
           services/mail-sync Worker (single production Worker)
             src/events/http.ts     MCP + REST + signed ICS feed + OAuth owner sign-in (auth.ts)
-            src/events/tools.ts    21 tool contracts (zod), scopes events:read / events:write
+            src/events/tools.ts    22 tool contracts (zod), scopes events:read / events:write
             src/events/engine.ts   orchestration: search, plan, register handoff, preferences
               ├─ providers.ts      capability registry + parallel provider router (per-provider timeouts)
               ├─ dedupe.ts         staged duplicate detection and canonical merge

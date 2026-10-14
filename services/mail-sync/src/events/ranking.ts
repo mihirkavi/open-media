@@ -76,7 +76,8 @@ export function rankEvent(event: CanonicalEvent, context: RankingContext): Ranke
   else if (start >= context.windowEnd.getTime() || (event.dateOnly ? start + 86_400_000 : end) < context.windowStart.getTime()) excluded = 'outside the requested dates';
   else if (event.registration?.availability === 'closed') excluded = 'registration closed';
   else if (context.inPersonOnly && event.attendanceMode === 'online') excluded = 'online only';
-  else if (context.freeOnly && event.price?.isFree === false) excluded = 'not free';
+  else if (context.freeOnly && event.price?.isFree !== true) excluded = event.price?.isFree === false ? 'not free' : 'price not listed';
+  else if (context.maxPriceUsd !== undefined && event.price?.isFree !== true && event.price?.minCents === undefined) excluded = 'price not listed';
   else if (context.maxPriceUsd !== undefined && (event.price?.minCents ?? 0) > context.maxPriceUsd * 100) excluded = `costs more than $${context.maxPriceUsd}`;
   else {
     const hit = context.exclude.find((term) => term.trim() && containsTerm(text, term.toLowerCase()));

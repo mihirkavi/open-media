@@ -141,12 +141,12 @@ export class ProviderRouter {
   }
 
   /** Reads one event page or feed URL (used to fetch exact times and details). */
-  async readEventPage(url: string): Promise<DiscoveredEvent[]> {
-    return this.store.cached(`detail:${url}`, 6 * 3600, async () => (await this.feeds.read(url)).events.slice(0, 5));
+  async readEventPage(url: string, fresh = false): Promise<DiscoveredEvent[]> {
+    return this.store.cached(`detail:${url}`, 6 * 3600, async () => (await this.feeds.read(url)).events.slice(0, 5), fresh);
   }
 
-  async lumaEvent(id: string): Promise<DiscoveredEvent> {
-    return this.store.cached(`luma-event:${id}`, 3 * 3600, () => this.luma.getEvent(id));
+  async lumaEvent(id: string, fresh = false): Promise<DiscoveredEvent> {
+    return this.store.cached(`luma-event:${id}`, 3 * 3600, () => this.luma.getEvent(id), fresh);
   }
 
   async readFeed(url: string, windowStart: Date, windowEnd: Date) {
