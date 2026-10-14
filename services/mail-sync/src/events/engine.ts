@@ -569,6 +569,9 @@ export class EventsEngine {
         configured: capability.provider === 'calcom' ? this.calendar.availabilityConfigured : capability.capabilities.discover !== 'not_configured',
         health: health.get(capability.provider) ?? null,
       })),
+      availability_calendars: await this.calendar.listCalendars()
+        .then((calendars) => calendars?.map((calendar) => ({ name: calendar.name, integration: calendar.integration, checked_for_conflicts: calendar.isSelected || !calendars.some((item) => item.isSelected) })))
+        .catch((error: unknown) => ({ error: error instanceof Error ? error.message : 'Cal.com calendars could not be listed' })),
       plan_calendar: { configured: this.calendar.feedConfigured, method: 'Signed ICS subscription feed (tentative holds and confirmed plans)' },
       your_sources: personal,
       areas: Object.values(AREAS).map((area) => area.name),
