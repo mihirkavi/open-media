@@ -43,3 +43,7 @@ services/mail-sync/.env
 # generated native folders
 /ios
 /android
+
+# Wrangler local state and local-only secrets
+.wrangler/
+.dev.vars*

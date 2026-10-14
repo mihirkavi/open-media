@@ -1,0 +1,17 @@
+workflow: register_event
+version: 1.0
+steps:
+  - tool: get_event_options
+  - present: price, availability, approval requirement, official link
+  - tool: register_event          # returns a handoff link; never registers
+  - person_completes_registration_on_official_page
+  - ask: outcome (registered | waitlisted | pending_approval | failed) and whether to add to calendar
+  - tool: record_registration
+    with: { verification: user_reported }
+on_uncertain_outcome:
+  - tool: get_registration_status
+  - ask_person_to_check_confirmation_email
+  - never_retry_blindly
+permissions:
+  external_commitment: explicit_confirmation   # the person acts on the provider site
+  purchase: never_automated

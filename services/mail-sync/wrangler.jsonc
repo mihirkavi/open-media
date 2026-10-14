@@ -3,9 +3,35 @@
   "name": "convo-mail-sync",
   "main": "src/worker.ts",
   "compatibility_date": "2026-08-18",
-  "compatibility_flags": ["nodejs_compat"],
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "vars": {
-    "CONVO_APP_ORIGIN": "*"
+    "CONVO_APP_ORIGIN": "*",
+    "EVENTS_OWNER_USER_ID": "owner",
+    "EVENTS_PUBLIC_ORIGIN": "https://convo-mail-sync.convo-mail-sync.workers.dev"
+  },
+  // Open Media Events (Layer 1): canonical events, plans and preferences.
+  "d1_databases": [
+    {
+      "binding": "EVENTS_DB",
+      "database_name": "open-media-events",
+      "database_id": "ed5c017c-34c7-4012-bf5c-bee065131269",
+      "migrations_dir": "migrations"
+    }
+  ],
+  // OAuth 2.1 grants and tokens for MCP clients (ChatGPT, Claude, others).
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_KV",
+      "id": "c72df5681f2744bd9ca1bb9f04158c80"
+    }
+  ],
+  // Optional semantic matching for event search.
+  "ai": {
+    "binding": "AI"
+  },
+  // Re-read upcoming planned events so changes (time, venue, cancellation) surface.
+  "triggers": {
+    "crons": ["17 */4 * * *"]
   },
   "ratelimits": [
     {
