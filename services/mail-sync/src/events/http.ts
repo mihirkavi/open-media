@@ -20,7 +20,7 @@ const EMBEDDING_MODEL = '@cf/baai/bge-small-en-v1.5';
 
 export function createEngine(env: EventsEnv, origin: string): EventsEngine {
   const store = new EventStore(env.EVENTS_DB);
-  const calendar = new CalendarCapability({ calcomApiKey: env.CALCOM_API_KEY, feedSigningKey: env.EVENTS_FEED_SIGNING_KEY, publicOrigin: env.EVENTS_PUBLIC_ORIGIN ?? origin });
+  const calendar = new CalendarCapability({ calcomApiKey: env.CALCOM_API_KEY?.trim() || undefined, feedSigningKey: env.EVENTS_FEED_SIGNING_KEY, publicOrigin: env.EVENTS_PUBLIC_ORIGIN ?? origin });
   const embeddings: EmbeddingProvider | undefined = env.AI
     ? { embed: async (texts) => (await env.AI!.run(EMBEDDING_MODEL, { text: texts })).data ?? [] }
     : undefined;
