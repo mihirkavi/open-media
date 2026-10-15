@@ -27,6 +27,7 @@ This checklist defines “production ready” for the current onboarding private
 - [ ] Apply the migration to production (`npx supabase db push --linked`). This makes existing beta profiles publicly readable; notify beta testers first.
 - [ ] Deploy the Worker (`npm run worker:deploy --prefix services/mail-sync`); previous production version `05ff616e-a628-4670-9ceb-980a7626b5d6` is the rollback target.
 - [ ] Set `EXPO_PUBLIC_OPEN_MEDIA_PUBLIC_API_URL=https://convo-mail-sync.convo-mail-sync.workers.dev` in the EAS production environment, then probe `/v1/posts`, `/v1/openapi.json`, and `/health`.
+- [ ] Push the sign-in email templates (`supabase/templates/magic_link.html`, `confirmation.html`) to production with `npx supabase config push`, or paste them into Auth → Email Templates. They add the one-time code that lets people sign in when the link opens in a different browser or app than the one that requested it.
 - [ ] Decide who handles community-hidden posts until an operator console exists.
 
 ## Explicitly out of scope for this release

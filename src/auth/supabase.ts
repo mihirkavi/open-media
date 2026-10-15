@@ -55,20 +55,42 @@ export async function signOut(): Promise<void> {
   if (error) throw error;
 }
 
+/** Signs in with the one-time code from the sign-in email. Works on any browser or device. */
+export async function verifySignInCode(email: string, code: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  if (!supabase) throw new Error('Supabase Auth is not configured for this build.');
+  const token = code.replace(/\s+/g, '');
+  if (!/^\d{6,10}$/.test(token)) throw new Error('Enter the code from your sign-in email.');
+  const { error } = await supabase.auth.verifyOtp({ email: email.trim(), token, type: 'email' });
+  if (error) throw new Error('That code is invalid or has expired. Request a new one and try again.');
+}
+
 export async function completeSignInURL(url: string): Promise<boolean> {
   const supabase = getSupabaseClient();
   if (!supabase) return false;
   const callback = parseAuthCallbackURL(url);
   if (!callback) return false;
-  if (callback.error) throw new Error(callback.error);
-  if (!callback.code) return false;
-  const { error } = await supabase.auth.exchangeCodeForSession(callback.code);
-  if (error) throw error;
-  if (Platform.OS === 'web' && typeof window !== 'undefined') {
-    const cleanPath = window.location.pathname.replace(/\/auth\/?$/, '/') || '/';
-    window.history.replaceState({}, document.title, cleanPath);
+  try {
+    if (callback.error) throw new Error(friendlyLinkError(callback.error));
+    if (!callback.code) return false;
+    const { error } = await supabase.auth.exchangeCodeForSession(callback.code);
+    if (error) throw new Error(friendlyLinkError(`${error.name} ${error.message}`));
+    return true;
+  } finally {
+    // Never leave a used or failed one-time code in the address bar.
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const cleanPath = window.location.pathname.replace(/\/auth\/?$/, '/') || '/';
+      window.history.replaceState({}, document.title, cleanPath);
+    }
   }
-  return true;
+}
+
+function friendlyLinkError(detail: string): string {
+  if (/code.?verifier/i.test(detail)) {
+    return 'This sign-in link was opened in a different browser or app than the one that requested it. Enter the code from the email instead.';
+  }
+  if (/expired|invalid/i.test(detail)) return 'This sign-in link is invalid or has expired. Enter the code from the email, or request a new link.';
+  return detail;
 }
 
 class ChunkedSecureStorage implements SupportedStorage {

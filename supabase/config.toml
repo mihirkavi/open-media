@@ -243,6 +243,16 @@ otp_expiry = 3600
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
+# Sign-in emails carry both a one-time code (works on any device) and a link
+# (works only in the browser or app that requested it, because of PKCE).
+[auth.email.template.magic_link]
+subject = "Your Open Media sign-in code"
+content_path = "./supabase/templates/magic_link.html"
+
+[auth.email.template.confirmation]
+subject = "Your Open Media sign-in code"
+content_path = "./supabase/templates/confirmation.html"
+
 # Uncomment to customize email template
 # [auth.email.template.invite]
 # subject = "You have been invited"
