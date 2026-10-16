@@ -14,7 +14,8 @@
     "worker:types": "wrangler types",
     "worker:check": "wrangler deploy --dry-run",
     "worker:deploy": "wrangler deploy",
-    "worker:dev": "wrangler dev --port 8787 --ip 127.0.0.1"
+    "worker:dev": "wrangler dev --port 8787 --ip 127.0.0.1",
+    "check-mailbox": "node --import tsx scripts/check-mailbox.ts"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "0.10.3",

@@ -46,7 +46,8 @@
     "test": "node --import tsx --test src/**/*.test.ts",
     "test:db": "supabase test db",
     "export:web": "expo export --platform web --output-dir .expo-dist",
-    "check": "npm run typecheck && npm test && npm run typecheck --prefix services/mail-sync && npm test --prefix services/mail-sync && npm run export:web"
+    "check": "npm run typecheck && npm test && npm run typecheck --prefix services/mail-sync && npm test --prefix services/mail-sync && npm run export:web",
+    "mail:check": "npm run check-mailbox --prefix services/mail-sync"
   },
   "private": true,
   "overrides": {
