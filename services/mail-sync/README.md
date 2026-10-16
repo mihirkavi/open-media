@@ -45,6 +45,10 @@ Requests require a Supabase bearer JWT. Mailbox hostnames are resolved and rejec
 
 Per user and Cloudflare location, the Worker allows five connection tests, twelve syncs, and ten sends per minute. Database ownership checks remain the authorization boundary; rate limits are an additional abuse-control layer.
 
+## Verified senders (BIMI)
+
+During sync, `src/senderVerification.ts` marks a message as from a verified sender when the receiving server's topmost `Authentication-Results` header records `dmarc=pass` for the From domain, the domain's DMARC policy is enforced (`quarantine`/`reject`), and its BIMI record has an HTTPS SVG logo plus a mark certificate whose leaf is a BIMI certificate (EKU `1.3.6.1.5.5.7.3.31`) for the domain, currently valid, and signed by the next certificate in the file. DNS lookups use DNS-over-HTTPS and are cached per domain for six hours. The app shows the logo, a blue check, and the domain.
+
 ## Known limits
 
 - IMAP reads `INBOX` and the Sent folder only; other folders, cursors, flag updates, and IDLE are next-stage work.
@@ -52,4 +56,6 @@ Per user and Cloudflare location, the Worker allows five connection tests, twelv
 - Plain-text bodies are capped at 50,000 characters; HTML and attachments are not stored or sent.
 - SMTP uses the same username and password as the incoming server.
 - Microsoft (Outlook.com, Microsoft 365) usually requires OAuth for IMAP/SMTP, which is not implemented.
+- Verified-sender checks do not yet validate the mark certificate chain up to a pinned Mark Verifying Authority root; the domain is always shown next to the name so lookalike domains remain visible.
+- Brand logos are SVG and display on web; native apps show initials until an SVG renderer is added.
 - In the Cloudflare Workers runtime, IMAP to Gmail stalls (verified locally with `wrangler dev`, 2026-10-16); iCloud works. Until this is fixed (a Workers-compatible IMAP client, or hosting mail sync on Node.js), production Gmail IMAP should be treated as not working.

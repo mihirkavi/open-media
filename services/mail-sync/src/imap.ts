@@ -2,6 +2,7 @@ import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 
 import { UserFacingError } from './errors.js';
+import { verifySender } from './senderVerification.js';
 import { MailAccountInput, SyncedMessage } from './types.js';
 
 function clientFor(input: MailAccountInput): ImapFlow {
@@ -61,6 +62,8 @@ async function fetchRecent(client: ImapFlow, path: string, mailbox: string, limi
   const messages: SyncedMessage[] = [];
   for await (const item of client.fetch(`${first}:*`, { uid: true, envelope: true, source: true, internalDate: true })) {
     const parsed = item.source ? await simpleParser(item.source) : undefined;
+    const fromAddress = item.envelope?.from?.[0]?.address ?? '';
+    const brand = parsed && mailbox !== 'Sent' ? await verifySender(fromAddress, parsed.headerLines) : { verified: false };
     messages.push({
       sourceMessageId: item.envelope?.messageId ?? `imap-${mailbox}-${item.uid}`,
       mailbox, subject: item.envelope?.subject ?? '',
@@ -68,6 +71,8 @@ async function fetchRecent(client: ImapFlow, path: string, mailbox: string, limi
       to: item.envelope?.to?.map((address) => address.address ?? address.name ?? '').filter(Boolean) ?? [],
       sentAt: new Date(item.envelope?.date ?? item.internalDate ?? Date.now()).toISOString(),
       text: parsed?.text?.slice(0, 50_000) ?? '',
+      senderVerified: brand.verified,
+      senderLogoUrl: brand.logoUrl,
     });
   }
   return messages;

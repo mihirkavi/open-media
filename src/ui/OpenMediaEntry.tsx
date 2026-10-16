@@ -34,12 +34,13 @@ export function OpenMediaEntry() {
     let request = 0;
     const acceptSession = async (nextSession?: Session | null) => {
       if (!active) return;
+      // Same person (already loaded or loading): keep the app as it is.
       if (nextSession && nextSession.user.id === loadedUserId.current) {
         setSession(nextSession);
         return;
       }
       const currentRequest = ++request;
-      loadedUserId.current = undefined;
+      loadedUserId.current = nextSession?.user.id;
       setLoading(true);
       setLoadFailed(false);
       setError('');
@@ -48,13 +49,11 @@ export function OpenMediaEntry() {
       try {
         if (nextSession) {
           const nextProfile = await getCurrentProfile(nextSession);
-          if (active && currentRequest === request) {
-            setProfile(nextProfile);
-            if (nextProfile) loadedUserId.current = nextSession.user.id;
-          }
+          if (active && currentRequest === request) setProfile(nextProfile);
         }
       } catch (reason) {
         if (active && currentRequest === request) {
+          loadedUserId.current = undefined;
           setError(messageFor(reason));
           setLoadFailed(true);
         }

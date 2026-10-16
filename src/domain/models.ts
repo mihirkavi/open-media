@@ -32,6 +32,10 @@ export interface Person {
   favorite?: boolean;
   /** True only when the person and phone number are saved in the device contacts. */
   isPhoneContact?: boolean;
+  /** Set when mail from this sender passed DMARC and carries a BIMI mark certificate. */
+  verifiedDomain?: string;
+  /** Brand logo (BIMI) shown instead of initials. */
+  avatarUrl?: string;
 }
 
 export interface EmailContext {

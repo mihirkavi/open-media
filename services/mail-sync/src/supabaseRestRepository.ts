@@ -84,7 +84,7 @@ export class SupabaseRestRepository {
   async saveMessages(_userId: string, accountId: string, messages: SyncedMessage[]): Promise<void> {
     // The database accepts at most 100 messages per call.
     for (let start = 0; start < messages.length; start += 100) {
-      await this.rpc('convo_save_mail_messages', { p_account_id: accountId, p_messages: messages.slice(start, start + 100) });
+      await this.rpc('open_media_save_mail_messages', { p_account_id: accountId, p_messages: messages.slice(start, start + 100) });
     }
   }
 

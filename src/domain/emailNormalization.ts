@@ -1,4 +1,5 @@
 import { StoredMailMessage } from '../connectors/mailApiConnector';
+import { emailPreview } from './emailBody';
 import { Conversation, MessageSource, Person } from './models';
 
 /**
@@ -25,18 +26,20 @@ export function normalizeStoredEmail(messages: StoredMailMessage[]): Conversatio
     const ordered = unique.sort((a, b) => Date.parse(a.sentAt) - Date.parse(b.sentAt));
     const inbound = ordered.find((item) => extractEmail(item.from) !== accountEmail.toLowerCase());
     const name = (inbound && extractName(inbound.from)) || address;
+    const verified = [...ordered].reverse().find((item) => item.senderVerified && extractEmail(item.from) === address);
     const personId = `mail-person-${stableID(address)}`;
     const identityId = `mail-identity-${stableID(address)}`;
     const conversationId = `mail-conversation-${stableID(`${accountId}:${address}`)}`;
     const person: Person = {
       id: personId, name, initials: initialsFor(name), avatarColor: colorFor(address),
+      ...(verified ? { verifiedDomain: address.split('@')[1], avatarUrl: verified.senderLogoUrl } : {}),
       identities: [{ id: identityId, personId, kind: 'email', value: address, source, label: accountEmail, verifiedByUser: false }],
     };
     const latest = ordered.at(-1);
     return {
       id: conversationId,
       participants: [person], sourceSummary: [source], lastMessageAt: latest?.sentAt ?? new Date().toISOString(),
-      preview: latest?.text || latest?.subject || '', unreadCount: 0, labels: [],
+      preview: latest ? emailPreview(latest.text, latest.subject) : '', unreadCount: 0, labels: [],
       email: { accountId, accountEmail, address, latestSubject: latest?.subject ?? '', latestMessageId: latest?.sourceMessageId },
       messages: ordered.map((message) => {
         const outbound = extractEmail(message.from) === accountEmail.toLowerCase();

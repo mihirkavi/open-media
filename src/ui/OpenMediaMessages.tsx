@@ -2,7 +2,10 @@ import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Image,
+  Linking,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,7 +15,8 @@ import {
   useWindowDimensions,
 } from "react-native";
 
-import { Conversation, PeopleFilter, Person } from "../domain/models";
+import { formatEmailBody } from "../domain/emailBody";
+import { Conversation, Message, PeopleFilter, Person } from "../domain/models";
 import { conversationTitle, filterConversations } from "../domain/selectors";
 import { ThemeColors } from "../theme";
 import { useOpenMediaTheme } from "../themeContext";
@@ -205,12 +209,14 @@ export function OpenMediaMessages({
               >
                 <Avatar
                   initials={conversation.participants[0]?.initials ?? "OM"}
+                  imageUrl={conversation.participants[0]?.avatarUrl}
                 />
                 <View style={styles.rowCopy}>
                   <View style={styles.rowTitleLine}>
                     <Text numberOfLines={1} style={styles.rowTitle}>
                       {conversationTitle(conversation)}
                     </Text>
+                    {conversation.participants[0]?.verifiedDomain ? <VerifiedBadge domain={conversation.participants[0].verifiedDomain} /> : null}
                     {conversation.unreadCount ? (
                       <View style={styles.unread} />
                     ) : null}
@@ -349,16 +355,19 @@ function MessageThread({
           </Pressable>
         ) : null}
         <View style={styles.threadHeading}>
-          <Text style={styles.threadTitle}>
-            {conversationTitle(conversation)}
-          </Text>
+          <View style={styles.rowTitleLine}>
+            <Text style={styles.threadTitle}>
+              {conversationTitle(conversation)}
+            </Text>
+            {otherPerson?.verifiedDomain ? <VerifiedBadge domain={otherPerson.verifiedDomain} /> : null}
+          </View>
           <Text style={styles.threadMeta}>
             {blocked
               ? "Blocked · messaging paused"
               : throughMatrix
               ? "Matrix · local development sandbox"
               : conversation.email
-                ? `Email · ${conversation.email.address} · via ${conversation.email.accountEmail}${conversation.email.canSend ? "" : " (receive only)"}`
+                ? `${otherPerson?.verifiedDomain ? `Verified sender · ${otherPerson.verifiedDomain}` : `Email · ${conversation.email.address}`} · via ${conversation.email.accountEmail}${conversation.email.canSend ? "" : " (receive only)"}`
                 : canSend
                   ? "Open Media · private to conversation members"
                   : "Imported conversation · reply unavailable"}
@@ -401,14 +410,18 @@ function MessageThread({
                   message.direction === "outbound" && styles.outboundBubble,
                 ]}
               >
-                <Text
-                  style={[
-                    styles.message,
-                    message.direction === "outbound" && styles.outboundMessage,
-                  ]}
-                >
-                  {message.body}
-                </Text>
+                {message.channel === "email" ? (
+                  <EmailBody message={message} />
+                ) : (
+                  <Text
+                    style={[
+                      styles.message,
+                      message.direction === "outbound" && styles.outboundMessage,
+                    ]}
+                  >
+                    {message.body}
+                  </Text>
+                )}
                 <View style={styles.messageMeta}>
                   <SourceMarker
                     source={message.source}
@@ -715,12 +728,76 @@ function NewMessagePanel({
   );
 }
 
-function Avatar({ initials }: { initials: string }) {
+function Avatar({ initials, imageUrl }: { initials: string; imageUrl?: string }) {
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const [failed, setFailed] = useState(false);
+  // BIMI logos are SVG, which the web renders natively; native apps fall back to initials.
+  if (imageUrl && !failed && Platform.OS === "web") {
+    return (
+      <Image
+        accessibilityIgnoresInvertColors
+        source={{ uri: imageUrl }}
+        onError={() => setFailed(true)}
+        style={[styles.avatar, styles.avatarImage]}
+      />
+    );
+  }
   return (
     <View style={styles.avatar}>
       <Text style={styles.avatarText}>{initials}</Text>
+    </View>
+  );
+}
+
+/** Blue check for senders that passed DMARC and publish a BIMI mark certificate. */
+function VerifiedBadge({ domain }: { domain: string }) {
+  return (
+    <Ionicons
+      accessibilityLabel={`Verified sender: ${domain}`}
+      name="checkmark-circle"
+      size={16}
+      color="#1D9BF0"
+    />
+  );
+}
+
+/** Email shown like a message: links as words, quoted history hidden, long mail collapsed. */
+function EmailBody({ message }: { message: Message }) {
+  const { colors } = useOpenMediaTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const formatted = useMemo(() => formatEmailBody(message.body), [message.body]);
+  const long = formatted.plain.length > 700 || formatted.plain.split("\n").length > 14;
+  const [expanded, setExpanded] = useState(false);
+  const outbound = message.direction === "outbound";
+  return (
+    <View>
+      <Text
+        numberOfLines={long && !expanded ? 14 : undefined}
+        style={[styles.message, outbound && styles.outboundMessage]}
+      >
+        {formatted.segments.map((segment, index) =>
+          segment.url ? (
+            <Text
+              key={index}
+              accessibilityRole="link"
+              onPress={() => Linking.openURL(segment.url!)}
+              style={[styles.emailLink, outbound && styles.outboundMessage]}
+            >
+              {segment.text}
+            </Text>
+          ) : (
+            <Text key={index}>{segment.text}</Text>
+          ),
+        )}
+      </Text>
+      {long ? (
+        <Pressable accessibilityRole="button" onPress={() => setExpanded((value) => !value)}>
+          <Text style={[styles.showMore, outbound && styles.outboundMessage]}>
+            {expanded ? "Show less" : "Show more"}
+          </Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -863,6 +940,9 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.text,
     },
     avatarText: { color: colors.surface, fontSize: 12, fontWeight: "700" },
+    avatarImage: { backgroundColor: colors.chrome },
+    emailLink: { color: colors.text, textDecorationLine: "underline", fontWeight: "600" },
+    showMore: { marginTop: 8, color: colors.textSecondary, fontSize: 13, fontWeight: "700" },
     rowCopy: { flex: 1, minWidth: 0 },
     rowTitleLine: { flexDirection: "row", alignItems: "center", gap: 7 },
     rowTitle: { color: colors.text, fontSize: 15, fontWeight: "600" },

@@ -48,6 +48,9 @@ export interface SyncedMessage {
   to: string[];
   sentAt: string;
   text: string;
+  /** Verified sender (DMARC pass + BIMI mark certificate); see senderVerification.ts. */
+  senderVerified?: boolean;
+  senderLogoUrl?: string;
 }
 
 export interface OutgoingMail {

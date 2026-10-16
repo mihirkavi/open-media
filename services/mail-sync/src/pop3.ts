@@ -4,6 +4,7 @@ import tls from 'node:tls';
 import { simpleParser } from 'mailparser';
 import { UserFacingError } from './errors.js';
 import { describeMailError } from './imap.js';
+import { verifySender } from './senderVerification.js';
 import { MailAccountInput, SyncedMessage } from './types.js';
 
 interface PopConnection {
@@ -36,11 +37,13 @@ export async function syncPop3(input: MailAccountInput, limit = 50): Promise<Syn
     for (let index = Math.max(1, count - limit + 1); index <= count; index += 1) {
       const source = await connection.command(`RETR ${index}`, true);
       const parsed = await simpleParser(source);
+      const brand = await verifySender(parsed.from?.value[0]?.address ?? '', parsed.headerLines);
       messages.push({
         sourceMessageId: parsed.messageId ?? `pop-${index}`,
         mailbox: 'POP Inbox', subject: parsed.subject ?? '',
         from: parsed.from?.text ?? '', to: parsed.to ? (Array.isArray(parsed.to) ? parsed.to.map((address) => address.text) : [parsed.to.text]) : [],
         sentAt: messageDate(parsed).toISOString(), text: parsed.text?.slice(0, 50_000) ?? '',
+        senderVerified: brand.verified, senderLogoUrl: brand.logoUrl,
       });
     }
     await connection.command('QUIT');

@@ -37,6 +37,9 @@ export interface SyncedMailMessage {
 export interface StoredMailMessage extends SyncedMailMessage {
   accountId: string;
   accountEmail: string;
+  /** DMARC-authenticated sender with a BIMI mark certificate (checked by the mail service). */
+  senderVerified?: boolean;
+  senderLogoUrl?: string;
 }
 
 export interface OutgoingMail {
@@ -85,6 +88,8 @@ export async function listStoredMail(limit = 500): Promise<StoredMailMessage[]> 
     to: Array.isArray(row.recipients) ? row.recipients.map(String) : [],
     sentAt: String(row.sent_at),
     text: String(row.body_text ?? ''),
+    senderVerified: row.sender_verified === true,
+    senderLogoUrl: typeof row.sender_logo_url === 'string' && row.sender_logo_url.startsWith('https://') ? row.sender_logo_url : undefined,
   }));
 }
 

@@ -172,7 +172,10 @@ export function OpenMediaApp({
   useEffect(() => {
     if (messageMode !== "open_media") return;
     let active = true;
+    let syncing = false;
     const syncAll = async () => {
+      if (syncing) return;
+      syncing = true;
       try {
         for (const account of await listMailAccounts()) {
           if (!active) return;
@@ -181,6 +184,7 @@ export function OpenMediaApp({
       } catch {
         // The mail service may be unreachable; stored email is still shown.
       }
+      syncing = false;
       if (active) await refreshMail();
     };
     refreshMail().then(syncAll);
