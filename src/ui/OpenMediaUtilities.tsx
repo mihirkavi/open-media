@@ -4,7 +4,6 @@ import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, Share, Style
 
 import { connectorCatalog } from '../connectors/catalog';
 import { deleteCurrentAccount, exportCurrentAccountData, OpenMediaProfile as OpenMediaProfileData } from '../data/openMediaService';
-import { ConnectedMailAccount, SyncedMailMessage } from '../connectors/mailApiConnector';
 import { Conversation } from '../domain/models';
 import { FeedMode, SocialPost } from '../domain/posts';
 import { initialsFor } from '../domain/publicPosts';
@@ -23,7 +22,7 @@ export function OpenMediaSearch({ posts, conversations, onNavigate }: { posts: S
   return <ScrollView style={styles.screen} contentContainerStyle={styles.content}><Text style={styles.title}>Search</Text><Text style={styles.subtitle}>People, posts, messages, and settings in one place.</Text><SearchField value={query} onChangeText={setQuery} autoFocus placeholder="Try “dark mode” or “Maya”" />{query && !results.length ? <Text style={styles.empty}>No results. Provider search adapters join this index only when authorized.</Text> : null}{results.map((result) => <Pressable key={`${result.kind}-${result.id}`} onPress={() => open(result)} style={styles.result}><View style={styles.resultIcon}><Ionicons name={result.kind === 'setting' ? 'settings-outline' : result.kind === 'conversation' ? 'chatbubble-outline' : 'newspaper-outline'} size={18} color={colors.text} /></View><View style={styles.resultCopy}><Text style={styles.kind}>{result.kind.toUpperCase()}</Text><Text style={styles.resultTitle}>{result.title}</Text><Text numberOfLines={2} style={styles.resultSubtitle}>{result.subtitle}</Text></View><Ionicons name="chevron-forward" size={18} color={colors.textTertiary} /></Pressable>)}</ScrollView>;
 }
 
-export function OpenMediaSettings({ feedMode, onFeedModeChange, onMailSynced }: { feedMode: FeedMode; onFeedModeChange: (mode: FeedMode) => void; onMailSynced: (account: ConnectedMailAccount, messages: SyncedMailMessage[]) => void }) {
+export function OpenMediaSettings({ feedMode, onFeedModeChange, onMailSynced }: { feedMode: FeedMode; onFeedModeChange: (mode: FeedMode) => void; onMailSynced: () => void }) {
   const { colors, appearance, setAppearance } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]); const [query, setQuery] = useState(''); const [connectionsOpen, setConnectionsOpen] = useState(false);
   if (connectionsOpen) return <ConnectionSettings isCompact onClose={() => setConnectionsOpen(false)} onMailSynced={onMailSynced} />;
   const visible = query ? searchSettings(query) : settingIndex;

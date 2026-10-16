@@ -13,8 +13,10 @@ import {
 } from "react-native";
 
 import {
-  ConnectedMailAccount,
-  SyncedMailMessage,
+  listMailAccounts,
+  listStoredMail,
+  sendMail,
+  syncMailAccount,
 } from "../connectors/mailApiConnector";
 import {
   loadMatrixConversations,
@@ -38,7 +40,7 @@ import {
   reportPost,
 } from "../data/postService";
 import { createClientId } from "../data/openMediaService";
-import { normalizeSyncedEmail } from "../domain/emailNormalization";
+import { normalizeStoredEmail, replySubject } from "../domain/emailNormalization";
 import { Conversation } from "../domain/models";
 import { FeedMode, SocialPost } from "../domain/posts";
 import { initialsFor, maxPostLength } from "../domain/publicPosts";
@@ -110,7 +112,7 @@ export function OpenMediaApp({
     },
     [feed.removePost],
   );
-  const [syncedConversations, setSyncedConversations] = useState<
+  const [mailConversations, setMailConversations] = useState<
     Conversation[]
   >([]);
   const [nativeConversations, setNativeConversations] = useState<
@@ -120,10 +122,57 @@ export function OpenMediaApp({
   const [messagesError, setMessagesError] = useState("");
   const [blockedUserIds, setBlockedUserIds] = useState<string[]>([]);
   const refreshSequence = useRef(0);
+  // One people-first inbox: Open Media chats and email, newest first.
   const conversations = useMemo(
-    () => [...nativeConversations, ...syncedConversations],
-    [nativeConversations, syncedConversations],
+    () =>
+      [...nativeConversations, ...mailConversations].sort(
+        (a, b) => Date.parse(b.lastMessageAt) - Date.parse(a.lastMessageAt),
+      ),
+    [nativeConversations, mailConversations],
   );
+  const refreshMail = useCallback(async () => {
+    if (messageMode !== "open_media") return;
+    try {
+      const [stored, accounts] = await Promise.all([
+        listStoredMail(),
+        listMailAccounts().catch(() => []),
+      ]);
+      const sending = new Set(
+        accounts.filter((account) => account.canSend).map((account) => account.id),
+      );
+      setMailConversations(
+        normalizeStoredEmail(stored).map((conversation) =>
+          conversation.email
+            ? { ...conversation, email: { ...conversation.email, canSend: sending.has(conversation.email.accountId) } }
+            : conversation,
+        ),
+      );
+    } catch {
+      // Email is additive; Open Media chats still load if mail storage is unavailable.
+    }
+  }, [messageMode]);
+  // Show stored email right away, then fetch new mail from every mailbox in the background.
+  useEffect(() => {
+    if (messageMode !== "open_media") return;
+    let active = true;
+    const syncAll = async () => {
+      try {
+        for (const account of await listMailAccounts()) {
+          if (!active) return;
+          await syncMailAccount(account.id).catch(() => undefined);
+        }
+      } catch {
+        // The mail service may be unreachable; stored email is still shown.
+      }
+      if (active) await refreshMail();
+    };
+    refreshMail().then(syncAll);
+    const timer = setInterval(syncAll, 5 * 60_000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [messageMode, refreshMail]);
   const refreshMessages = useCallback(async () => {
     const sequence = ++refreshSequence.current;
     try {
@@ -162,12 +211,25 @@ export function OpenMediaApp({
   }, [messageMode, refreshMessages]);
   const sendMessage = useCallback(
     async (conversationId: string, body: string) => {
+      const email = mailConversations.find(
+        (conversation) => conversation.id === conversationId,
+      )?.email;
+      if (email) {
+        await sendMail(email.accountId, {
+          to: [email.address],
+          subject: replySubject(email.latestSubject),
+          text: body,
+          inReplyTo: email.latestMessageId,
+        });
+        await refreshMail();
+        return;
+      }
       if (messageMode === "matrix")
         await sendMatrixMessage(conversationId, body);
       else await sendOpenMediaMessage(conversationId, currentUserId, body);
       await refreshMessages();
     },
-    [currentUserId, messageMode, refreshMessages],
+    [currentUserId, mailConversations, messageMode, refreshMail, refreshMessages],
   );
   const searchProfiles = useCallback(
     (query: string) =>
@@ -195,17 +257,8 @@ export function OpenMediaApp({
     },
     [refreshMessages, feed.refresh],
   );
-  const onMailSynced = (
-    account: ConnectedMailAccount,
-    messages: SyncedMailMessage[],
-  ) => {
-    const imported = normalizeSyncedEmail(account, messages);
-    setSyncedConversations((current) => [
-      ...imported,
-      ...current.filter(
-        (conversation) => !imported.some((item) => item.id === conversation.id),
-      ),
-    ]);
+  const onMailSynced = () => {
+    refreshMail();
   };
 
   const navigate = (next: Destination) => {

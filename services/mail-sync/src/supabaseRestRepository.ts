@@ -11,6 +11,17 @@ interface AccountRow {
   username: string;
   encrypted_secret: string;
   status: 'connected' | 'error';
+  smtp_host: string | null;
+  smtp_port: number | null;
+  smtp_security: 'tls' | 'starttls' | null;
+}
+
+interface AccountListRow {
+  id: string;
+  email: string;
+  protocol: 'imap' | 'pop3';
+  status: 'connected' | 'error';
+  can_send: boolean;
 }
 
 export class SupabaseRestRepository {
@@ -25,7 +36,7 @@ export class SupabaseRestRepository {
     input: Omit<MailAccountInput, 'password'>,
     encryptedSecret: string,
   ): Promise<StoredMailAccount> {
-    const id = await this.rpc<string>('convo_save_mail_account', {
+    const id = await this.rpc<string>('open_media_save_mail_account', {
       p_email: input.email,
       p_protocol: input.protocol,
       p_host: input.host,
@@ -33,12 +44,15 @@ export class SupabaseRestRepository {
       p_secure: input.secure,
       p_username: input.username,
       p_encrypted_secret: encryptedSecret,
+      p_smtp_host: input.smtp?.host ?? null,
+      p_smtp_port: input.smtp?.port ?? null,
+      p_smtp_security: input.smtp?.security ?? null,
     });
     return { ...input, id, userId, encryptedSecret, status: 'connected' };
   }
 
   async findAccount(userId: string, accountId: string): Promise<StoredMailAccount | undefined> {
-    const rows = await this.rpc<AccountRow[]>('convo_get_mail_account', { p_account_id: accountId });
+    const rows = await this.rpc<AccountRow[]>('open_media_get_mail_account', { p_account_id: accountId });
     const row = rows[0];
     if (!row || row.user_id !== userId) return undefined;
     return {
@@ -52,11 +66,15 @@ export class SupabaseRestRepository {
       username: row.username,
       encryptedSecret: row.encrypted_secret,
       status: row.status,
+      ...(row.smtp_host && row.smtp_port && row.smtp_security
+        ? { smtp: { host: row.smtp_host, port: row.smtp_port, security: row.smtp_security } }
+        : {}),
     };
   }
 
   async listAccounts(_userId: string): Promise<PublicMailAccount[]> {
-    return await this.rpc<PublicMailAccount[]>('open_media_list_mail_accounts', {});
+    const rows = await this.rpc<AccountListRow[]>('open_media_list_mail_accounts', {});
+    return rows.map((row) => ({ id: row.id, email: row.email, protocol: row.protocol, status: row.status, canSend: row.can_send }));
   }
 
   async deleteAccount(_userId: string, accountId: string): Promise<boolean> {
@@ -64,7 +82,10 @@ export class SupabaseRestRepository {
   }
 
   async saveMessages(_userId: string, accountId: string, messages: SyncedMessage[]): Promise<void> {
-    await this.rpc('convo_save_mail_messages', { p_account_id: accountId, p_messages: messages });
+    // The database accepts at most 100 messages per call.
+    for (let start = 0; start < messages.length; start += 100) {
+      await this.rpc('convo_save_mail_messages', { p_account_id: accountId, p_messages: messages.slice(start, start + 100) });
+    }
   }
 
   private async rpc<T = unknown>(name: string, body: Record<string, unknown>): Promise<T> {

@@ -307,7 +307,8 @@ function MessageThread({
   const canSend =
     !blocked &&
     (conversation.sourceSummary.includes("open_media") ||
-      conversation.sourceSummary.includes("matrix"));
+      conversation.sourceSummary.includes("matrix") ||
+      Boolean(conversation.email?.canSend));
   const throughMatrix = conversation.sourceSummary.includes("matrix");
   const otherPerson = conversation.participants[0];
   const reportableMessage = [...conversation.messages]
@@ -354,9 +355,11 @@ function MessageThread({
               ? "Blocked · messaging paused"
               : throughMatrix
               ? "Matrix · local development sandbox"
-              : canSend
-                ? "Open Media · private to conversation members"
-                : "Imported conversation · reply unavailable"}
+              : conversation.email
+                ? `Email · ${conversation.email.address} · via ${conversation.email.accountEmail}${conversation.email.canSend ? "" : " (receive only)"}`
+                : canSend
+                  ? "Open Media · private to conversation members"
+                  : "Imported conversation · reply unavailable"}
           </Text>
         </View>
         {otherPerson &&
@@ -451,7 +454,13 @@ function MessageThread({
               multiline
               value={body}
               onChangeText={setBody}
-              placeholder={throughMatrix ? "Message through Matrix" : "Message"}
+              placeholder={
+                conversation.email
+                  ? `Reply by email from ${conversation.email.accountEmail}`
+                  : throughMatrix
+                    ? "Message through Matrix"
+                    : "Message"
+              }
               placeholderTextColor={colors.textTertiary}
               style={styles.composerInput}
             />
@@ -483,7 +492,9 @@ function MessageThread({
           <Text style={styles.disabledText}>
             {blocked
               ? "Unblock this person to send or receive new messages."
-              : "This provider does not offer a working send capability yet."}
+              : conversation.email
+                ? "Add outgoing mail (SMTP) to this mailbox in Settings → Connections to reply from here."
+                : "This provider does not offer a working send capability yet."}
           </Text>
         </View>
       )}

@@ -8,16 +8,19 @@ import { SUPPORTED_SCOPES } from './events/tools.js';
 
 import { decryptSecret, encryptSecret } from './crypto.js';
 import { syncImap, testImap } from './imap.js';
-import { resolvePublicMailHost } from './networkSafety.js';
+import { resolveMailHost } from './networkSafety.js';
 import { handlePublicApiRequest, isPublicApiPath } from './publicApi.js';
 import { syncPop3, testPop3 } from './pop3.js';
+import { sendSmtp, SmtpConnection, testSmtp } from './smtp.js';
 import { SupabaseRestRepository } from './supabaseRestRepository.js';
-import { MailAccountInput } from './types.js';
+import { MailAccountInput, OutgoingMail, SmtpSettings } from './types.js';
 
 interface WorkerSecrets {
   SUPABASE_URL: string;
   SUPABASE_PUBLISHABLE_KEY: string;
   MAIL_CREDENTIALS_KEY: string;
+  /** Local development only: allow mail servers on this machine (e.g. Mailpit). Never set in production. */
+  MAIL_ALLOW_LOCAL_SERVERS?: string;
 }
 
 type WorkerEnv = Env & WorkerSecrets & EventsEnv;
@@ -31,6 +34,18 @@ const schema = z.object({
   secure: z.literal(true),
   username: noNewlines,
   password: noNewlines,
+  smtp: z.object({
+    host: z.string().min(1).max(253).regex(/^[a-z0-9.-]+$/i),
+    port: z.number().int().min(1).max(65535),
+    security: z.enum(['tls', 'starttls']),
+  }).optional(),
+});
+const address = z.email().max(320);
+const sendSchema = z.object({
+  to: z.array(address).min(1).max(10),
+  subject: z.string().max(998).refine((value) => !/[\r\n]/.test(value), 'Subjects cannot contain line breaks.'),
+  text: z.string().min(1).max(50_000),
+  inReplyTo: z.string().max(998).refine((value) => !/[\r\n]/.test(value)).optional(),
 });
 
 /** Mail sync and the public read API, unchanged; served behind the OAuth wrapper's default route. */
@@ -57,9 +72,10 @@ const legacyHandler = {
       if (request.method === 'POST' && url.pathname === '/v1/mail-accounts') {
         if (!await allowed(env.MAIL_CONNECT_RATE_LIMITER, session.userId)) return rateLimited(headers);
         const input = schema.parse(await readJSON(request)) as MailAccountInput;
-        await testConnection(await connectionInput(input));
+        await testConnection(await connectionInput(input, env));
+        if (input.smtp) await testSmtp(await smtpConnection(input.smtp, env), input);
         const account = await repository.saveAccount(session.userId, input, encryptSecret(input.password, env.MAIL_CREDENTIALS_KEY));
-        return json(201, { id: account.id, email: account.email, protocol: account.protocol, status: account.status }, headers);
+        return json(201, { id: account.id, email: account.email, protocol: account.protocol, status: account.status, canSend: Boolean(input.smtp) }, headers);
       }
 
       const syncMatch = request.method === 'POST' && url.pathname.match(/^\/v1\/mail-accounts\/([^/]+)\/sync$/);
@@ -67,10 +83,22 @@ const legacyHandler = {
         if (!await allowed(env.MAIL_SYNC_RATE_LIMITER, session.userId)) return rateLimited(headers);
         const account = await repository.findAccount(session.userId, syncMatch[1]);
         if (!account) return json(404, { error: 'Mailbox not found.' }, headers);
-        const input = await connectionInput({ ...account, password: decryptSecret(account.encryptedSecret, env.MAIL_CREDENTIALS_KEY) });
+        const input = await connectionInput({ ...account, password: decryptSecret(account.encryptedSecret, env.MAIL_CREDENTIALS_KEY) }, env);
         const messages = account.protocol === 'imap' ? await syncImap(input) : await syncPop3(input);
         await repository.saveMessages(session.userId, account.id, messages);
         return json(200, { messages, count: messages.length, mode: account.protocol === 'imap' ? 'sync' : 'import' }, headers);
+      }
+
+      const sendMatch = request.method === 'POST' && url.pathname.match(/^\/v1\/mail-accounts\/([^/]+)\/send$/);
+      if (sendMatch) {
+        if (!await allowed(env.MAIL_SEND_RATE_LIMITER, session.userId)) return rateLimited(headers);
+        const mail = sendSchema.parse(await readJSON(request)) as OutgoingMail;
+        const account = await repository.findAccount(session.userId, sendMatch[1]);
+        if (!account) return json(404, { error: 'Mailbox not found.' }, headers);
+        if (!account.smtp) return json(409, { error: 'Add outgoing mail (SMTP) settings to this mailbox before sending.' }, headers);
+        const sent = await sendSmtp(await smtpConnection(account.smtp, env), { ...account, password: decryptSecret(account.encryptedSecret, env.MAIL_CREDENTIALS_KEY) }, mail);
+        await repository.saveMessages(session.userId, account.id, [sent]);
+        return json(201, { message: sent }, headers);
       }
 
       const deleteMatch = request.method === 'DELETE' && url.pathname.match(/^\/v1\/mail-accounts\/([^/]+)$/);
@@ -157,8 +185,14 @@ async function testConnection(input: MailAccountInput) {
   return input.protocol === 'imap' ? testImap(input) : testPop3(input);
 }
 
-async function connectionInput(input: MailAccountInput): Promise<MailAccountInput> {
-  return { ...input, host: await resolvePublicMailHost(input.host), tlsServername: input.host };
+async function connectionInput(input: MailAccountInput, env: WorkerEnv): Promise<MailAccountInput> {
+  const { address } = await resolveMailHost(input.host, env.MAIL_ALLOW_LOCAL_SERVERS === 'true');
+  return { ...input, host: address, tlsServername: input.host };
+}
+
+async function smtpConnection(settings: SmtpSettings, env: WorkerEnv): Promise<SmtpConnection> {
+  const { address, local } = await resolveMailHost(settings.host, env.MAIL_ALLOW_LOCAL_SERVERS === 'true');
+  return { ...settings, address, allowPlaintext: local };
 }
 
 async function readJSON(request: Request): Promise<unknown> {

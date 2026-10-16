@@ -8,3 +8,10 @@ test('rejects private and link-local mail targets', () => {
   assert.equal(isPublicAddress('17.57.154.29'), true);
   assert.equal(isPublicAddress('2606:4700:4700::1111'), true);
 });
+
+test('allows local mail servers only when explicitly enabled for development', async () => {
+  const { resolveMailHost } = await import('./networkSafety.js');
+  assert.deepEqual(await resolveMailHost('localhost', true), { address: '127.0.0.1', local: true });
+  await assert.rejects(resolveMailHost('localhost', false), /IP address|private or reserved/);
+  await assert.rejects(resolveMailHost('127.0.0.1', false), /IP address/);
+});

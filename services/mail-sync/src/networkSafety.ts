@@ -1,6 +1,8 @@
 import { isIP } from 'node:net';
 import { lookup } from 'node:dns/promises';
 
+const localHostnames = new Set(['localhost', '127.0.0.1', '::1']);
+
 export async function resolvePublicMailHost(host: string): Promise<string> {
   if (isIP(host)) throw new Error('Enter a public mail-server hostname, not an IP address.');
   const answers = await lookup(host, { all: true, verbatim: true });
@@ -9,6 +11,19 @@ export async function resolvePublicMailHost(host: string): Promise<string> {
     throw new Error('Mail server resolves to a private or reserved network address.');
   }
   return publicAnswer.address;
+}
+
+/**
+ * Resolves a mail host. `allowLocal` is for local development only (a test
+ * server such as Mailpit on this machine); production never sets it.
+ */
+export async function resolveMailHost(host: string, allowLocal: boolean): Promise<{ address: string; local: boolean }> {
+  if (allowLocal && isLocalMailHost(host)) return { address: host === 'localhost' ? '127.0.0.1' : host, local: true };
+  return { address: await resolvePublicMailHost(host), local: false };
+}
+
+export function isLocalMailHost(host: string): boolean {
+  return localHostnames.has(host.toLowerCase());
 }
 
 export function isPublicAddress(address: string): boolean {

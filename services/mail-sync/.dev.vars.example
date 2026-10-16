@@ -1,0 +1,9 @@
+# Local `wrangler dev` settings. `npm run local` writes the real .dev.vars for you.
+SUPABASE_URL=http://127.0.0.1:54321
+SUPABASE_PUBLISHABLE_KEY=
+# Generate: openssl rand -base64 32
+MAIL_CREDENTIALS_KEY=
+CONVO_APP_ORIGIN=http://localhost:8081
+EVENTS_PUBLIC_ORIGIN=http://127.0.0.1:8787
+# Local development only: allow mail servers on this machine (the test inbox SMTP at localhost:54325).
+MAIL_ALLOW_LOCAL_SERVERS=true

@@ -30,6 +30,15 @@ This checklist defines “production ready” for the current onboarding private
 - [ ] Push the sign-in email templates (`supabase/templates/magic_link.html`, `confirmation.html`) to production with `npx supabase config push`, or paste them into Auth → Email Templates. They add the one-time code that lets people sign in when the link opens in a different browser or app than the one that requested it.
 - [ ] Decide who handles community-hidden posts until an operator console exists.
 
+## Email in Messages and SMTP sending (2026-10-15, not yet in production)
+
+- [x] `20261015120000_mail_smtp_and_inbox.sql`: optional per-mailbox SMTP settings (all-or-nothing constraint), `open_media_*` save/get/list functions alongside the deployed `convo_*` ones, and `open_media_list_mail_messages` for the Messages inbox. Nine new database assertions (72 total) and a clean lint.
+- [x] Worker: SMTP login test on connect, `POST /v1/mail-accounts/:id/send` with `MAIL_SEND_RATE_LIMITER` (10/min), IMAP Sent-folder sync, hostname/IP safety for SMTP, Nodemailer 10.1.1 (audit clean). Verified locally under `wrangler dev`: stored email loads into Messages, a reply sends over SMTP with `Re:` subject and `In-Reply-To`/`References`, and is stored as sent mail.
+- [x] Retired the Node-only local mail server and its insecure `x-convo-local-user` development bypass; local development runs the real Worker.
+- [ ] Apply the migration to production (with the public-posts migration), then deploy the Worker.
+- [ ] Production sign-in emails: configure custom SMTP in Supabase Auth (dashboard → Authentication → SMTP) and push the templates; the built-in email service is rate-limited and not meant for real users.
+- [ ] Probe a real mailbox end to end in production (connect with SMTP, sync, reply).
+
 ## Explicitly out of scope for this release
 
 Clips remain labeled fictional data. Media upload, provider OAuth, outbound email, production Matrix, push notifications, message E2E encryption, and operator moderation tooling are disabled or absent and must not be advertised as working. Native-chat block/report intake is live; post reports and community auto-hide are implemented; a broad public launch still requires an operator moderation console, media safety, and automated native UI coverage.

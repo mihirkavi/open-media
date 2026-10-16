@@ -60,21 +60,22 @@ reset role;
 set local role anon;
 select set_config('request.jwt.claim.sub', '', true);
 
-select is(jsonb_array_length(public.open_media_public_posts()), 2, 'signed-out visitors can read public posts');
-select is(public.open_media_public_posts()->0->>'body', 'Second post', 'public posts are newest first');
+select is(jsonb_array_length(public.open_media_public_posts(20, null, null, 'alice')), 2, 'signed-out visitors can read public posts');
+select is(public.open_media_public_posts(20, null, null, 'alice')->0->>'body', 'Second post', 'public posts are newest first');
 select is(
-  public.open_media_public_posts()->0->'author'->>'handle', 'alice',
+  public.open_media_public_posts(20, null, null, 'alice')->0->'author'->>'handle', 'alice',
   'public posts include the author handle'
 );
 select ok(
-  not (public.open_media_public_posts()->0 ? 'client_id') and not (public.open_media_public_posts()->0->'author' ? 'email'),
+  not (public.open_media_public_posts(20, null, null, 'alice')->0 ? 'client_id') and not (public.open_media_public_posts(20, null, null, 'alice')->0->'author' ? 'email'),
   'public posts expose no client IDs or email addresses'
 );
 select is(
   jsonb_array_length(public.open_media_public_posts(
     1,
-    (public.open_media_public_posts(1)->0->>'createdAt')::timestamptz,
-    (public.open_media_public_posts(1)->0->>'id')::uuid
+    (public.open_media_public_posts(1, null, null, 'alice')->0->>'createdAt')::timestamptz,
+    (public.open_media_public_posts(1, null, null, 'alice')->0->>'id')::uuid,
+    'alice'
   )),
   1,
   'keyset pagination returns the next page'
@@ -100,23 +101,23 @@ select throws_ok(
 
 select set_config('request.jwt.claim.sub', '20000000-0000-0000-0000-000000000002', true);
 select lives_ok(
-  $$ select public.open_media_report_post((public.open_media_public_posts(1)->0->>'id')::uuid, 'spam', 'ads') $$,
+  $$ select public.open_media_report_post((public.open_media_public_posts(1, null, null, 'alice')->0->>'id')::uuid, 'spam', 'ads') $$,
   'a signed-in person can report a post'
 );
 select lives_ok(
-  $$ select public.open_media_report_post((public.open_media_public_posts(1)->0->>'id')::uuid, 'spam', 'ads again') $$,
+  $$ select public.open_media_report_post((public.open_media_public_posts(1, null, null, 'alice')->0->>'id')::uuid, 'spam', 'ads again') $$,
   'repeated reports from one person are idempotent'
 );
 select set_config('request.jwt.claim.sub', '30000000-0000-0000-0000-000000000003', true);
-select public.open_media_report_post((public.open_media_public_posts(1)->0->>'id')::uuid, 'harassment', '');
-select is(jsonb_array_length(public.open_media_public_posts()), 2, 'two distinct reports do not hide a post');
+select public.open_media_report_post((public.open_media_public_posts(1, null, null, 'alice')->0->>'id')::uuid, 'harassment', '');
+select is(jsonb_array_length(public.open_media_public_posts(20, null, null, 'alice')), 2, 'two distinct reports do not hide a post');
 select set_config('request.jwt.claim.sub', '50000000-0000-0000-0000-000000000005', true);
-select public.open_media_report_post((public.open_media_public_posts(1)->0->>'id')::uuid, 'spam', '');
-select is(jsonb_array_length(public.open_media_public_posts()), 1, 'the third distinct report hides the post from everyone');
+select public.open_media_report_post((public.open_media_public_posts(1, null, null, 'alice')->0->>'id')::uuid, 'spam', '');
+select is(jsonb_array_length(public.open_media_public_posts(20, null, null, 'alice')), 1, 'the third distinct report hides the post from everyone');
 
 -- Blocks hide authors from a signed-in viewer's feed
 select public.open_media_set_user_blocked('10000000-0000-0000-0000-000000000001', true);
-select is(jsonb_array_length(public.open_media_public_posts()), 0, 'a viewer does not see posts from people they blocked');
+select is(jsonb_array_length(public.open_media_public_posts(20, null, null, 'alice')), 0, 'a viewer does not see posts from people they blocked');
 
 -- Deletion
 select set_config('request.jwt.claim.sub', '10000000-0000-0000-0000-000000000001', true);

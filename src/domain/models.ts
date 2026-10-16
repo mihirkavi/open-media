@@ -67,6 +67,20 @@ export interface Conversation {
   groupTitle?: string;
   starred?: boolean;
   labels: string[];
+  /** Present for email conversations: which mailbox and address replies go through. */
+  email?: EmailThreadInfo;
+}
+
+export interface EmailThreadInfo {
+  accountId: string;
+  accountEmail: string;
+  /** The other person's email address. */
+  address: string;
+  /** Subject and Message-ID of the latest message, for threaded replies. */
+  latestSubject: string;
+  latestMessageId?: string;
+  /** True when the mailbox has outgoing (SMTP) settings, so replies can be sent. */
+  canSend?: boolean;
 }
 
 export interface DraftMessage {

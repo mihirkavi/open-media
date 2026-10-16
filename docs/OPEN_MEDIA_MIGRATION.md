@@ -100,6 +100,7 @@ All user-owned tables require RLS, ownership indexes, explicit grants, bounded r
 - [x] Persist public Open Media text posts with idempotent, rate-limited publishing, author deletion, post reporting, community auto-hide, blocked-author filtering, and account export/deletion coverage.
 - [x] Make posts and profiles readable without an account, in the app and through the read-only public JSON API served by the production Worker ([ADR 0004](adrs/0004-public-posts-and-open-read-api.md)).
 - [ ] Next: operator moderation console, public profile pages, replies/likes/follows, and optional RSS/ActivityPub outputs.
+- [x] Show stored email (Inbox and Sent) as people-first conversations in Messages, sync automatically, and reply over SMTP with per-mailbox settings and provider presets.
 - [ ] Next: implement provider OAuth authorization-code + PKCE and token lifecycle, starting with one email provider.
 - [ ] Next: implement media upload/transcode/storage and connector contract tests before enabling image/video posts and Clips publishing.
 

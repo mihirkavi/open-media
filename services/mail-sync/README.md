@@ -1,25 +1,24 @@
 # Open Media mail-sync service
 
-This separate service is the only component allowed to handle reusable mailbox credentials. The mobile/web client sends a configuration over HTTPS, the service validates it against the real IMAP or POP server, encrypts the password with AES-256-GCM, and imports recent messages into Open Media's normalized client flow.
+This Cloudflare Worker is the only component allowed to handle reusable mailbox credentials. The mobile/web client sends a mailbox configuration over HTTPS; the Worker validates it against the real IMAP or POP server (and the SMTP server, when sending is enabled), encrypts the password with AES-256-GCM, imports recent mail, and sends replies. The same Worker also serves the public read API ([PUBLIC_API.md](PUBLIC_API.md)) and Open Media Events.
 
 ## Local run
 
+Use the repository's one-command setup, which starts local Supabase, writes `.dev.vars`, and runs this Worker with `wrangler dev` on `http://127.0.0.1:8787`:
+
 ```bash
-export NODE_ENV=development
-export CONVO_ALLOW_INSECURE_LOCAL_AUTH=true
-npm run mail:server
-curl http://127.0.0.1:8787/health
+npm run local
 ```
 
-Without `DATABASE_URL`, development uses an in-memory repository and an ephemeral encryption key. Restarting the service intentionally forgets those accounts. This mode binds only to `127.0.0.1` and cannot be enabled when `NODE_ENV=production`.
+To run only this Worker (after `npm run local` has written `.dev.vars` once): `npm run mail:server` from the repository root. Wrangler requires Node.js 22.
 
-For local durable use, set the variables in `.env.example` and apply the repository's Supabase migrations. The Node entry point defaults to `0.0.0.0` in production; set `HOST` explicitly when another bind address is required.
+`.dev.vars` (gitignored) sets `MAIL_ALLOW_LOCAL_SERVERS=true`, which allows mail servers on this machine, such as the local test inbox's SMTP server at `localhost:54325`, without TLS. Production never sets it.
 
 ## Cloudflare Worker production
 
-The production entry point is `src/worker.ts`, configured by `wrangler.jsonc`. It uses Cloudflare's outbound TCP/TLS support for IMAP and POP, validates the Supabase JWT itself, and calls authenticated PostgREST RPCs. Those RPCs run as the caller and enforce ownership again through RLS; the Worker never receives a database password or service-role key.
+The production entry point is `src/worker.ts`, configured by `wrangler.jsonc`. It uses Cloudflare's outbound TCP/TLS support for IMAP, POP, and SMTP, validates the Supabase JWT itself, and calls authenticated PostgREST RPCs. Those RPCs run as the caller and enforce ownership again; the Worker never receives a database password or service-role key.
 
-Configure these Worker secrets before deployment:
+Worker secrets:
 
 ```text
 SUPABASE_URL
@@ -27,25 +26,27 @@ SUPABASE_PUBLISHABLE_KEY
 MAIL_CREDENTIALS_KEY
 ```
 
-`MAIL_CREDENTIALS_KEY` must be a base64-encoded 32-byte key and must never be placed in Expo configuration. Generate Worker types and validate the bundle with `npm run worker:types` and `npm run worker:check`. Deploy with `npm run worker:deploy`.
+`MAIL_CREDENTIALS_KEY` must be a base64-encoded 32-byte key and must never be placed in Expo configuration. Generate Worker types and validate the bundle with `npm run worker:types` and `npm run worker:check`. Deploy with `npm run worker:deploy`, after applying the repository's Supabase migrations to production.
 
-The current production health endpoint is `https://convo-mail-sync.convo-mail-sync.workers.dev/health`.
+The production health endpoint is `https://convo-mail-sync.convo-mail-sync.workers.dev/health`.
 
 ## Endpoints
 
 - `GET /health`
-- `GET /v1/mail-accounts` — list only safe mailbox metadata for the authenticated owner
-- `POST /v1/mail-accounts` — authenticate, validate a TLS mailbox, encrypt its password, return a safe account record
-- `POST /v1/mail-accounts/:id/sync` — import the latest 100 IMAP Inbox messages or latest 50 POP messages for the authenticated owner
-- `DELETE /v1/mail-accounts/:id` — delete the authenticated owner's encrypted credential and imported messages
+- `GET /v1/mail-accounts` — safe mailbox metadata (including whether it can send) for the authenticated owner
+- `POST /v1/mail-accounts` — test the incoming server and, if given, the outgoing (SMTP) server; encrypt the password; return a safe account record
+- `POST /v1/mail-accounts/:id/sync` — import the latest 100 messages from IMAP `INBOX` and the Sent folder, or the latest 50 POP messages
+- `POST /v1/mail-accounts/:id/send` — send a plain-text email (up to 10 recipients) through the mailbox's SMTP server, threaded with `In-Reply-To`, and store it as sent mail
+- `DELETE /v1/mail-accounts/:id` — delete the owner's encrypted credential and imported messages
 
-Production requests require a Supabase bearer JWT. `x-convo-local-user` is accepted only when the explicit local-development flag is enabled. Mailbox hostnames are resolved and rejected if any answer points to loopback, link-local, private, multicast, or reserved space.
+Requests require a Supabase bearer JWT. Mailbox hostnames are resolved and rejected if any answer points to loopback, link-local, private, multicast, or reserved space. SMTP uses implicit TLS (port 465) or required STARTTLS (port 587), with certificate validation against the configured hostname.
 
-The deployed Worker rate-limits each authenticated user before contacting an upstream mail server: five connection tests and twelve syncs per minute per Cloudflare location. Database ownership checks remain the authorization boundary; rate limits are an additional abuse-control layer rather than billing-grade accounting.
+Per user and Cloudflare location, the Worker allows five connection tests, twelve syncs, and ten sends per minute. Database ownership checks remain the authorization boundary; rate limits are an additional abuse-control layer.
 
 ## Known limits
 
-- IMAP currently imports only `INBOX`; folders, cursors, flag updates, and IDLE are next-stage work.
+- IMAP reads `INBOX` and the Sent folder only; other folders, cursors, flag updates, and IDLE are next-stage work.
 - POP is import-only and does not delete server messages.
-- Plain-text bodies are capped at 50,000 characters; HTML and attachments are not stored.
-- SMTP sending is deliberately absent until draft review, identity selection, auditing, and abuse controls are implemented.
+- Plain-text bodies are capped at 50,000 characters; HTML and attachments are not stored or sent.
+- SMTP uses the same username and password as the incoming server.
+- Microsoft (Outlook.com, Microsoft 365) usually requires OAuth for IMAP/SMTP, which is not implemented.

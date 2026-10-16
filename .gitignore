@@ -46,4 +46,12 @@ services/mail-sync/.env
 
 # Wrangler local state and local-only secrets
 .wrangler/
-.dev.vars*
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+
+# Local stack (npm run local)
+.local/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
