@@ -31,9 +31,9 @@ export const mailProviderPresets: MailProviderPreset[] = [
   {
     id: 'icloud', label: 'iCloud Mail', domains: ['icloud.com', 'me.com', 'mac.com'],
     imap: { host: 'imap.mail.me.com', port: 993 }, smtp: { host: 'smtp.mail.me.com', port: 587, security: 'starttls' },
-    passwordHelp: 'Use an app-specific password from account.apple.com → Sign-In and Security. The username is your full iCloud address.',
+    passwordHelp: 'Use an app-specific password (account.apple.com → Sign-In and Security → App-Specific Passwords), typed as shown, like abcd-efgh-ijkl-mnop. Your Apple Account password will not work. The username is your @icloud.com address; if that is refused, try just the part before @icloud.com.',
     mxSuffixes: ['mail.icloud.com'],
-    customDomainNote: 'This domain uses iCloud Mail. For the username, enter your Apple ID email (usually your @icloud.com address), not the custom-domain address. Mail is still sent from your custom address.',
+    customDomainNote: 'This domain uses iCloud Mail. For the username, enter your @icloud.com address (find it in Settings → your name → iCloud → iCloud Mail on iPhone), not the custom-domain address and not a non-Apple Apple ID email. Mail is still sent from your custom address.',
   },
   {
     id: 'outlook', label: 'Outlook.com', domains: ['outlook.com', 'hotmail.com', 'live.com', 'msn.com'],
