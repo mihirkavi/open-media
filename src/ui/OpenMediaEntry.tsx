@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Session } from '@supabase/supabase-js';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Image, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { completeSignInURL, getSupabaseClient, sendSignInLink, signOut, verifySignInCode } from '../auth/supabase';
@@ -21,6 +21,10 @@ export function OpenMediaEntry() {
   const [retryVersion, setRetryVersion] = useState(0);
   const [error, setError] = useState('');
   const [signingIn, setSigningIn] = useState(false);
+  // The person whose profile is already on screen. Supabase re-announces the
+  // session (e.g. when the browser tab regains focus or the token refreshes);
+  // for the same person that must not reload the app or lose your place.
+  const loadedUserId = useRef<string | undefined>(undefined);
   const matrixAvailable = __DEV__ && Boolean(process.env.EXPO_PUBLIC_MATRIX_BRIDGE_URL);
   const [matrixDemo, setMatrixDemo] = useState(matrixAvailable && process.env.EXPO_PUBLIC_MATRIX_AUTO_CONNECT === '1');
 
@@ -30,7 +34,12 @@ export function OpenMediaEntry() {
     let request = 0;
     const acceptSession = async (nextSession?: Session | null) => {
       if (!active) return;
+      if (nextSession && nextSession.user.id === loadedUserId.current) {
+        setSession(nextSession);
+        return;
+      }
       const currentRequest = ++request;
+      loadedUserId.current = undefined;
       setLoading(true);
       setLoadFailed(false);
       setError('');
@@ -39,7 +48,10 @@ export function OpenMediaEntry() {
       try {
         if (nextSession) {
           const nextProfile = await getCurrentProfile(nextSession);
-          if (active && currentRequest === request) setProfile(nextProfile);
+          if (active && currentRequest === request) {
+            setProfile(nextProfile);
+            if (nextProfile) loadedUserId.current = nextSession.user.id;
+          }
         }
       } catch (reason) {
         if (active && currentRequest === request) {
@@ -75,7 +87,7 @@ export function OpenMediaEntry() {
   if (loadFailed) return <RetryStatus error={error} onRetry={() => setRetryVersion((value) => value + 1)} onSignOut={session ? async () => { await signOut(); setSession(undefined); setLoadFailed(false); } : undefined} />;
   if (!session && !signingIn) return <PublicHome onSignIn={() => { setError(''); setSigningIn(true); }} />;
   if (!session) return <SignInScreen error={error} onError={setError} onBack={() => setSigningIn(false)} onMatrixDemo={matrixAvailable ? () => setMatrixDemo(true) : undefined} />;
-  if (!profile) return <ProfileSetup session={session} error={error} onError={setError} onComplete={setProfile} onSignOut={async () => { await signOut(); setSession(undefined); }} />;
+  if (!profile) return <ProfileSetup session={session} error={error} onError={setError} onComplete={(nextProfile) => { loadedUserId.current = session.user.id; setProfile(nextProfile); }} onSignOut={async () => { await signOut(); setSession(undefined); }} />;
   return <OpenMediaApp currentUserId={session.user.id} profile={profile} onSignOut={async () => { await signOut(); setSession(undefined); setProfile(undefined); }} onAccountDeleted={() => { setSession(undefined); setProfile(undefined); }} />;
 }
 

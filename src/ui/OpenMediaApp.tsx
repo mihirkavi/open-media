@@ -1,13 +1,11 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ActivityIndicator,
   Image,
-  Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
-  TextInput,
   View,
   useWindowDimensions,
 } from "react-native";
@@ -34,16 +32,11 @@ import {
   subscribeToOpenMediaMessages,
   unsubscribeFromOpenMediaMessages,
 } from "../data/openMediaService";
-import {
-  deletePost,
-  publishPost,
-  reportPost,
-} from "../data/postService";
-import { createClientId } from "../data/openMediaService";
+import { deletePost, reportPost } from "../data/postService";
 import { normalizeStoredEmail, replySubject } from "../domain/emailNormalization";
 import { Conversation } from "../domain/models";
-import { FeedMode, SocialPost } from "../domain/posts";
-import { initialsFor, maxPostLength } from "../domain/publicPosts";
+import { FeedMode } from "../domain/posts";
+import { initialsFor } from "../domain/publicPosts";
 import { ThemeColors } from "../theme";
 import { useOpenMediaTheme } from "../themeContext";
 import { FeedView, ClipsView } from "./OpenMediaFeed";
@@ -74,6 +67,21 @@ const primary: Array<{
 
 export type MessageMode = "open_media" | "matrix";
 
+const destinations: Destination[] = ["feed", "clips", "messages", "search", "profile", "settings"];
+
+/** On the web, the section lives in the address bar (#messages) so refresh and back keep your place. */
+function destinationFromURL(): Destination | undefined {
+  if (Platform.OS !== "web" || typeof window === "undefined") return undefined;
+  const hash = window.location.hash.replace(/^#/, "") as Destination;
+  return destinations.includes(hash) ? hash : undefined;
+}
+
+function writeDestinationToURL(destination: Destination) {
+  if (Platform.OS !== "web" || typeof window === "undefined") return;
+  const target = destination === "feed" ? window.location.pathname : `${window.location.pathname}#${destination}`;
+  if (`${window.location.pathname}${window.location.hash}` !== target) window.history.pushState(null, "", target);
+}
+
 export function OpenMediaApp({
   currentUserId,
   profile,
@@ -91,12 +99,21 @@ export function OpenMediaApp({
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const compact = width < 760;
-  const [destination, setDestination] = useState<Destination>(
-    messageMode === "matrix" ? "messages" : "feed",
-  );
+  const initialDestination: Destination =
+    destinationFromURL() ?? (messageMode === "matrix" ? "messages" : "feed");
+  const [destination, setDestination] = useState<Destination>(initialDestination);
   const [lastPrimary, setLastPrimary] = useState<PrimaryDestination>(
-    messageMode === "matrix" ? "messages" : "feed",
+    primary.some((item) => item.id === initialDestination)
+      ? (initialDestination as PrimaryDestination)
+      : "feed",
   );
+  // Browser back/forward moves between sections.
+  useEffect(() => {
+    if (Platform.OS !== "web" || typeof window === "undefined") return;
+    const onPop = () => setDestination(destinationFromURL() ?? "feed");
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
   const [feedMode, setFeedMode] = useState<FeedMode>("relevant");
   const [composeOpen, setComposeOpen] = useState(false);
   const feed = usePublicFeed(currentUserId);
@@ -261,10 +278,16 @@ export function OpenMediaApp({
     refreshMail();
   };
 
+  // Create opens the writing box at the top of Feed; no pop-up.
+  const startPost = () => {
+    navigate("feed");
+    setComposeOpen(true);
+  };
   const navigate = (next: Destination) => {
     if (primary.some((item) => item.id === next))
       setLastPrimary(next as PrimaryDestination);
     setDestination(next);
+    writeDestinationToURL(next);
   };
 
   return (
@@ -273,7 +296,7 @@ export function OpenMediaApp({
         <DesktopRail
           destination={destination}
           onNavigate={navigate}
-          onCompose={() => setComposeOpen(true)}
+          onCompose={startPost}
         />
       ) : null}
       <View style={styles.content}>
@@ -295,7 +318,9 @@ export function OpenMediaApp({
             onRetry={feed.refresh}
             onLoadMore={feed.loadMore}
             viewer={viewer}
-            onCompose={canPost ? () => setComposeOpen(true) : undefined}
+            composing={composeOpen}
+            onComposingChange={canPost ? setComposeOpen : undefined}
+            onPublished={canPost ? feed.addPost : undefined}
             onDeletePost={canPost ? removeOwnPost : undefined}
             onReportPost={canPost ? reportPost : undefined}
           />
@@ -343,19 +368,10 @@ export function OpenMediaApp({
         <MobileTabs
           destination={destination as PrimaryDestination}
           onNavigate={navigate}
-          onCompose={() => setComposeOpen(true)}
+          onCompose={startPost}
         />
       ) : null}
-      <ComposeModal
-        visible={composeOpen}
-        canPublish={canPost}
-        onClose={() => setComposeOpen(false)}
-        onPublished={(post) => {
-          feed.addPost(post);
-          setComposeOpen(false);
-          navigate("feed");
-        }}
-      />
+
     </View>
   );
 }
@@ -584,109 +600,6 @@ function MobileTabs({
   );
 }
 
-function ComposeModal({
-  visible,
-  canPublish,
-  onClose,
-  onPublished,
-}: {
-  visible: boolean;
-  canPublish: boolean;
-  onClose: () => void;
-  onPublished: (post: SocialPost) => void;
-}) {
-  const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
-  const [body, setBody] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  // One client ID per draft keeps retries idempotent on the server.
-  const clientId = useRef(createClientId());
-  const length = body.trim().length;
-  const ready = canPublish && !busy && length > 0 && length <= maxPostLength;
-  const publish = async () => {
-    setBusy(true);
-    setError("");
-    try {
-      const post = await publishPost(body, clientId.current);
-      setBody("");
-      clientId.current = createClientId();
-      onPublished(post);
-    } catch (reason) {
-      setError(
-        reason instanceof Error ? reason.message : "Publishing failed.",
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-  return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}
-    >
-      <View style={styles.backdrop}>
-        <View style={styles.modal}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Create post</Text>
-            <IconButton icon="close" label="Close composer" onPress={onClose} />
-          </View>
-          <TextInput
-            accessibilityLabel="Post text"
-            multiline
-            autoFocus
-            maxLength={maxPostLength + 200}
-            value={body}
-            onChangeText={setBody}
-            placeholder="What’s happening?"
-            placeholderTextColor={colors.textTertiary}
-            style={styles.input}
-          />
-          {error ? (
-            <Text accessibilityLiveRegion="assertive" style={styles.composeError}>
-              {error}
-            </Text>
-          ) : null}
-          <View style={styles.publishRow}>
-            <View style={styles.publishCopy}>
-              <Text style={styles.sharing}>
-                {canPublish
-                  ? "Public · anyone can read this, with or without an account, including search engines and AI agents"
-                  : "Publishing is available with an Open Media account"}
-              </Text>
-              <Text
-                style={[
-                  styles.draftOnly,
-                  length > maxPostLength && styles.overLimit,
-                ]}
-              >
-                {length}/{maxPostLength}
-              </Text>
-            </View>
-            <Pressable
-              disabled={!ready}
-              accessibilityRole="button"
-              accessibilityState={{ disabled: !ready, busy }}
-              onPress={publish}
-              style={[styles.publish, ready && styles.publishReady]}
-            >
-              {busy ? (
-                <ActivityIndicator color={colors.surface} />
-              ) : (
-                <Text style={[styles.publishText, ready && styles.publishTextReady]}>
-                  Publish
-                </Text>
-              )}
-            </Pressable>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  );
-}
-
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     app: { flex: 1, flexDirection: "row", backgroundColor: colors.surface },
@@ -794,64 +707,5 @@ function createStyles(colors: ThemeColors) {
       borderWidth: 3,
       borderColor: colors.surface,
     },
-    backdrop: {
-      flex: 1,
-      alignItems: "center",
-      justifyContent: "center",
-      padding: 18,
-      backgroundColor: "rgba(0,0,0,0.5)",
-    },
-    modal: {
-      width: "100%",
-      maxWidth: 600,
-      padding: 20,
-      borderRadius: 22,
-      backgroundColor: colors.surface,
-    },
-    modalHeader: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-    },
-    modalTitle: { color: colors.text, fontSize: 18, fontWeight: "800" },
-    input: {
-      minHeight: 170,
-      marginTop: 12,
-      paddingVertical: 14,
-      color: colors.text,
-      fontSize: 18,
-      lineHeight: 26,
-      textAlignVertical: "top",
-      outlineStyle: "none",
-    } as object,
-    publishRow: {
-      paddingTop: 14,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      gap: 12,
-      borderTopWidth: 1,
-      borderTopColor: colors.border,
-    },
-    sharing: { color: colors.textSecondary, fontSize: 12, lineHeight: 17, fontWeight: "500" },
-    draftOnly: { marginTop: 4, color: colors.textTertiary, fontSize: 12 },
-    publish: {
-      minHeight: 40,
-      paddingHorizontal: 18,
-      alignItems: "center",
-      justifyContent: "center",
-      borderRadius: 20,
-      backgroundColor: colors.chrome,
-    },
-    publishText: {
-      color: colors.textTertiary,
-      fontSize: 12,
-      fontWeight: "700",
-    },
-    publishReady: { backgroundColor: colors.text },
-    publishTextReady: { color: colors.surface },
-    publishCopy: { flex: 1 },
-    overLimit: { color: colors.danger },
-    composeError: { marginTop: 8, color: colors.danger, fontSize: 12 },
   });
 }

@@ -115,6 +115,17 @@ export function OpenMediaMessages({
             </View>
           )}
         </View>
+        {newMessageOpen && messageMode === "open_media" ? (
+          <NewMessagePanel
+            onClose={() => setNewMessageOpen(false)}
+            onSearch={onSearchProfiles}
+            onStart={async (personId) => {
+              const id = await onStartConversation(personId);
+              setSelectedId(id);
+              setNewMessageOpen(false);
+            }}
+          />
+        ) : <>
         <View style={styles.search}>
           <Ionicons name="search" size={17} color={colors.textSecondary} />
           <TextInput
@@ -244,6 +255,7 @@ export function OpenMediaMessages({
             ) : null}
           </View>
         )}
+        </>}
       </View>
       {!compact ? (
         <View style={styles.threadPane}>
@@ -264,16 +276,6 @@ export function OpenMediaMessages({
           )}
         </View>
       ) : null}
-      <NewMessageModal
-        visible={messageMode === "open_media" && newMessageOpen}
-        onClose={() => setNewMessageOpen(false)}
-        onSearch={onSearchProfiles}
-        onStart={async (personId) => {
-          const id = await onStartConversation(personId);
-          setSelectedId(id);
-          setNewMessageOpen(false);
-        }}
-      />
     </View>
   );
 }
@@ -591,13 +593,12 @@ function MessageThread({
   );
 }
 
-function NewMessageModal({
-  visible,
+/** Find someone on Open Media, right in the conversation list (no pop-up). */
+function NewMessagePanel({
   onClose,
   onSearch,
   onStart,
 }: {
-  visible: boolean;
   onClose: () => void;
   onSearch: (query: string) => Promise<Person[]>;
   onStart: (personId: string) => Promise<void>;
@@ -610,13 +611,6 @@ function NewMessageModal({
   const [error, setError] = useState("");
   useEffect(() => {
     let active = true;
-    if (!visible) {
-      setQuery("");
-      setResults([]);
-      setError("");
-      setBusy(false);
-      return;
-    }
     const timeout = setTimeout(() => {
       if (query.trim().length < 2) {
         setResults([]);
@@ -643,16 +637,9 @@ function NewMessageModal({
       active = false;
       clearTimeout(timeout);
     };
-  }, [query, visible, onSearch]);
+  }, [query, onSearch]);
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}
-    >
-      <View style={styles.backdrop}>
-        <View style={styles.modal}>
+        <View style={styles.newPanel}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>New message</Text>
             <Pressable
@@ -725,8 +712,6 @@ function NewMessageModal({
             Only people who have finished Open Media onboarding appear here.
           </Text>
         </View>
-      </View>
-    </Modal>
   );
 }
 
@@ -1019,6 +1004,7 @@ function createStyles(colors: ThemeColors) {
       borderRadius: 22,
       backgroundColor: colors.surface,
     },
+    newPanel: { flex: 1, paddingTop: 4 },
     modalHeader: {
       paddingHorizontal: 18,
       marginBottom: 10,

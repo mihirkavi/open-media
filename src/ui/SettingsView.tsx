@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import { applyContactCleanup, scanDeviceContacts } from '../contacts/deviceContacts';
 import { ConnectedMailAccount, MailAccountConfiguration, MailProtocol, connectMailAccount, disconnectMailAccount, listMailAccounts, syncMailAccount } from '../connectors/mailApiConnector';
@@ -192,6 +192,69 @@ export function SettingsView({ onClose, onMailSynced }: SettingsViewProps) {
   const missing = mailForm ? missingFields(mailForm) : [];
   const serversCollapsed = Boolean(detected) && !showServers && !mailForm?.serversEdited;
 
+  if (mailForm) {
+    return (
+      <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        <View style={styles.titleRow}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Back to Email & connections" onPress={closeForm} style={styles.back}><Ionicons name="chevron-back" size={22} color={colors.text} /></Pressable>
+          <Text style={styles.title}>Add email account</Text>
+        </View>
+        <Text style={styles.sectionCopy}>Connect any mailbox. Its email appears in Messages and you can reply from there.</Text>
+            <Field label="Email address" value={mailForm?.email ?? ''} onChangeText={(email) => setMailForm((current) => current && withEmail(current, email))} autoCapitalize="none" autoComplete="email" keyboardType="email-address" placeholder="you@example.com" />
+            {detecting ? <Text style={styles.hint}>Looking up mail settings…</Text> : null}
+            {detected ? <View style={styles.note}>
+              <Text style={styles.noteTitle}>{detected.preset.label}{detected.customDomain ? ' (custom domain)' : ''}</Text>
+              {detected.customDomain && detected.preset.customDomainNote ? <Text style={styles.noteText}>{detected.preset.customDomainNote}</Text> : null}
+              <Text style={styles.noteText}>{detected.preset.passwordHelp}</Text>
+              {detected.preset.caution ? <Text style={[styles.noteText, styles.caution]}>{detected.preset.caution}</Text> : null}
+            </View> : null}
+            <Field label="Username" value={mailForm?.username ?? ''} onChangeText={(username) => setMailForm((current) => current && ({ ...current, username }))} autoCapitalize="none" />
+            <Field label="App password" value={mailForm?.password ?? ''} onChangeText={(password) => setMailForm((current) => current && ({ ...current, password }))} secureTextEntry autoComplete="off" />
+
+            <View style={styles.switchRow}>
+              <View style={styles.rowCopy}><Text style={styles.rowTitle}>Reply from Open Media</Text><Text style={styles.rowDetail}>Sends through your provider’s SMTP server with the same sign-in.</Text></View>
+              <Switch accessibilityLabel="Reply from Open Media" value={mailForm?.sendEnabled ?? true} onValueChange={(sendEnabled) => setMailForm((current) => current && ({ ...current, sendEnabled }))} trackColor={{ false: colors.border, true: colors.text }} thumbColor={colors.surface} {...({ activeThumbColor: colors.surface } as object)} />
+            </View>
+
+            {serversCollapsed ? (
+              <Pressable accessibilityRole="button" onPress={() => setShowServers(true)} style={styles.disclosure}>
+                <Text style={styles.rowDetail}>Servers: {mailForm?.host}{mailForm?.sendEnabled ? ` · ${mailForm.smtpHost}` : ''}</Text>
+                <Text style={styles.link}>Edit server settings</Text>
+              </Pressable>
+            ) : <>
+              <Text style={styles.groupLabel}>Incoming mail</Text>
+              <View style={styles.segment}>
+                <SegmentButton label="IMAP" active={mailForm?.protocol === 'imap'} onPress={() => setMailForm((current) => current && ({ ...current, protocol: 'imap' as MailProtocol, port: 993, serversEdited: true }))} />
+                <SegmentButton label="POP" active={mailForm?.protocol === 'pop3'} onPress={() => setMailForm((current) => current && ({ ...current, protocol: 'pop3' as MailProtocol, port: 995, serversEdited: true }))} />
+              </View>
+              <View style={styles.serverRow}>
+                <View style={styles.serverHost}><Field label="Server" placeholder={mailForm?.protocol === 'pop3' ? 'pop.example.com' : 'imap.example.com'} value={mailForm?.host ?? ''} onChangeText={(host) => setMailForm((current) => current && ({ ...current, host, serversEdited: true }))} autoCapitalize="none" /></View>
+                <View style={styles.port}><Field label="Port" value={String(mailForm?.port || '')} onChangeText={(port) => setMailForm((current) => current && ({ ...current, port: Number(port) || 0, serversEdited: true }))} keyboardType="number-pad" /></View>
+              </View>
+              {mailForm?.sendEnabled ? <>
+                <Text style={styles.groupLabel}>Outgoing mail (SMTP)</Text>
+                <View style={styles.segment}>
+                  {(['starttls', 'tls'] as const).map((security) => <SegmentButton key={security} label={security === 'starttls' ? 'STARTTLS · 587' : 'TLS · 465'} active={mailForm.smtpSecurity === security} onPress={() => setMailForm((current) => current && ({ ...current, smtpSecurity: security, smtpPort: defaultSmtpPort(security), serversEdited: true }))} />)}
+                </View>
+                <View style={styles.serverRow}>
+                  <View style={styles.serverHost}><Field label="Server" placeholder="smtp.example.com" value={mailForm.smtpHost} onChangeText={(smtpHost) => setMailForm((current) => current && ({ ...current, smtpHost, serversEdited: true }))} autoCapitalize="none" /></View>
+                  <View style={styles.port}><Field label="Port" value={String(mailForm.smtpPort || '')} onChangeText={(port) => setMailForm((current) => current && ({ ...current, smtpPort: Number(port) || 0, serversEdited: true }))} keyboardType="number-pad" /></View>
+                </View>
+              </> : null}
+              <Text style={styles.hint}>Connections always use encryption (TLS).</Text>
+            </>}
+        <View style={styles.formFooter}>
+            {mailError ? <Text accessibilityRole="alert" style={styles.error}>{mailError}</Text> : null}
+            {missing.length ? <Text style={styles.hint}>Still needed: {missing.join(', ')}.</Text> : null}
+            <Pressable accessibilityRole="button" disabled={mailBusy || missing.length > 0} onPress={submitMail} style={[styles.primary, (mailBusy || missing.length > 0) && styles.primaryDisabled]}>
+              {mailBusy ? <ActivityIndicator color={colors.surface} /> : <Text style={styles.primaryText}>Connect</Text>}
+            </Pressable>
+            <Text style={styles.footnote}>We test the sign-in with your provider before saving.</Text>
+        </View>
+      </ScrollView>
+    );
+  }
+
   return (
     <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
       <View style={styles.titleRow}>
@@ -259,67 +322,6 @@ export function SettingsView({ onClose, onMailSynced }: SettingsViewProps) {
         ))}
       </View>
 
-      <Modal visible={Boolean(mailForm)} animationType="fade" transparent onRequestClose={closeForm}>
-        <View style={styles.backdrop}><View style={styles.sheet}>
-          <View style={styles.sheetHeader}>
-            <Text style={styles.sheetTitle}>Add email account</Text>
-            <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={closeForm} style={styles.back}><Ionicons name="close" size={22} color={colors.text} /></Pressable>
-          </View>
-          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.sheetBody}>
-            <Field label="Email address" value={mailForm?.email ?? ''} onChangeText={(email) => setMailForm((current) => current && withEmail(current, email))} autoCapitalize="none" autoComplete="email" keyboardType="email-address" placeholder="you@example.com" />
-            {detecting ? <Text style={styles.hint}>Looking up mail settings…</Text> : null}
-            {detected ? <View style={styles.note}>
-              <Text style={styles.noteTitle}>{detected.preset.label}{detected.customDomain ? ' (custom domain)' : ''}</Text>
-              {detected.customDomain && detected.preset.customDomainNote ? <Text style={styles.noteText}>{detected.preset.customDomainNote}</Text> : null}
-              <Text style={styles.noteText}>{detected.preset.passwordHelp}</Text>
-              {detected.preset.caution ? <Text style={[styles.noteText, styles.caution]}>{detected.preset.caution}</Text> : null}
-            </View> : null}
-            <Field label="Username" value={mailForm?.username ?? ''} onChangeText={(username) => setMailForm((current) => current && ({ ...current, username }))} autoCapitalize="none" />
-            <Field label="App password" value={mailForm?.password ?? ''} onChangeText={(password) => setMailForm((current) => current && ({ ...current, password }))} secureTextEntry autoComplete="off" />
-
-            <View style={styles.switchRow}>
-              <View style={styles.rowCopy}><Text style={styles.rowTitle}>Reply from Open Media</Text><Text style={styles.rowDetail}>Sends through your provider’s SMTP server with the same sign-in.</Text></View>
-              <Switch accessibilityLabel="Reply from Open Media" value={mailForm?.sendEnabled ?? true} onValueChange={(sendEnabled) => setMailForm((current) => current && ({ ...current, sendEnabled }))} trackColor={{ false: colors.border, true: colors.text }} thumbColor={colors.surface} {...({ activeThumbColor: colors.surface } as object)} />
-            </View>
-
-            {serversCollapsed ? (
-              <Pressable accessibilityRole="button" onPress={() => setShowServers(true)} style={styles.disclosure}>
-                <Text style={styles.rowDetail}>Servers: {mailForm?.host}{mailForm?.sendEnabled ? ` · ${mailForm.smtpHost}` : ''}</Text>
-                <Text style={styles.link}>Edit server settings</Text>
-              </Pressable>
-            ) : <>
-              <Text style={styles.groupLabel}>Incoming mail</Text>
-              <View style={styles.segment}>
-                <SegmentButton label="IMAP" active={mailForm?.protocol === 'imap'} onPress={() => setMailForm((current) => current && ({ ...current, protocol: 'imap' as MailProtocol, port: 993, serversEdited: true }))} />
-                <SegmentButton label="POP" active={mailForm?.protocol === 'pop3'} onPress={() => setMailForm((current) => current && ({ ...current, protocol: 'pop3' as MailProtocol, port: 995, serversEdited: true }))} />
-              </View>
-              <View style={styles.serverRow}>
-                <View style={styles.serverHost}><Field label="Server" placeholder={mailForm?.protocol === 'pop3' ? 'pop.example.com' : 'imap.example.com'} value={mailForm?.host ?? ''} onChangeText={(host) => setMailForm((current) => current && ({ ...current, host, serversEdited: true }))} autoCapitalize="none" /></View>
-                <View style={styles.port}><Field label="Port" value={String(mailForm?.port || '')} onChangeText={(port) => setMailForm((current) => current && ({ ...current, port: Number(port) || 0, serversEdited: true }))} keyboardType="number-pad" /></View>
-              </View>
-              {mailForm?.sendEnabled ? <>
-                <Text style={styles.groupLabel}>Outgoing mail (SMTP)</Text>
-                <View style={styles.segment}>
-                  {(['starttls', 'tls'] as const).map((security) => <SegmentButton key={security} label={security === 'starttls' ? 'STARTTLS · 587' : 'TLS · 465'} active={mailForm.smtpSecurity === security} onPress={() => setMailForm((current) => current && ({ ...current, smtpSecurity: security, smtpPort: defaultSmtpPort(security), serversEdited: true }))} />)}
-                </View>
-                <View style={styles.serverRow}>
-                  <View style={styles.serverHost}><Field label="Server" placeholder="smtp.example.com" value={mailForm.smtpHost} onChangeText={(smtpHost) => setMailForm((current) => current && ({ ...current, smtpHost, serversEdited: true }))} autoCapitalize="none" /></View>
-                  <View style={styles.port}><Field label="Port" value={String(mailForm.smtpPort || '')} onChangeText={(port) => setMailForm((current) => current && ({ ...current, smtpPort: Number(port) || 0, serversEdited: true }))} keyboardType="number-pad" /></View>
-                </View>
-              </> : null}
-              <Text style={styles.hint}>Connections always use encryption (TLS).</Text>
-            </>}
-          </ScrollView>
-          <View style={styles.sheetFooter}>
-            {mailError ? <Text accessibilityRole="alert" style={styles.error}>{mailError}</Text> : null}
-            {missing.length ? <Text style={styles.hint}>Still needed: {missing.join(', ')}.</Text> : null}
-            <Pressable accessibilityRole="button" disabled={mailBusy || missing.length > 0} onPress={submitMail} style={[styles.primary, (mailBusy || missing.length > 0) && styles.primaryDisabled]}>
-              {mailBusy ? <ActivityIndicator color={colors.surface} /> : <Text style={styles.primaryText}>Connect</Text>}
-            </Pressable>
-            <Text style={styles.footnote}>We test the sign-in with your provider before saving.</Text>
-          </View>
-        </View></View>
-      </Modal>
     </ScrollView>
   );
 }
@@ -369,12 +371,7 @@ function createStyles(colors: ThemeColors) {
     inlineSpinner: { marginTop: 10 },
     error: { marginTop: 10, color: colors.danger, fontSize: 12, lineHeight: 18 },
     footnote: { marginTop: 10, color: colors.textTertiary, fontSize: 12, lineHeight: 17 },
-    backdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16, backgroundColor: 'rgba(0,0,0,0.45)' },
-    sheet: { width: '100%', maxWidth: 520, maxHeight: '94%', borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' },
-    sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 22, paddingRight: 8, paddingTop: 10 },
-    sheetTitle: { color: colors.text, fontSize: 20, fontWeight: '800', letterSpacing: -0.4 },
-    sheetBody: { paddingHorizontal: 22, paddingBottom: 8 },
-    sheetFooter: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 18, borderTopWidth: 1, borderTopColor: colors.border },
+    formFooter: { marginTop: 24, paddingTop: 16, borderTopWidth: 1, borderTopColor: colors.border },
     field: { marginTop: 12 },
     fieldLabel: { marginBottom: 6, color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
     input: { minHeight: 46, paddingHorizontal: 14, color: colors.text, fontSize: 15, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceAlt, outlineStyle: 'none' } as object,
