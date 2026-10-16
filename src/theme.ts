@@ -10,6 +10,8 @@ export const lightColors = {
   surface: '#FFFFFF',
   surfaceAlt: '#FAFAF8',
   border: '#E6E6E1',
+  /** Incoming message bubbles. */
+  bubble: '#EDEDEA',
   text: '#111111',
   textSecondary: '#5C5C57',
   textTertiary: '#7E7E78',
@@ -27,6 +29,7 @@ export const darkColors: ThemeColors = {
   surface: '#0A0A0A',
   surfaceAlt: '#0E0E0D',
   border: '#272725',
+  bubble: '#222220',
   text: '#F6F6F2',
   textSecondary: '#B4B4AD',
   textTertiary: '#8A8A83',

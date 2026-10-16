@@ -16,6 +16,7 @@ import {
 } from "react-native";
 
 import { formatEmailBody } from "../domain/emailBody";
+import { formatListTime, layoutThread } from "../domain/threadLayout";
 import { Conversation, Message, PeopleFilter, Person } from "../domain/models";
 import { conversationTitle, filterConversations } from "../domain/selectors";
 import { ThemeColors } from "../theme";
@@ -209,7 +210,8 @@ export function OpenMediaMessages({
               >
                 <Avatar
                   initials={conversation.participants[0]?.initials ?? "OM"}
-                  imageUrl={conversation.participants[0]?.avatarUrl}
+                  imageUrls={conversation.participants[0]?.avatarUrls}
+                  size={48}
                 />
                 <View style={styles.rowCopy}>
                   <View style={styles.rowTitleLine}>
@@ -220,15 +222,11 @@ export function OpenMediaMessages({
                     {conversation.unreadCount ? (
                       <View style={styles.unread} />
                     ) : null}
+                    <Text style={styles.rowTime}>{formatListTime(new Date(conversation.lastMessageAt))}</Text>
                   </View>
-                  <Text numberOfLines={1} style={styles.preview}>
+                  <Text numberOfLines={2} style={styles.preview}>
                     {conversation.preview}
                   </Text>
-                  <View style={styles.sources}>
-                    {conversation.sourceSummary.map((source) => (
-                      <SourceMarker key={source} source={source} />
-                    ))}
-                  </View>
                 </View>
               </Pressable>
             ))}
@@ -355,13 +353,18 @@ function MessageThread({
           </Pressable>
         ) : null}
         <View style={styles.threadHeading}>
-          <View style={styles.rowTitleLine}>
-            <Text style={styles.threadTitle}>
+          <Avatar
+            initials={otherPerson?.initials ?? "OM"}
+            imageUrls={otherPerson?.avatarUrls}
+            size={44}
+          />
+          <View style={[styles.rowTitleLine, styles.threadNameLine]}>
+            <Text numberOfLines={1} style={styles.threadTitle}>
               {conversationTitle(conversation)}
             </Text>
             {otherPerson?.verifiedDomain ? <VerifiedBadge domain={otherPerson.verifiedDomain} /> : null}
           </View>
-          <Text style={styles.threadMeta}>
+          <Text numberOfLines={1} style={styles.threadMeta}>
             {blocked
               ? "Blocked · messaging paused"
               : throughMatrix
@@ -391,57 +394,58 @@ function MessageThread({
       </View>
       <ScrollView contentContainerStyle={styles.threadContent}>
         {conversation.messages.length ? (
-          conversation.messages.map((message) => (
-            <View
-              key={message.id}
-              style={[
-                styles.messageWrap,
-                message.direction === "outbound" && styles.outboundWrap,
-              ]}
-            >
-              {message.emailContext ? (
-                <Text style={styles.subject}>
-                  {message.emailContext.subject}
-                </Text>
-              ) : null}
+          layoutThread(conversation.messages).map((item) =>
+            item.kind === "time" ? (
+              <Text key={item.key} style={styles.timeSeparator}>
+                {item.label}
+              </Text>
+            ) : (
               <View
+                key={item.key}
                 style={[
-                  styles.bubble,
-                  message.direction === "outbound" && styles.outboundBubble,
+                  styles.messageWrap,
+                  item.message.direction === "outbound" && styles.outboundWrap,
+                  item.groupStart && styles.groupStart,
                 ]}
               >
-                {message.channel === "email" ? (
-                  <EmailBody message={message} />
-                ) : (
-                  <Text
-                    style={[
-                      styles.message,
-                      message.direction === "outbound" && styles.outboundMessage,
-                    ]}
-                  >
-                    {message.body}
-                  </Text>
-                )}
-                <View style={styles.messageMeta}>
-                  <SourceMarker
-                    source={message.source}
-                    inverse={message.direction === "outbound"}
-                  />
-                  <Text
-                    style={[
-                      styles.time,
-                      message.direction === "outbound" && styles.outboundTime,
-                    ]}
-                  >
-                    {new Intl.DateTimeFormat("en", {
-                      hour: "numeric",
-                      minute: "2-digit",
-                    }).format(new Date(message.sentAt))}
-                  </Text>
+                <View
+                  style={[
+                    styles.bubble,
+                    item.message.direction === "outbound" && styles.outboundBubble,
+                    item.groupEnd && (item.message.direction === "outbound" ? styles.outboundTail : styles.inboundTail),
+                  ]}
+                >
+                  {item.subject ? (
+                    <Text
+                      style={[
+                        styles.bubbleSubject,
+                        item.message.direction === "outbound" && styles.outboundMessage,
+                      ]}
+                    >
+                      {item.subject}
+                    </Text>
+                  ) : null}
+                  {item.message.channel === "email" ? (
+                    <EmailBody message={item.message} />
+                  ) : (
+                    <Text
+                      style={[
+                        styles.message,
+                        item.message.direction === "outbound" && styles.outboundMessage,
+                      ]}
+                    >
+                      {item.message.body}
+                    </Text>
+                  )}
                 </View>
+                {item.groupEnd && conversation.sourceSummary.length > 1 ? (
+                  <View style={[styles.bubbleSource, item.message.direction === "outbound" && styles.outboundWrap]}>
+                    <SourceMarker source={item.message.source} showLabel />
+                  </View>
+                ) : null}
               </View>
-            </View>
-          ))
+            ),
+          )
         ) : (
           <View style={styles.threadEmpty}>
             <Text style={styles.emptyTitle}>Say hello</Text>
@@ -728,24 +732,35 @@ function NewMessagePanel({
   );
 }
 
-function Avatar({ initials, imageUrl }: { initials: string; imageUrl?: string }) {
+/** Round picture: tries each image in order (BIMI logo, company icon), then shows initials. */
+function Avatar({ initials, imageUrls = [], size = 40 }: { initials: string; imageUrls?: string[]; size?: number }) {
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const [failed, setFailed] = useState(false);
-  // BIMI logos are SVG, which the web renders natively; native apps fall back to initials.
-  if (imageUrl && !failed && Platform.OS === "web") {
+  // Native image views cannot draw SVG (BIMI logos); the web can.
+  const candidates = useMemo(
+    () => imageUrls.filter((url) => Platform.OS === "web" || !/\.svg(\?|$)/i.test(url)),
+    [imageUrls],
+  );
+  const [index, setIndex] = useState(0);
+  useEffect(() => setIndex(0), [candidates]);
+  const dimension = { width: size, height: size, borderRadius: size / 2 };
+  const url = candidates[index];
+  if (url) {
     return (
-      <Image
-        accessibilityIgnoresInvertColors
-        source={{ uri: imageUrl }}
-        onError={() => setFailed(true)}
-        style={[styles.avatar, styles.avatarImage]}
-      />
+      <View style={[styles.avatarFrame, dimension]}>
+        <Image
+          accessibilityIgnoresInvertColors
+          source={{ uri: url }}
+          onError={() => setIndex((value) => value + 1)}
+          resizeMode="cover"
+          style={dimension}
+        />
+      </View>
     );
   }
   return (
-    <View style={styles.avatar}>
-      <Text style={styles.avatarText}>{initials}</Text>
+    <View style={[styles.avatar, dimension]}>
+      <Text style={[styles.avatarText, { fontSize: Math.round(size * 0.32) }]}>{initials}</Text>
     </View>
   );
 }
@@ -922,15 +937,18 @@ function createStyles(colors: ThemeColors) {
     },
     emptyActionText: { color: colors.surface, fontSize: 12, fontWeight: "800" },
     row: {
-      minHeight: 82,
-      paddingHorizontal: 17,
+      minHeight: 76,
+      marginHorizontal: 8,
+      paddingHorizontal: 10,
+      paddingVertical: 10,
       flexDirection: "row",
       alignItems: "center",
       gap: 12,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.border,
+      borderRadius: 14,
     },
     rowActive: { backgroundColor: colors.chrome },
+    rowTime: { marginLeft: "auto", color: colors.textTertiary, fontSize: 12 },
+    avatarFrame: { overflow: "hidden", backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
     avatar: {
       width: 40,
       height: 40,
@@ -952,35 +970,45 @@ function createStyles(colors: ThemeColors) {
       borderRadius: 4,
       backgroundColor: colors.accent,
     },
-    preview: { marginTop: 3, color: colors.textSecondary, fontSize: 13 },
-    sources: { marginTop: 5, flexDirection: "row", gap: 3 },
+    preview: { marginTop: 2, color: colors.textSecondary, fontSize: 13, lineHeight: 18 },
     threadPane: { flex: 1, minWidth: 0 },
-    thread: { flex: 1, backgroundColor: colors.surfaceAlt },
+    thread: { flex: 1, backgroundColor: colors.surface },
     threadHeader: {
-      minHeight: 70,
-      paddingHorizontal: 18,
+      minHeight: 96,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
       flexDirection: "row",
       alignItems: "center",
-      gap: 9,
+      gap: 6,
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
       backgroundColor: colors.surface,
     },
-    threadHeading: { flex: 1 },
+    threadHeading: { flex: 1, minWidth: 0, alignItems: "center", gap: 4 },
+    threadNameLine: { justifyContent: "center", maxWidth: "100%" },
     back: {
       width: 44,
       height: 44,
       alignItems: "center",
       justifyContent: "center",
     },
-    threadTitle: { color: colors.text, fontSize: 15, fontWeight: "700" },
-    threadMeta: { marginTop: 3, color: colors.textTertiary, fontSize: 12 },
+    threadTitle: { flexShrink: 1, color: colors.text, fontSize: 15, fontWeight: "700" },
+    threadMeta: { maxWidth: "100%", color: colors.textTertiary, fontSize: 12, textAlign: "center" },
     threadContent: {
       width: "100%",
-      maxWidth: 700,
+      maxWidth: 760,
       alignSelf: "center",
-      padding: 22,
+      paddingHorizontal: 16,
+      paddingVertical: 18,
       flexGrow: 1,
+    },
+    timeSeparator: {
+      marginTop: 18,
+      marginBottom: 6,
+      color: colors.textTertiary,
+      fontSize: 11,
+      fontWeight: "600",
+      textAlign: "center",
     },
     threadEmpty: {
       flex: 1,
@@ -988,36 +1016,22 @@ function createStyles(colors: ThemeColors) {
       alignItems: "center",
       justifyContent: "center",
     },
-    messageWrap: { maxWidth: "78%", alignSelf: "flex-start", marginBottom: 12 },
+    messageWrap: { maxWidth: "76%", alignSelf: "flex-start", marginTop: 2 },
     outboundWrap: { alignSelf: "flex-end" },
-    subject: {
-      marginBottom: 5,
-      color: colors.textTertiary,
-      fontSize: 12,
-      fontWeight: "600",
-    },
+    groupStart: { marginTop: 10 },
     bubble: {
       paddingHorizontal: 14,
-      paddingVertical: 10,
-      borderRadius: 18,
-      borderBottomLeftRadius: 5,
-      backgroundColor: colors.chrome,
+      paddingVertical: 9,
+      borderRadius: 20,
+      backgroundColor: colors.bubble,
     },
-    outboundBubble: {
-      borderBottomLeftRadius: 18,
-      borderBottomRightRadius: 5,
-      backgroundColor: colors.text,
-    },
+    outboundBubble: { backgroundColor: colors.text },
+    inboundTail: { borderBottomLeftRadius: 6 },
+    outboundTail: { borderBottomRightRadius: 6 },
+    bubbleSubject: { marginBottom: 3, color: colors.text, fontSize: 15, lineHeight: 21, fontWeight: "700" },
+    bubbleSource: { marginTop: 4, marginHorizontal: 6, alignSelf: "flex-start" },
     message: { color: colors.text, fontSize: 15, lineHeight: 21 },
     outboundMessage: { color: colors.surface },
-    messageMeta: {
-      marginTop: 6,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 5,
-    },
-    time: { color: colors.textTertiary, fontSize: 11 },
-    outboundTime: { color: colors.surface },
     composerWrap: {
       paddingHorizontal: 14,
       paddingTop: 8,

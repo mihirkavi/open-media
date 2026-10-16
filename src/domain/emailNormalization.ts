@@ -1,5 +1,6 @@
 import { StoredMailMessage } from '../connectors/mailApiConnector';
 import { emailPreview } from './emailBody';
+import { senderIconUrls } from './senderIcons';
 import { Conversation, MessageSource, Person } from './models';
 
 /**
@@ -32,7 +33,8 @@ export function normalizeStoredEmail(messages: StoredMailMessage[]): Conversatio
     const conversationId = `mail-conversation-${stableID(`${accountId}:${address}`)}`;
     const person: Person = {
       id: personId, name, initials: initialsFor(name), avatarColor: colorFor(address),
-      ...(verified ? { verifiedDomain: address.split('@')[1], avatarUrl: verified.senderLogoUrl } : {}),
+      ...(verified ? { verifiedDomain: address.split('@')[1] } : {}),
+      avatarUrls: senderIconUrls(address, verified?.senderLogoUrl),
       identities: [{ id: identityId, personId, kind: 'email', value: address, source, label: accountEmail, verifiedByUser: false }],
     };
     const latest = ordered.at(-1);
