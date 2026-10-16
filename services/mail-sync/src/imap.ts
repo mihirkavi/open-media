@@ -1,21 +1,42 @@
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 
+import { UserFacingError } from './errors.js';
 import { MailAccountInput, SyncedMessage } from './types.js';
 
 function clientFor(input: MailAccountInput): ImapFlow {
-  return new ImapFlow({
+  const client = new ImapFlow({
     host: input.host, port: input.port, secure: input.allowPlaintext ? false : input.secure,
     ...(input.allowPlaintext ? { doSTARTTLS: false } : {}),
     auth: { user: input.username, pass: input.password },
     logger: false, tls: { rejectUnauthorized: true, servername: input.tlsServername ?? input.host },
+    connectionTimeout: 15_000, greetingTimeout: 15_000, socketTimeout: 60_000,
+    disableCompression: true,
   });
+  // Late socket errors (e.g. a timeout after a failed login) must not crash the process.
+  client.on('error', () => undefined);
+  return client;
 }
 
 export async function testImap(input: MailAccountInput): Promise<void> {
   if (!input.secure && !input.allowPlaintext) throw new Error('Unencrypted IMAP is disabled. Use TLS on port 993.');
   const client = clientFor(input);
-  try { await client.connect(); } finally { if (client.usable) await client.logout(); }
+  try { await client.connect(); }
+  catch (error) { throw new UserFacingError(describeMailError(error, input, 'IMAP')); }
+  finally { if (client.usable) await client.logout(); }
+}
+
+/** Plain-language reason a mail server connection failed; never includes the password. */
+export function describeMailError(error: unknown, input: Pick<MailAccountInput, 'host' | 'port' | 'tlsServername'>, kind: 'IMAP' | 'POP'): string {
+  const detail = error as { authenticationFailed?: boolean; responseText?: string; code?: string; message?: string };
+  const server = `${input.tlsServername ?? input.host}:${input.port}`;
+  const text = `${detail.responseText ?? ''} ${detail.message ?? ''}`;
+  if (detail.authenticationFailed || /auth|login|credential|password|invalid user|-ERR/i.test(text)) {
+    return `The ${kind} server ${server} rejected the username or password. Most providers need an app password, not your normal password.`;
+  }
+  if (/timeout|timed out/i.test(text) || detail.code === 'ETIMEDOUT') return `The ${kind} server ${server} did not respond. Check the server and port.`;
+  if (/certificate|tls|ssl/i.test(text)) return `Could not make a secure connection to ${server}. Check the server and port (usually 993 for IMAP or 995 for POP).`;
+  return `Could not connect to the ${kind} server ${server}. Check the server and port.`;
 }
 
 /** Reads the newest messages from INBOX and the Sent folder, so threads show both sides. */

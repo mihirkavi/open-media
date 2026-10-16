@@ -38,6 +38,7 @@ This checklist defines “production ready” for the current onboarding private
 - [ ] Apply the migration to production (with the public-posts migration), then deploy the Worker.
 - [ ] Production sign-in emails: configure custom SMTP in Supabase Auth (dashboard → Authentication → SMTP) and push the templates; the built-in email service is rate-limited and not meant for real users.
 - [ ] Probe a real mailbox end to end in production (connect with SMTP, sync, reply).
+- [ ] Fix or work around IMAP to Gmail stalling in the Workers runtime (local `wrangler dev`, 2026-10-16; iCloud unaffected). Options: a Workers-compatible IMAP client, or hosting mail sync on Node.js. Local development already runs mail sync on Node.js.
 
 ## Explicitly out of scope for this release
 

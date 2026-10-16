@@ -7,14 +7,14 @@
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "wrangler dev --port 8787 --ip 127.0.0.1",
-    "start": "wrangler dev --port 8787 --ip 127.0.0.1",
-    "public-api": "node --env-file-if-exists=.env --import tsx src/publicApiServer.ts",
+    "dev": "node --watch --env-file=.dev.vars --import tsx src/localServer.ts",
+    "start": "node --env-file=.dev.vars --import tsx src/localServer.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test src/*.test.ts src/events/*.test.ts",
     "worker:types": "wrangler types",
     "worker:check": "wrangler deploy --dry-run",
-    "worker:deploy": "wrangler deploy"
+    "worker:deploy": "wrangler deploy",
+    "worker:dev": "wrangler dev --port 8787 --ip 127.0.0.1"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "0.10.3",

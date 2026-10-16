@@ -2,6 +2,8 @@ import net from 'node:net';
 import tls from 'node:tls';
 
 import { simpleParser } from 'mailparser';
+import { UserFacingError } from './errors.js';
+import { describeMailError } from './imap.js';
 import { MailAccountInput, SyncedMessage } from './types.js';
 
 interface PopConnection {
@@ -10,12 +12,16 @@ interface PopConnection {
 }
 
 export async function testPop3(input: MailAccountInput): Promise<void> {
-  const connection = await connectPop3(input);
+  let connection: PopConnection;
+  try { connection = await connectPop3(input); }
+  catch (error) { throw new UserFacingError(describeMailError(error, input, 'POP')); }
   try {
     await connection.command(`USER ${input.username}`);
     await connection.command(`PASS ${input.password}`);
     await connection.command('STAT');
     await connection.command('QUIT');
+  } catch (error) {
+    throw new UserFacingError(describeMailError(error, input, 'POP'));
   } finally { connection.close(); }
 }
 
@@ -48,14 +54,23 @@ async function connectPop3(input: MailAccountInput): Promise<PopConnection> {
     ? net.connect({ host: input.host, port: input.port })
     : tls.connect({ host: input.host, port: input.port, servername: input.tlsServername ?? input.host, rejectUnauthorized: true });
   let buffer = '';
+  let failure: Error | undefined;
   let waiter: ((line: string) => void) | undefined;
   socket.setEncoding('utf8');
   socket.on('data', (chunk) => { buffer += chunk; waiter?.(buffer); });
+  // Stop waiting if the server goes quiet or the connection drops.
+  const fail = (error: Error) => { failure ??= error; waiter?.(buffer); };
+  socket.setTimeout(30_000, () => { fail(new Error('POP server timed out')); socket.destroy(); });
+  socket.on('error', fail);
+  socket.on('close', () => fail(new Error('POP connection closed')));
   await new Promise<void>((resolve, reject) => { socket.once(input.allowPlaintext ? 'connect' : 'secureConnect', () => resolve()); socket.once('error', reject); });
 
   const readResponse = async (multiline = false) => {
     const terminator = multiline ? '\r\n.\r\n' : '\r\n';
-    while (!buffer.includes(terminator)) await new Promise<string>((resolve) => { waiter = resolve; });
+    while (!buffer.includes(terminator)) {
+      if (failure) throw failure;
+      await new Promise<string>((resolve) => { waiter = resolve; });
+    }
     waiter = undefined;
     const end = buffer.indexOf(terminator) + terminator.length;
     const response = buffer.slice(0, end);

@@ -42,7 +42,6 @@
     "web": "expo start --web",
     "mail:server": "npm run dev --prefix services/mail-sync",
     "matrix:server": "node --import tsx services/matrix-bridge/src/server.ts",
-    "public-api:server": "npm run public-api --prefix services/mail-sync",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test src/**/*.test.ts",
     "test:db": "supabase test db",

@@ -49,11 +49,7 @@ Errors use `{ "error": { "code", "message" } }` with `400`, `404`, `405`, `429` 
 
 ## Run locally
 
-With the local Supabase stack running (`npx supabase start` from the repository root), put the local `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY` in `services/mail-sync/.env`, then:
-
-```bash
-npm run public-api:server   # http://127.0.0.1:8790
-```
+`npm run local` serves the public API with the mail service at `http://127.0.0.1:8787` (for example `http://127.0.0.1:8787/v1/posts`).
 
 Set `EXPO_PUBLIC_OPEN_MEDIA_PUBLIC_API_URL` in the app environment to show the open-data link to signed-out visitors.
 

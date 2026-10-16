@@ -4,13 +4,15 @@ This Cloudflare Worker is the only component allowed to handle reusable mailbox 
 
 ## Local run
 
-Use the repository's one-command setup, which starts local Supabase, writes `.dev.vars`, and runs this Worker with `wrangler dev` on `http://127.0.0.1:8787`:
+Use the repository's one-command setup, which starts local Supabase, writes `.dev.vars`, and runs the mail service on Node.js at `http://127.0.0.1:8787`:
 
 ```bash
 npm run local
 ```
 
-To run only this Worker (after `npm run local` has written `.dev.vars` once): `npm run mail:server` from the repository root. Wrangler requires Node.js 22.
+Locally, `src/localServer.ts` runs the same request handler as the Worker (`src/mailHandler.ts`) on Node.js, with in-memory rate limits. To run only the mail service after `npm run local` has written `.dev.vars` once: `npm run mail:server` from the repository root. To try the Cloudflare runtime itself, use `npm run worker:dev` (Node.js 22).
+
+Why Node.js locally: inside the Workers runtime, the IMAP library stalls on some servers. Gmail stops responding after `CAPABILITY`, while iCloud works; the same code works on Node.js. See Known limits.
 
 `.dev.vars` (gitignored) sets `MAIL_ALLOW_LOCAL_SERVERS=true`, which allows mail servers on this machine, such as the local test inbox's SMTP server at `localhost:54325`, without TLS. Production never sets it.
 
@@ -50,3 +52,4 @@ Per user and Cloudflare location, the Worker allows five connection tests, twelv
 - Plain-text bodies are capped at 50,000 characters; HTML and attachments are not stored or sent.
 - SMTP uses the same username and password as the incoming server.
 - Microsoft (Outlook.com, Microsoft 365) usually requires OAuth for IMAP/SMTP, which is not implemented.
+- In the Cloudflare Workers runtime, IMAP to Gmail stalls (verified locally with `wrangler dev`, 2026-10-16); iCloud works. Until this is fixed (a Workers-compatible IMAP client, or hosting mail sync on Node.js), production Gmail IMAP should be treated as not working.

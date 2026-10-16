@@ -1,7 +1,7 @@
 /**
  * `npm run local` — runs the whole Open Media stack on this computer:
- * local Supabase (database, auth, test inbox), the mail/public-API Worker
- * (via wrangler dev), and the web app. Ctrl+C stops the Worker and web app;
+ * local Supabase (database, auth, test inbox), the mail and public API
+ * service (on Node.js), and the web app. Ctrl+C stops the Worker and web app;
  * `npm run local:stop` also stops the database.
  *
  * Generated files stay inside the repository and are gitignored:
@@ -77,7 +77,8 @@ async function main() {
   ].join('\n'));
 
   step('Starting the mail and public API service');
-  start('api', 'npx', ['wrangler', 'dev', '--port', '8787', '--ip', '127.0.0.1'], mailService);
+  // Node.js locally: the IMAP library stalls on some servers (e.g. Gmail) inside the Workers runtime.
+  start('api', 'npm', ['run', 'dev'], mailService);
   await waitFor(`${apiURL}/health`, 'mail service');
 
   step('Starting the web app');

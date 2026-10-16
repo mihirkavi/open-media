@@ -1,10 +1,11 @@
 import nodemailer from 'nodemailer';
 
+import { UserFacingError } from './errors.js';
 import { MailAccountInput, OutgoingMail, SmtpSettings, SyncedMessage } from './types.js';
 
 /** Connection details after the hostname has been checked and resolved. */
 export interface SmtpConnection extends SmtpSettings {
-  /** Resolved address to connect to; TLS is still validated against `host`. */
+  /** Hostname (or local test address) to connect to; TLS is validated against `host`. */
   address: string;
   /** Local development only: plaintext to a local test server such as Mailpit. */
   allowPlaintext?: boolean;
@@ -32,7 +33,7 @@ export async function testSmtp(connection: SmtpConnection, account: Pick<MailAcc
   try {
     await transport.verify();
   } catch {
-    throw new Error(`Could not sign in to the outgoing mail server ${connection.host}:${connection.port}. Check the server, port, security, and app password.`);
+    throw new UserFacingError(`Could not sign in to the outgoing mail server ${connection.host}:${connection.port}. Check the server, port, security, and app password.`);
   } finally {
     transport.close();
   }
@@ -63,7 +64,7 @@ export async function sendSmtp(
       text: mail.text,
     };
   } catch {
-    throw new Error('The outgoing mail server did not accept this message. Try again, or check the mailbox settings.');
+    throw new UserFacingError('The outgoing mail server did not accept this message. Try again, or check the mailbox settings.');
   } finally {
     transport.close();
   }

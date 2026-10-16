@@ -126,7 +126,7 @@ Apple Foundation Models requires the native iOS target, iOS 26+, supported hardw
 
 Configure `EXPO_PUBLIC_SUPABASE_URL` and `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY` for onboarding and native messaging. Add the app callback URL to Supabase Auth redirect URLs before distributing a native build. Production should prefer provider OAuth where supported. The client accepts `EXPO_PUBLIC_OPEN_MEDIA_API_URL`; the former `EXPO_PUBLIC_CONVO_API_URL` remains a temporary compatibility alias.
 
-To run the public API locally against the local Supabase stack, see [services/mail-sync/PUBLIC_API.md](services/mail-sync/PUBLIC_API.md) and start it with `npm run public-api:server`. Set `EXPO_PUBLIC_OPEN_MEDIA_PUBLIC_API_URL` to show the open-data link to signed-out visitors.
+`npm run local` also serves the public API at `http://127.0.0.1:8787/v1/posts` (see [services/mail-sync/PUBLIC_API.md](services/mail-sync/PUBLIC_API.md)). Set `EXPO_PUBLIC_OPEN_MEDIA_PUBLIC_API_URL` to show the open-data link to signed-out visitors.
 
 To test Matrix locally, configure the gateway process from `services/matrix-bridge/.env.example`, run `npm run matrix:server`, and start a development build with `EXPO_PUBLIC_MATRIX_BRIDGE_URL` pointing to that gateway. The app exposes **Try the local Matrix sandbox** only in development. Matrix credentials remain in the gateway process and are never embedded in the Expo client. Never expose the single-account sandbox publicly.
 
