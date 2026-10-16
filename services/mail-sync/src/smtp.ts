@@ -62,6 +62,7 @@ export async function sendSmtp(
       to: mail.to,
       sentAt: new Date().toISOString(),
       text: mail.text,
+      inReplyTo: mail.inReplyTo,
     };
   } catch {
     throw new UserFacingError('The outgoing mail server did not accept this message. Try again, or check the mailbox settings.');

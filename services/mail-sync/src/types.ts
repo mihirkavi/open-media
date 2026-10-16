@@ -51,6 +51,22 @@ export interface SyncedMessage {
   /** Verified sender (DMARC pass + BIMI mark certificate); see senderVerification.ts. */
   senderVerified?: boolean;
   senderLogoUrl?: string;
+  /** HTTPS image URLs from the HTML body; the app loads them only on request. */
+  remoteImages?: string[];
+  attachments?: MailAttachment[];
+  /** Message-ID this message replies to (In-Reply-To header). */
+  inReplyTo?: string;
+}
+
+export interface MailAttachment {
+  filename: string;
+  contentType: string;
+  size: number;
+  inline: boolean;
+  /** File bytes for upload; absent when over the size limit. Never sent to clients. */
+  content?: Buffer;
+  /** Set after upload to private Storage. */
+  storagePath?: string;
 }
 
 export interface OutgoingMail {

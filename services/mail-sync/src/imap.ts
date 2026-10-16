@@ -2,6 +2,7 @@ import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 
 import { UserFacingError } from './errors.js';
+import { collectAttachments, collectRemoteImages } from './mailMedia.js';
 import { verifySender } from './senderVerification.js';
 import { MailAccountInput, SyncedMessage } from './types.js';
 
@@ -73,6 +74,9 @@ async function fetchRecent(client: ImapFlow, path: string, mailbox: string, limi
       text: parsed?.text?.slice(0, 50_000) ?? '',
       senderVerified: brand.verified,
       senderLogoUrl: brand.logoUrl,
+      remoteImages: collectRemoteImages(parsed?.html),
+      attachments: collectAttachments(parsed?.attachments),
+      inReplyTo: parsed?.inReplyTo,
     });
   }
   return messages;

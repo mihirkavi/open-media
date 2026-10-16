@@ -34,7 +34,7 @@ import {
 } from "../data/openMediaService";
 import { deletePost, reportPost } from "../data/postService";
 import { normalizeStoredEmail, replySubject } from "../domain/emailNormalization";
-import { Conversation } from "../domain/models";
+import { Conversation, Message } from "../domain/models";
 import { FeedMode } from "../domain/posts";
 import { initialsFor } from "../domain/publicPosts";
 import { ThemeColors } from "../theme";
@@ -231,23 +231,25 @@ export function OpenMediaApp({
     };
   }, [messageMode, refreshMessages]);
   const sendMessage = useCallback(
-    async (conversationId: string, body: string) => {
+    async (conversationId: string, body: string, replyTo?: Message) => {
       const email = mailConversations.find(
         (conversation) => conversation.id === conversationId,
       )?.email;
       if (email) {
-        await sendMail(email.accountId, {
-          to: [email.address],
-          subject: replySubject(email.latestSubject),
+        // Replying to a specific email threads to it, from the mailbox that received it.
+        const target = replyTo?.emailContext;
+        await sendMail(target?.accountId ?? email.accountId, {
+          to: [target?.address ?? email.address],
+          subject: replySubject(target?.subject ?? email.latestSubject),
           text: body,
-          inReplyTo: email.latestMessageId,
+          inReplyTo: replyTo?.sourceMessageId ?? email.latestMessageId,
         });
         await refreshMail();
         return;
       }
       if (messageMode === "matrix")
         await sendMatrixMessage(conversationId, body);
-      else await sendOpenMediaMessage(conversationId, currentUserId, body);
+      else await sendOpenMediaMessage(conversationId, currentUserId, body, replyTo?.id);
       await refreshMessages();
     },
     [currentUserId, mailConversations, messageMode, refreshMail, refreshMessages],

@@ -40,6 +40,10 @@ export interface StoredMailMessage extends SyncedMailMessage {
   /** DMARC-authenticated sender with a BIMI mark certificate (checked by the mail service). */
   senderVerified?: boolean;
   senderLogoUrl?: string;
+  remoteImages?: string[];
+  attachments?: Array<{ filename: string; contentType: string; size: number; storagePath?: string; inline: boolean }>;
+  /** Message-ID this email replies to. */
+  inReplyTo?: string;
 }
 
 export interface OutgoingMail {
@@ -90,7 +94,31 @@ export async function listStoredMail(limit = 500): Promise<StoredMailMessage[]> 
     text: String(row.body_text ?? ''),
     senderVerified: row.sender_verified === true,
     senderLogoUrl: typeof row.sender_logo_url === 'string' && row.sender_logo_url.startsWith('https://') ? row.sender_logo_url : undefined,
+    remoteImages: Array.isArray(row.remote_images) ? row.remote_images.map(String).filter((url) => url.startsWith('https://')) : [],
+    attachments: Array.isArray(row.attachments)
+      ? (row.attachments as Array<Record<string, unknown>>).map((item) => ({
+          filename: String(item.filename ?? 'attachment'),
+          contentType: String(item.contentType ?? 'application/octet-stream'),
+          size: Number(item.size ?? 0),
+          storagePath: typeof item.storagePath === 'string' ? item.storagePath : undefined,
+          inline: item.inline === true,
+        }))
+      : [],
+    inReplyTo: typeof row.in_reply_to === 'string' ? row.in_reply_to : undefined,
   }));
+}
+
+/** Short-lived private link to a stored attachment (cached for reuse). */
+const signedLinks = new Map<string, { url: string; expires: number }>();
+export async function attachmentURL(storagePath: string): Promise<string> {
+  const cached = signedLinks.get(storagePath);
+  if (cached && cached.expires > Date.now()) return cached.url;
+  const client = getSupabaseClient();
+  if (!client) throw new Error('Open Media is not connected to its backend.');
+  const { data, error } = await client.storage.from('mail-attachments').createSignedUrl(storagePath, 3600);
+  if (error || !data) throw error ?? new Error('This attachment is unavailable.');
+  signedLinks.set(storagePath, { url: data.signedUrl, expires: Date.now() + 50 * 60_000 });
+  return data.signedUrl;
 }
 
 async function request<T = unknown>(path: string, init: { method?: string; body?: unknown }, fallbackError: string): Promise<T> {

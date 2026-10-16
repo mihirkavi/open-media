@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
@@ -15,9 +15,10 @@ import {
   useWindowDimensions,
 } from "react-native";
 
+import { attachmentURL } from "../connectors/mailApiConnector";
 import { formatEmailBody } from "../domain/emailBody";
 import { formatListTime, layoutThread } from "../domain/threadLayout";
-import { Conversation, Message, PeopleFilter, Person } from "../domain/models";
+import { Conversation, Message, MessageAttachment, PeopleFilter, Person } from "../domain/models";
 import { conversationTitle, filterConversations } from "../domain/selectors";
 import { ThemeColors } from "../theme";
 import { useOpenMediaTheme } from "../themeContext";
@@ -31,7 +32,7 @@ interface Props {
   messageMode: MessageMode;
   blockedUserIds: string[];
   onRetry: () => Promise<void>;
-  onSend: (conversationId: string, body: string) => Promise<void>;
+  onSend: (conversationId: string, body: string, replyTo?: Message) => Promise<void>;
   onSearchProfiles: (query: string) => Promise<Person[]>;
   onStartConversation: (personId: string) => Promise<string>;
   onSetBlocked: (personId: string, blocked: boolean) => Promise<void>;
@@ -295,7 +296,7 @@ function MessageThread({
   conversation: Conversation;
   blocked: boolean;
   onBack?: () => void;
-  onSend: (conversationId: string, body: string) => Promise<void>;
+  onSend: (conversationId: string, body: string, replyTo?: Message) => Promise<void>;
   onSetBlocked: (personId: string, blocked: boolean) => Promise<void>;
   onReport: (
     conversationId: string,
@@ -310,6 +311,8 @@ function MessageThread({
   const [error, setError] = useState("");
   const [safetyOpen, setSafetyOpen] = useState(false);
   const [safetyStatus, setSafetyStatus] = useState("");
+  // Like iMessage, a thread opens at the newest message.
+  const threadScroll = useRef<ScrollView>(null);
   const canSend =
     !blocked &&
     (conversation.sourceSummary.includes("open_media") ||
@@ -324,13 +327,22 @@ function MessageThread({
         message.direction === "inbound" &&
         message.senderPersonId === otherPerson?.id,
     );
+  const [replyTo, setReplyTo] = useState<Message>();
+  const composerInput = useRef<TextInput>(null);
+  const startReply = (message: Message) => {
+    setReplyTo(message);
+    setTimeout(() => composerInput.current?.focus(), 0);
+  };
+  const byId = useMemo(() => new Map(conversation.messages.map((message) => [message.id, message])), [conversation.messages]);
+  const senderLabel = (message: Message) => message.direction === "outbound" ? "You" : (otherPerson?.name ?? "Them");
   const submit = async () => {
     if (!body.trim()) return;
     setBusy(true);
     setError("");
     try {
-      await onSend(conversation.id, body);
+      await onSend(conversation.id, body, replyTo);
       setBody("");
+      setReplyTo(undefined);
     } catch (reason) {
       setError(
         reason instanceof Error ? reason.message : "Message could not be sent.",
@@ -392,7 +404,11 @@ function MessageThread({
           </Pressable>
         ) : null}
       </View>
-      <ScrollView contentContainerStyle={styles.threadContent}>
+      <ScrollView
+        ref={threadScroll}
+        contentContainerStyle={styles.threadContent}
+        onContentSizeChange={() => threadScroll.current?.scrollToEnd({ animated: false })}
+      >
         {conversation.messages.length ? (
           layoutThread(conversation.messages).map((item) =>
             item.kind === "time" ? (
@@ -408,13 +424,26 @@ function MessageThread({
                   item.groupStart && styles.groupStart,
                 ]}
               >
-                <View
+                <ReplyableBubble
+                  outbound={item.message.direction === "outbound"}
+                  enabled={canSend}
+                  onReply={() => startReply(item.message)}
                   style={[
                     styles.bubble,
                     item.message.direction === "outbound" && styles.outboundBubble,
                     item.groupEnd && (item.message.direction === "outbound" ? styles.outboundTail : styles.inboundTail),
                   ]}
                 >
+                  {item.message.replyToMessageId && byId.get(item.message.replyToMessageId) ? (
+                    <View style={[styles.quote, item.message.direction === "outbound" && styles.quoteOutbound]}>
+                      <Text style={[styles.quoteName, item.message.direction === "outbound" && styles.quoteNameOutbound]}>
+                        {senderLabel(byId.get(item.message.replyToMessageId)!)}
+                      </Text>
+                      <Text numberOfLines={2} style={[styles.quoteText, item.message.direction === "outbound" && styles.quoteTextOutbound]}>
+                        {quoteText(byId.get(item.message.replyToMessageId)!)}
+                      </Text>
+                    </View>
+                  ) : null}
                   {item.subject ? (
                     <Text
                       style={[
@@ -437,7 +466,8 @@ function MessageThread({
                       {item.message.body}
                     </Text>
                   )}
-                </View>
+                </ReplyableBubble>
+                <MessageMedia message={item.message} />
                 {item.groupEnd && conversation.sourceSummary.length > 1 ? (
                   <View style={[styles.bubbleSource, item.message.direction === "outbound" && styles.outboundWrap]}>
                     <SourceMarker source={item.message.source} showLabel />
@@ -466,8 +496,21 @@ function MessageThread({
               {error}
             </Text>
           ) : null}
+          {replyTo ? (
+            <View style={styles.replyBanner}>
+              <View style={styles.replyBar} />
+              <View style={styles.replyBannerCopy}>
+                <Text style={styles.replyBannerTitle}>Replying to {senderLabel(replyTo)}</Text>
+                <Text numberOfLines={1} style={styles.replyBannerText}>{quoteText(replyTo)}</Text>
+              </View>
+              <Pressable accessibilityRole="button" accessibilityLabel="Cancel reply" onPress={() => setReplyTo(undefined)} style={styles.replyCancel}>
+                <Ionicons name="close" size={18} color={colors.textSecondary} />
+              </Pressable>
+            </View>
+          ) : null}
           <View style={styles.composer}>
             <TextInput
+              ref={composerInput}
               accessibilityLabel="Message"
               maxLength={8000}
               multiline
@@ -777,6 +820,194 @@ function VerifiedBadge({ domain }: { domain: string }) {
   );
 }
 
+/** One line of a message for quotes and the reply banner. */
+function quoteText(message: Message): string {
+  const text = message.channel === "email" ? formatEmailBody(message.body).plain : message.body;
+  const line = text.split("\n").map((part) => part.trim()).find(Boolean);
+  if (line) return line;
+  if (message.attachments?.length) return message.attachments.every((item) => item.contentType.startsWith("image/")) ? "Photo" : "Attachment";
+  return message.emailContext?.subject ?? "Message";
+}
+
+/**
+ * A message bubble you can reply to, like iMessage: hover on the web shows a
+ * reply button beside it; long-press anywhere starts a reply.
+ */
+function ReplyableBubble({ outbound, enabled, onReply, style, children }: React.PropsWithChildren<{ outbound: boolean; enabled: boolean; onReply: () => void; style: object }>) {
+  const { colors } = useOpenMediaTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const [hovered, setHovered] = useState(false);
+  if (!enabled) return <View style={style}>{children}</View>;
+  return (
+    <View style={[styles.replyRow, outbound && styles.replyRowOutbound]}>
+      <Pressable
+        accessibilityActions={[{ name: "reply", label: "Reply" }]}
+        onAccessibilityAction={(event) => event.nativeEvent.actionName === "reply" && onReply()}
+        onLongPress={onReply}
+        delayLongPress={350}
+        onHoverIn={() => setHovered(true)}
+        onHoverOut={() => setHovered(false)}
+        style={[style, styles.replyBubble]}
+      >
+        {children}
+      </Pressable>
+      {Platform.OS === "web" ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Reply"
+          onPress={onReply}
+          onHoverIn={() => setHovered(true)}
+          onHoverOut={() => setHovered(false)}
+          style={[styles.replyButton, !hovered && styles.replyButtonHidden]}
+        >
+          <Ionicons name="arrow-undo-outline" size={16} color={colors.textSecondary} />
+        </Pressable>
+      ) : null}
+    </View>
+  );
+}
+
+/** Inline images under this size are usually footer icons, not content. */
+const minInlineImageBytes = 8 * 1024;
+
+/** Photos as rounded bubbles, files as chips, remote images on request. */
+function MessageMedia({ message }: { message: Message }) {
+  const { colors } = useOpenMediaTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const [showRemote, setShowRemote] = useState(false);
+  const attachments = (message.attachments ?? []).filter(
+    (item) => !(item.inline && item.contentType.startsWith("image/") && item.size < minInlineImageBytes),
+  );
+  const images = attachments.filter((item) => item.contentType.startsWith("image/") && item.storagePath);
+  const files = attachments.filter((item) => !images.includes(item));
+  const remote = message.remoteImages ?? [];
+  const outbound = message.direction === "outbound";
+  if (!images.length && !files.length && !remote.length) return null;
+  return (
+    <View style={[styles.media, outbound && styles.mediaOutbound]}>
+      {images.map((item) => (
+        <PhotoBubble key={item.storagePath} attachment={item} />
+      ))}
+      {files.map((item, index) => (
+        <FileChip key={`${item.name}-${index}`} attachment={item} />
+      ))}
+      {remote.length ? (
+        showRemote ? (
+          remote.map((url) => <PhotoBubble key={url} url={url} />)
+        ) : (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityHint="Images load from the sender's servers, which can tell them you opened this email."
+            onPress={() => setShowRemote(true)}
+            style={styles.showImages}
+          >
+            <Ionicons name="image-outline" size={16} color={colors.textSecondary} />
+            <Text style={styles.showImagesText}>
+              Show {remote.length} {remote.length === 1 ? "image" : "images"}
+            </Text>
+          </Pressable>
+        )
+      ) : null}
+    </View>
+  );
+}
+
+function PhotoBubble({ attachment, url: directURL }: { attachment?: MessageAttachment; url?: string }) {
+  const { colors } = useOpenMediaTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const [url, setURL] = useState(directURL);
+  const [ratio, setRatio] = useState(4 / 3);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (directURL || !attachment?.storagePath) return;
+    let active = true;
+    attachmentURL(attachment.storagePath).then((value) => active && setURL(value), () => active && setFailed(true));
+    return () => { active = false; };
+  }, [attachment?.storagePath, directURL]);
+  useEffect(() => {
+    if (!url) return;
+    Image.getSize(url, (width, height) => width && height && setRatio(Math.min(Math.max(width / height, 0.5), 2.5)), () => undefined);
+  }, [url]);
+  if (failed) return null;
+  return (
+    <Pressable
+      accessibilityRole="imagebutton"
+      accessibilityLabel={attachment ? `Photo: ${attachment.name}` : "Image from this email"}
+      disabled={!url}
+      onPress={() => url && Linking.openURL(url)}
+      style={[styles.photo, { aspectRatio: ratio }]}
+    >
+      {url ? (
+        <Image
+          accessibilityIgnoresInvertColors
+          source={{ uri: url }}
+          resizeMode="cover"
+          onError={() => setFailed(true)}
+          style={styles.photoImage}
+        />
+      ) : (
+        <ActivityIndicator color={colors.textTertiary} />
+      )}
+    </Pressable>
+  );
+}
+
+function FileChip({ attachment }: { attachment: MessageAttachment }) {
+  const { colors } = useOpenMediaTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const [busy, setBusy] = useState(false);
+  const available = Boolean(attachment.storagePath);
+  const open = async () => {
+    if (!attachment.storagePath) return;
+    setBusy(true);
+    try { await Linking.openURL(await attachmentURL(attachment.storagePath)); }
+    finally { setBusy(false); }
+  };
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${attachment.name}, ${formatBytes(attachment.size)}`}
+      disabled={!available || busy}
+      onPress={open}
+      style={styles.fileChip}
+    >
+      <View style={styles.fileIcon}>
+        {busy ? <ActivityIndicator size="small" color={colors.text} /> : <Ionicons name={fileIcon(attachment.contentType)} size={18} color={colors.text} />}
+      </View>
+      <View style={styles.fileCopy}>
+        <Text numberOfLines={1} style={styles.fileName}>{attachment.name}</Text>
+        <Text numberOfLines={1} style={styles.fileMeta}>
+          {available ? `${fileKind(attachment)} · ${formatBytes(attachment.size)}` : `${formatBytes(attachment.size)} · Open in your mail app`}
+        </Text>
+      </View>
+      {available ? <Ionicons name="arrow-down-circle-outline" size={20} color={colors.textTertiary} /> : null}
+    </Pressable>
+  );
+}
+
+function fileIcon(contentType: string): keyof typeof Ionicons.glyphMap {
+  if (contentType.startsWith("image/")) return "image-outline";
+  if (contentType.startsWith("video/")) return "film-outline";
+  if (contentType.startsWith("audio/")) return "musical-notes-outline";
+  if (contentType === "application/pdf") return "document-text-outline";
+  if (/zip|compressed|tar|gzip/.test(contentType)) return "archive-outline";
+  if (/calendar/.test(contentType)) return "calendar-outline";
+  if (/sheet|excel|csv/.test(contentType)) return "grid-outline";
+  if (/presentation|powerpoint|keynote/.test(contentType)) return "easel-outline";
+  return "document-outline";
+}
+
+function fileKind(attachment: MessageAttachment): string {
+  const extension = attachment.name.includes(".") ? attachment.name.split(".").pop()!.toUpperCase().slice(0, 5) : "";
+  return extension || attachment.contentType.split("/")[1]?.toUpperCase().slice(0, 8) || "File";
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
 /** Email shown like a message: links as words, quoted history hidden, long mail collapsed. */
 function EmailBody({ message }: { message: Message }) {
   const { colors } = useOpenMediaTheme();
@@ -1030,6 +1261,66 @@ function createStyles(colors: ThemeColors) {
     outboundTail: { borderBottomRightRadius: 6 },
     bubbleSubject: { marginBottom: 3, color: colors.text, fontSize: 15, lineHeight: 21, fontWeight: "700" },
     bubbleSource: { marginTop: 4, marginHorizontal: 6, alignSelf: "flex-start" },
+    replyRow: { maxWidth: "100%", flexDirection: "row", alignItems: "center", gap: 6 },
+    replyBubble: { flexShrink: 1, minWidth: 0 },
+    replyRowOutbound: { flexDirection: "row-reverse" },
+    replyButton: { width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: colors.chrome },
+    replyButtonHidden: { opacity: 0 },
+    quote: { marginBottom: 6, paddingLeft: 9, borderLeftWidth: 3, borderLeftColor: colors.textTertiary },
+    quoteOutbound: { borderLeftColor: colors.surface, opacity: 0.85 },
+    quoteName: { color: colors.textSecondary, fontSize: 12, fontWeight: "700" },
+    quoteNameOutbound: { color: colors.surface },
+    quoteText: { marginTop: 1, color: colors.textSecondary, fontSize: 13, lineHeight: 18 },
+    quoteTextOutbound: { color: colors.surface },
+    replyBanner: { marginBottom: 8, paddingVertical: 8, paddingLeft: 10, paddingRight: 4, flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 14, backgroundColor: colors.chrome },
+    replyBar: { width: 3, alignSelf: "stretch", borderRadius: 2, backgroundColor: colors.text },
+    replyBannerCopy: { flex: 1, minWidth: 0 },
+    replyBannerTitle: { color: colors.text, fontSize: 12, fontWeight: "700" },
+    replyBannerText: { marginTop: 1, color: colors.textSecondary, fontSize: 13 },
+    replyCancel: { width: 32, height: 32, alignItems: "center", justifyContent: "center" },
+    media: { marginTop: 4, gap: 4, alignItems: "flex-start", width: 280, maxWidth: "100%" },
+    mediaOutbound: { alignItems: "flex-end", alignSelf: "flex-end" },
+    photo: {
+      width: "100%",
+      maxHeight: 360,
+      overflow: "hidden",
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: 18,
+      backgroundColor: colors.bubble,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    photoImage: { width: "100%", height: "100%" },
+    fileChip: {
+      width: "100%",
+      minHeight: 56,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      borderRadius: 16,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    fileIcon: { width: 36, height: 36, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: colors.chrome },
+    fileCopy: { flex: 1, minWidth: 0 },
+    fileName: { color: colors.text, fontSize: 14, fontWeight: "600" },
+    fileMeta: { marginTop: 2, color: colors.textTertiary, fontSize: 12 },
+    showImages: {
+      minHeight: 36,
+      paddingHorizontal: 12,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      borderRadius: 18,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    showImagesText: { color: colors.textSecondary, fontSize: 13, fontWeight: "600" },
     message: { color: colors.text, fontSize: 15, lineHeight: 21 },
     outboundMessage: { color: colors.surface },
     composerWrap: {

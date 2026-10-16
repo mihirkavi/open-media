@@ -91,7 +91,9 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
       const input = await connectionInput({ ...account, password: decryptSecret(account.encryptedSecret, env.MAIL_CREDENTIALS_KEY) }, env);
       const messages = account.protocol === 'imap' ? await syncImap(input) : await syncPop3(input);
       await repository.saveMessages(session.userId, account.id, messages);
-      return json(200, { messages, count: messages.length, mode: account.protocol === 'imap' ? 'sync' : 'import' }, headers);
+      // File bytes stay on the server; clients read stored mail through the database.
+  const summaries = messages.map(({ attachments, ...message }) => ({ ...message, attachmentCount: attachments?.length ?? 0 }));
+  return json(200, { messages: summaries, count: messages.length, mode: account.protocol === 'imap' ? 'sync' : 'import' }, headers);
     }
 
     const sendMatch = request.method === 'POST' && url.pathname.match(/^\/v1\/mail-accounts\/([^/]+)\/send$/);

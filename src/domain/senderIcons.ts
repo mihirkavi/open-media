@@ -6,6 +6,12 @@ const personalMailDomains = new Set([
   'tuta.io', 'qq.com', '163.com', 'web.de', 'test.local', 'example.com', 'openmedia.test',
 ]);
 
+export function isPersonalMailDomain(domain: string): boolean {
+  const lower = domain.toLowerCase();
+  const organization = lower.split('.').slice(-2).join('.');
+  return personalMailDomains.has(lower) || personalMailDomains.has(organization) || lower.endsWith('.test') || lower.endsWith('.local');
+}
+
 /**
  * Pictures to try for an email sender, best first: the verified BIMI logo, then
  * the company's own site icon (organization domains only). The avatar falls
@@ -16,6 +22,6 @@ export function senderIconUrls(address: string, bimiLogoUrl?: string): string[] 
   const domain = address.split('@')[1]?.toLowerCase();
   if (!domain || !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) return urls;
   const organization = domain.split('.').slice(-2).join('.');
-  if (personalMailDomains.has(domain) || personalMailDomains.has(organization) || domain.endsWith('.test') || domain.endsWith('.local')) return urls;
+  if (isPersonalMailDomain(domain)) return urls;
   return [...urls, `https://${organization}/apple-touch-icon.png`, `https://www.${organization}/apple-touch-icon.png`, `https://www.${organization}/favicon.ico`];
 }

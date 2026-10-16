@@ -39,6 +39,8 @@ This checklist defines “production ready” for the current onboarding private
 - [ ] Production sign-in emails: configure custom SMTP in Supabase Auth (dashboard → Authentication → SMTP) and push the templates; the built-in email service is rate-limited and not meant for real users.
 - [ ] Probe a real mailbox end to end in production (connect with SMTP, sync, reply).
 - [x] Verified senders (BIMI) and message-style email formatting; `20261016120000_mail_verified_senders.sql` adds `sender_verified`/`sender_logo_url` with HTTPS-only logo URLs (database-tested).
+- [x] Attachments and on-request remote images (`20261017120000_mail_attachments.sql`: private `mail-attachments` bucket with per-user Storage policies) and iMessage-style replies (`20261017130000_message_replies.sql`: same-conversation reply trigger, email `in_reply_to`). Database-tested; verified in the browser with synthetic mail.
+- [ ] Production: confirm the `mail-attachments` bucket and policies exist after migrating, and that account deletion clears Storage.
 - [ ] Validate BIMI mark-certificate chains against pinned Mark Verifying Authority roots before calling the badge equivalent to Gmail's.
 - [ ] Fix or work around IMAP to Gmail stalling in the Workers runtime (local `wrangler dev`, 2026-10-16; iCloud unaffected). Options: a Workers-compatible IMAP client, or hosting mail sync on Node.js. Local development already runs mail sync on Node.js.
 

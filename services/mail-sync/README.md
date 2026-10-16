@@ -49,11 +49,15 @@ Per user and Cloudflare location, the Worker allows five connection tests, twelv
 
 During sync, `src/senderVerification.ts` marks a message as from a verified sender when the receiving server's topmost `Authentication-Results` header records `dmarc=pass` for the From domain, the domain's DMARC policy is enforced (`quarantine`/`reject`), and its BIMI record has an HTTPS SVG logo plus a mark certificate whose leaf is a BIMI certificate (EKU `1.3.6.1.5.5.7.3.31`) for the domain, currently valid, and signed by the next certificate in the file. DNS lookups use DNS-over-HTTPS and are cached per domain for six hours. The app shows the logo, a blue check, and the domain.
 
+## Attachments and images
+
+Sync keeps up to 10 attachments per message (15 MB each) and uploads them to the private `mail-attachments` Storage bucket under `<user id>/<mailbox id>/…`, using the person's own session (Storage policies allow only their folder; the save function rejects paths outside it). Messages whose attachments are already stored are not re-uploaded. Larger files keep metadata only. HTTPS `<img>` URLs from the HTML body are stored as URLs (at most 8, tracking pixels removed) and loaded by the app only on request. Removing a mailbox deletes its folder; deleting the Open Media account deletes the person's whole folder first.
+
 ## Known limits
 
 - IMAP reads `INBOX` and the Sent folder only; other folders, cursors, flag updates, and IDLE are next-stage work.
 - POP is import-only and does not delete server messages.
-- Plain-text bodies are capped at 50,000 characters; HTML and attachments are not stored or sent.
+- Plain-text bodies are capped at 50,000 characters; HTML is not stored, and replies are sent as plain text without attachments.
 - SMTP uses the same username and password as the incoming server.
 - Microsoft (Outlook.com, Microsoft 365) usually requires OAuth for IMAP/SMTP, which is not implemented.
 - Verified-sender checks do not yet validate the mark certificate chain up to a pinned Mark Verifying Authority root; the domain is always shown next to the name so lookalike domains remain visible.

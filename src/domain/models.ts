@@ -41,6 +41,19 @@ export interface Person {
 export interface EmailContext {
   providerThreadId: string;
   subject: string;
+  /** The other person's address on this message, and the mailbox it belongs to (for replies). */
+  address?: string;
+  accountId?: string;
+  accountEmail?: string;
+}
+
+export interface MessageAttachment {
+  name: string;
+  contentType: string;
+  size: number;
+  /** Private storage path; absent when the file was too large to keep. */
+  storagePath?: string;
+  inline: boolean;
 }
 
 export interface Message {
@@ -55,6 +68,11 @@ export interface Message {
   source: MessageSource;
   channel: MessageChannel;
   emailContext?: EmailContext;
+  attachments?: MessageAttachment[];
+  /** HTTPS images referenced by an HTML email; shown only when the person asks. */
+  remoteImages?: string[];
+  /** The message this one replies to, in the same conversation (shown as a quote). */
+  replyToMessageId?: string;
   direction: 'inbound' | 'outbound';
   deliveryState: 'received' | 'sent' | 'pending' | 'failed';
 }

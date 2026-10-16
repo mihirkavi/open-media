@@ -1,59 +1,89 @@
 import { StoredMailMessage } from '../connectors/mailApiConnector';
 import { emailPreview } from './emailBody';
-import { senderIconUrls } from './senderIcons';
 import { Conversation, MessageSource, Person } from './models';
+import { isPersonalMailDomain, senderIconUrls } from './senderIcons';
+
+/** Mailbox names companies send from; mail from these joins one chat per company. */
+const roleAddress = /^(no-?reply|do-?not-?reply|news(letter)?s?|info|hello|hi|team|support|help|care|service|notifications?|notify|alerts?|updates?|orders?|billing|receipts?|accounts?|marketing|offers?|deals|promo(tions)?|mail(er)?|contact|feedback|community|digest|security|bounce|reply|members?)([._+-].*)?$/i;
+
+/** Who a message is with: one chat per person, or one per company for company mail. */
+export function correspondentKey(address: string, verified = false): { key: string; company?: string } {
+  const [local = '', domain = ''] = address.toLowerCase().split('@');
+  if (!domain) return { key: `address:${address.toLowerCase()}` };
+  const organization = domain.split('.').slice(-2).join('.');
+  if (isPersonalMailDomain(domain)) return { key: `address:${address.toLowerCase()}` };
+  const subdomainSender = domain !== organization;
+  if (verified || roleAddress.test(local) || subdomainSender) return { key: `company:${organization}`, company: organization };
+  return { key: `address:${address.toLowerCase()}` };
+}
 
 /**
- * Turns stored email (inbound and sent) into people-first conversations: one
- * conversation per mailbox and other person, with both directions in order.
+ * Turns stored email (inbound and sent, across every connected mailbox) into
+ * people-first conversations: one per person, or one per company for company
+ * mail, with both directions in order.
  */
 export function normalizeStoredEmail(messages: StoredMailMessage[]): Conversation[] {
-  const grouped = new Map<string, { accountId: string; accountEmail: string; address: string; items: StoredMailMessage[] }>();
+  const groups = new Map<string, { key: string; company?: string; items: Array<StoredMailMessage & { address: string }> }>();
   for (const message of messages) {
     const own = message.accountEmail.toLowerCase();
     const outbound = extractEmail(message.from) === own;
     const address = outbound
       ? extractEmail(message.to.find((recipient) => extractEmail(recipient) !== own) ?? message.to[0] ?? '') || 'unknown-recipient'
       : extractEmail(message.from) || message.from || 'unknown-sender';
-    const key = `${message.accountId}:${address}`;
-    const group = grouped.get(key) ?? { accountId: message.accountId, accountEmail: message.accountEmail, address, items: [] };
-    group.items.push(message);
-    grouped.set(key, group);
+    const { key, company } = correspondentKey(address, Boolean(message.senderVerified));
+    const group = groups.get(key) ?? { key, company, items: [] };
+    group.items.push({ ...message, address });
+    groups.set(key, group);
   }
 
-  return [...grouped.values()].map(({ accountId, accountEmail, address, items }) => {
-    const source: MessageSource = /@(icloud|me|mac)\.com$/i.test(accountEmail) ? 'icloud' : /@(gmail|googlemail)\.com$/i.test(accountEmail) ? 'gmail' : 'imap';
-    const unique = [...new Map(items.map((item) => [item.sourceMessageId, item])).values()];
+  return [...groups.values()].map(({ key, company, items }) => {
+    const unique = [...new Map(items.map((item) => [`${item.accountId}:${item.sourceMessageId}`, item])).values()];
     const ordered = unique.sort((a, b) => Date.parse(a.sentAt) - Date.parse(b.sentAt));
-    const inbound = ordered.find((item) => extractEmail(item.from) !== accountEmail.toLowerCase());
-    const name = (inbound && extractName(inbound.from)) || address;
-    const verified = [...ordered].reverse().find((item) => item.senderVerified && extractEmail(item.from) === address);
-    const personId = `mail-person-${stableID(address)}`;
-    const identityId = `mail-identity-${stableID(address)}`;
-    const conversationId = `mail-conversation-${stableID(`${accountId}:${address}`)}`;
+    const inboundItems = ordered.filter((item) => extractEmail(item.from) !== item.accountEmail.toLowerCase());
+    const latestInbound = inboundItems.at(-1);
+    const latest = ordered.at(-1)!;
+    const replyTarget = latestInbound ?? latest;
+    const verified = [...inboundItems].reverse().find((item) => item.senderVerified);
+    const name = (latestInbound && extractName(latestInbound.from)) || (company ? brandName(company) : replyTarget.address);
+    const source: MessageSource = /@(icloud|me|mac)\.com$/i.test(replyTarget.accountEmail) ? 'icloud' : /@(gmail|googlemail)\.com$/i.test(replyTarget.accountEmail) ? 'gmail' : 'imap';
+    const personId = `mail-person-${stableID(key)}`;
+    const conversationId = `mail-conversation-${stableID(key)}`;
+    const addresses = [...new Set(ordered.map((item) => item.address))];
     const person: Person = {
-      id: personId, name, initials: initialsFor(name), avatarColor: colorFor(address),
-      ...(verified ? { verifiedDomain: address.split('@')[1] } : {}),
-      avatarUrls: senderIconUrls(address, verified?.senderLogoUrl),
-      identities: [{ id: identityId, personId, kind: 'email', value: address, source, label: accountEmail, verifiedByUser: false }],
+      id: personId, name, initials: initialsFor(name), avatarColor: colorFor(key),
+      identities: addresses.map((value) => ({ id: `mail-identity-${stableID(value)}`, personId, kind: 'email' as const, value, source, label: replyTarget.accountEmail, verifiedByUser: false })),
+      ...(verified ? { verifiedDomain: verified.address.split('@')[1] } : {}),
+      avatarUrls: senderIconUrls(replyTarget.address, verified?.senderLogoUrl),
     };
-    const latest = ordered.at(-1);
     return {
       id: conversationId,
-      participants: [person], sourceSummary: [source], lastMessageAt: latest?.sentAt ?? new Date().toISOString(),
-      preview: latest ? emailPreview(latest.text, latest.subject) : '', unreadCount: 0, labels: [],
-      email: { accountId, accountEmail, address, latestSubject: latest?.subject ?? '', latestMessageId: latest?.sourceMessageId },
-      messages: ordered.map((message) => {
-        const outbound = extractEmail(message.from) === accountEmail.toLowerCase();
+      participants: [person], sourceSummary: [source], lastMessageAt: latest.sentAt,
+      preview: emailPreview(latest.text, '') || attachmentPreview(latest), unreadCount: 0, labels: [],
+      email: { accountId: replyTarget.accountId, accountEmail: replyTarget.accountEmail, address: replyTarget.address, latestSubject: replyTarget.subject, latestMessageId: replyTarget.sourceMessageId },
+      messages: linkReplies(ordered.map((message) => {
+        const outbound = extractEmail(message.from) === message.accountEmail.toLowerCase();
+        const identityId = `mail-identity-${stableID(message.address)}`;
         return {
-          id: `mail-message-${stableID(`${accountId}:${message.sourceMessageId}`)}`, sourceMessageId: message.sourceMessageId,
+          id: `mail-message-${stableID(`${message.accountId}:${message.sourceMessageId}`)}`, sourceMessageId: message.sourceMessageId,
           conversationId, senderPersonId: outbound ? 'me' : personId, senderIdentityId: outbound ? 'me' : identityId,
-          recipientPersonIds: outbound ? [personId] : ['me'], sentAt: message.sentAt, body: message.text || '(No plain-text body)', source, channel: 'email' as const,
-          emailContext: { providerThreadId: message.sourceMessageId, subject: message.subject || '(No subject)' },
+          recipientPersonIds: outbound ? [personId] : ['me'], sentAt: message.sentAt, body: message.text, source, channel: 'email' as const,
+          emailContext: { providerThreadId: message.sourceMessageId, subject: message.subject || '(No subject)', address: message.address, accountId: message.accountId, accountEmail: message.accountEmail },
+          attachments: (message.attachments ?? []).map((item) => ({ name: item.filename, contentType: item.contentType, size: item.size, storagePath: item.storagePath, inline: item.inline })),
+          remoteImages: message.remoteImages ?? [],
           direction: outbound ? 'outbound' as const : 'inbound' as const, deliveryState: outbound ? 'sent' as const : 'received' as const,
+          inReplyTo: message.inReplyTo,
         };
-      }),
+      })),
     };
+  });
+}
+
+/** Points each reply at the message it quotes (by Message-ID) when that message is in the same chat. */
+function linkReplies<T extends { id: string; sourceMessageId: string; inReplyTo?: string }>(messages: T[]): Array<Omit<T, 'inReplyTo'> & { replyToMessageId?: string }> {
+  const bySource = new Map(messages.map((message) => [message.sourceMessageId, message.id]));
+  return messages.map(({ inReplyTo, ...message }) => {
+    const replyTo = inReplyTo ? bySource.get(inReplyTo) : undefined;
+    return replyTo && replyTo !== message.id ? { ...message, replyToMessageId: replyTo } : message;
   });
 }
 
@@ -63,6 +93,13 @@ export function replySubject(subject: string): string {
 }
 
 export function extractEmail(value: string): string { return value.match(/<([^>]+)>/)?.[1]?.trim().toLocaleLowerCase() ?? (value.includes('@') ? value.trim().toLocaleLowerCase() : ''); }
+function attachmentPreview(message: StoredMailMessage): string {
+  const count = message.attachments?.length ?? 0;
+  if (!count) return message.subject;
+  const images = message.attachments!.filter((item) => item.contentType.startsWith('image/')).length;
+  return images === count ? (count === 1 ? 'Photo' : `${count} photos`) : (count === 1 ? 'Attachment' : `${count} attachments`);
+}
+function brandName(organization: string): string { const label = organization.split('.')[0]; return label.charAt(0).toUpperCase() + label.slice(1); }
 function extractName(value: string): string { return value.replace(/<[^>]+>/, '').trim().replace(/^['"]|['"]$/g, '').trim(); }
 function initialsFor(name: string): string { return name.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || '?'; }
 function stableID(value: string): string { let hash = 2166136261; for (let index = 0; index < value.length; index += 1) hash = Math.imul(hash ^ value.charCodeAt(index), 16777619); return (hash >>> 0).toString(36); }

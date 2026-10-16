@@ -1,4 +1,7 @@
+import { attachmentPath } from './mailMedia.js';
 import { MailAccountInput, PublicMailAccount, StoredMailAccount, SyncedMessage } from './types.js';
+
+const bucket = 'mail-attachments';
 
 interface AccountRow {
   id: string;
@@ -77,14 +80,71 @@ export class SupabaseRestRepository {
     return rows.map((row) => ({ id: row.id, email: row.email, protocol: row.protocol, status: row.status, canSend: row.can_send }));
   }
 
-  async deleteAccount(_userId: string, accountId: string): Promise<boolean> {
+  async deleteAccount(userId: string, accountId: string): Promise<boolean> {
+    // Storage files are not removed by the database cascade; delete them first.
+    await this.removeFolder(`${userId}/${accountId}`);
     return await this.rpc<boolean>('open_media_delete_mail_account', { p_account_id: accountId });
   }
 
-  async saveMessages(_userId: string, accountId: string, messages: SyncedMessage[]): Promise<void> {
+  async saveMessages(userId: string, accountId: string, messages: SyncedMessage[]): Promise<void> {
+    const stored = new Set(messages.some((message) => message.attachments?.length)
+      ? await this.rpc<string[]>('open_media_mail_messages_with_attachments', { p_account_id: accountId })
+      : []);
+    const payload = [];
+    for (const message of messages) {
+      const attachments = [];
+      for (const [position, attachment] of (message.attachments ?? []).entries()) {
+        const path = attachmentPath(userId, accountId, message.sourceMessageId, position, attachment.filename);
+        let storagePath: string | undefined;
+        if (attachment.content && !stored.has(message.sourceMessageId)) {
+          storagePath = (await this.upload(path, attachment.content, attachment.contentType)) ? path : undefined;
+        } else if (attachment.content) {
+          storagePath = path;
+        }
+        const { content: _content, ...metadata } = attachment;
+        attachments.push({ ...metadata, storagePath });
+      }
+      payload.push({ ...message, attachments });
+    }
     // The database accepts at most 100 messages per call.
-    for (let start = 0; start < messages.length; start += 100) {
-      await this.rpc('open_media_save_mail_messages', { p_account_id: accountId, p_messages: messages.slice(start, start + 100) });
+    for (let start = 0; start < payload.length; start += 100) {
+      await this.rpc('open_media_save_mail_messages', { p_account_id: accountId, p_messages: payload.slice(start, start + 100) });
+    }
+  }
+
+  /** Uploads one file to the person's private folder; false if Storage refused it. */
+  private async upload(path: string, content: Buffer, contentType: string): Promise<boolean> {
+    const response = await fetch(`${this.supabaseURL}/storage/v1/object/${bucket}/${encodePath(path)}`, {
+      method: 'POST',
+      headers: { apikey: this.publishableKey, authorization: `Bearer ${this.accessToken}`, 'content-type': contentType, 'x-upsert': 'true', 'cache-control': '3600' },
+      body: new Uint8Array(content),
+    });
+    return response.ok;
+  }
+
+  /** Deletes every file under a folder in the person's attachments bucket. */
+  private async removeFolder(prefix: string): Promise<void> {
+    const files: string[] = [];
+    const walk = async (folder: string, depth: number) => {
+      const response = await fetch(`${this.supabaseURL}/storage/v1/object/list/${bucket}`, {
+        method: 'POST',
+        headers: { apikey: this.publishableKey, authorization: `Bearer ${this.accessToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ prefix: folder, limit: 1000 }),
+      });
+      if (!response.ok) return;
+      for (const entry of await response.json() as Array<{ name: string; id: string | null }>) {
+        const path = `${folder}/${entry.name}`;
+        if (entry.id) files.push(path);
+        else if (depth < 3) await walk(path, depth + 1);
+      }
+    };
+    await walk(prefix, 0);
+    for (let start = 0; start < files.length; start += 100) {
+      await fetch(`${this.supabaseURL}/storage/v1/object/${bucket}`, {
+        method: 'DELETE',
+        headers: { apikey: this.publishableKey, authorization: `Bearer ${this.accessToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ prefixes: files.slice(start, start + 100) }),
+      });
     }
   }
 
@@ -105,4 +165,8 @@ export class SupabaseRestRepository {
     if (response.status === 204) return undefined as T;
     return await response.json() as T;
   }
+}
+
+function encodePath(path: string): string {
+  return path.split('/').map(encodeURIComponent).join('/');
 }

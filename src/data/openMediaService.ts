@@ -41,6 +41,7 @@ interface MessageRow {
   body: string;
   transport: "open_media" | "email";
   created_at: string;
+  reply_to_message_id: string | null;
 }
 
 function requireClient(): SupabaseClient {
@@ -173,6 +174,9 @@ export async function reportConversation(
 
 export async function deleteCurrentAccount(): Promise<void> {
   const client = requireClient();
+  // Stored email attachments are files, not rows; remove them before the account.
+  const { data: auth } = await client.auth.getUser();
+  if (auth.user) await removeStorageFolder(client, "mail-attachments", auth.user.id);
   const { error } = await client.rpc("open_media_delete_account");
   if (error) throw error;
   await client.auth.signOut({ scope: "local" });
@@ -205,6 +209,7 @@ export async function sendOpenMediaMessage(
   conversationId: string,
   senderId: string,
   body: string,
+  replyToMessageId?: string,
 ): Promise<void> {
   const trimmed = body.trim();
   if (!trimmed) return;
@@ -216,6 +221,7 @@ export async function sendOpenMediaMessage(
     client_id: createClientId(),
     body: trimmed,
     transport: "open_media",
+    ...(replyToMessageId ? { reply_to_message_id: replyToMessageId } : {}),
   });
   if (error) throw error;
 }
@@ -248,7 +254,7 @@ export async function loadOpenMediaConversations(
       client
         .from("messages")
         .select(
-          "id, conversation_id, sender_id, client_id, body, transport, created_at",
+          "id, conversation_id, sender_id, client_id, body, transport, created_at, reply_to_message_id",
         )
         .in("conversation_id", conversationIds)
         .order("created_at", { ascending: true }),
@@ -382,6 +388,7 @@ function mapMessage(
     channel: row.transport === "email" ? "email" : "native",
     direction: outbound ? "outbound" : "inbound",
     deliveryState: outbound ? "sent" : "received",
+    ...(row.reply_to_message_id ? { replyToMessageId: row.reply_to_message_id } : {}),
   };
 }
 
@@ -396,4 +403,14 @@ export function createClientId(): string {
       return value.toString(16);
     },
   );
+}
+
+async function removeStorageFolder(client: SupabaseClient, bucket: string, folder: string, depth = 0): Promise<void> {
+  const { data, error } = await client.storage.from(bucket).list(folder, { limit: 1000 });
+  if (error || !data) return;
+  const files = data.filter((entry) => entry.id).map((entry) => `${folder}/${entry.name}`);
+  if (files.length) await client.storage.from(bucket).remove(files);
+  if (depth < 3) {
+    for (const entry of data.filter((item) => !item.id)) await removeStorageFolder(client, bucket, `${folder}/${entry.name}`, depth + 1);
+  }
 }

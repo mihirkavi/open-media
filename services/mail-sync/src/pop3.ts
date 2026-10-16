@@ -4,6 +4,7 @@ import tls from 'node:tls';
 import { simpleParser } from 'mailparser';
 import { UserFacingError } from './errors.js';
 import { describeMailError } from './imap.js';
+import { collectAttachments, collectRemoteImages } from './mailMedia.js';
 import { verifySender } from './senderVerification.js';
 import { MailAccountInput, SyncedMessage } from './types.js';
 
@@ -44,6 +45,8 @@ export async function syncPop3(input: MailAccountInput, limit = 50): Promise<Syn
         from: parsed.from?.text ?? '', to: parsed.to ? (Array.isArray(parsed.to) ? parsed.to.map((address) => address.text) : [parsed.to.text]) : [],
         sentAt: messageDate(parsed).toISOString(), text: parsed.text?.slice(0, 50_000) ?? '',
         senderVerified: brand.verified, senderLogoUrl: brand.logoUrl,
+        remoteImages: collectRemoteImages(parsed.html), attachments: collectAttachments(parsed.attachments),
+        inReplyTo: parsed.inReplyTo,
       });
     }
     await connection.command('QUIT');
