@@ -92,7 +92,7 @@ export function OpenMediaMessages({
             <Text style={styles.subtitle}>
               {messageMode === "matrix"
                 ? "Local Matrix sandbox room."
-                : "People first. Open Media messages are live."}
+                : "Everyone you talk to, in one place."}
             </Text>
           </View>
           {messageMode === "open_media" ? (
@@ -783,12 +783,12 @@ function createStyles(colors: ThemeColors) {
       alignItems: "center",
       gap: 5,
       borderRadius: 15,
-      backgroundColor: "#E8F7F4",
+      backgroundColor: colors.chrome,
     },
     matrixBadgeText: {
-      color: "#0D7068",
-      fontSize: 8,
-      fontWeight: "900",
+      color: colors.textSecondary,
+      fontSize: 10,
+      fontWeight: "700",
       letterSpacing: 0.8,
     },
     search: {
@@ -820,7 +820,7 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.chrome,
     },
     chipActive: { backgroundColor: colors.text },
-    chipText: { color: colors.textSecondary, fontSize: 11, fontWeight: "600" },
+    chipText: { color: colors.textSecondary, fontSize: 13, fontWeight: "600" },
     chipTextActive: { color: colors.surface },
     center: {
       flex: 1,
@@ -838,7 +838,7 @@ function createStyles(colors: ThemeColors) {
     },
     error: {
       margin: 18,
-      color: "#B42318",
+      color: colors.danger,
       fontSize: 12,
       lineHeight: 18,
       textAlign: "center",
@@ -877,17 +877,17 @@ function createStyles(colors: ThemeColors) {
       justifyContent: "center",
       backgroundColor: colors.text,
     },
-    avatarText: { color: colors.surface, fontSize: 10, fontWeight: "800" },
+    avatarText: { color: colors.surface, fontSize: 12, fontWeight: "700" },
     rowCopy: { flex: 1, minWidth: 0 },
     rowTitleLine: { flexDirection: "row", alignItems: "center", gap: 7 },
-    rowTitle: { color: colors.text, fontSize: 14, fontWeight: "700" },
+    rowTitle: { color: colors.text, fontSize: 15, fontWeight: "600" },
     unread: {
       width: 7,
       height: 7,
       borderRadius: 4,
       backgroundColor: colors.accent,
     },
-    preview: { marginTop: 4, color: colors.textSecondary, fontSize: 11 },
+    preview: { marginTop: 3, color: colors.textSecondary, fontSize: 13 },
     sources: { marginTop: 5, flexDirection: "row", gap: 3 },
     threadPane: { flex: 1, minWidth: 0 },
     thread: { flex: 1, backgroundColor: colors.surfaceAlt },
@@ -909,7 +909,7 @@ function createStyles(colors: ThemeColors) {
       justifyContent: "center",
     },
     threadTitle: { color: colors.text, fontSize: 15, fontWeight: "700" },
-    threadMeta: { marginTop: 3, color: colors.textTertiary, fontSize: 10 },
+    threadMeta: { marginTop: 3, color: colors.textTertiary, fontSize: 12 },
     threadContent: {
       width: "100%",
       maxWidth: 700,
@@ -928,7 +928,7 @@ function createStyles(colors: ThemeColors) {
     subject: {
       marginBottom: 5,
       color: colors.textTertiary,
-      fontSize: 9,
+      fontSize: 12,
       fontWeight: "600",
     },
     bubble: {
@@ -943,7 +943,7 @@ function createStyles(colors: ThemeColors) {
       borderBottomRightRadius: 5,
       backgroundColor: colors.text,
     },
-    message: { color: colors.text, fontSize: 14, lineHeight: 20 },
+    message: { color: colors.text, fontSize: 15, lineHeight: 21 },
     outboundMessage: { color: colors.surface },
     messageMeta: {
       marginTop: 6,
@@ -951,7 +951,7 @@ function createStyles(colors: ThemeColors) {
       alignItems: "center",
       gap: 5,
     },
-    time: { color: colors.textTertiary, fontSize: 8 },
+    time: { color: colors.textTertiary, fontSize: 11 },
     outboundTime: { color: colors.surface },
     composerWrap: {
       paddingHorizontal: 14,
@@ -991,7 +991,7 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.text,
     },
     sendDisabled: { opacity: 0.3 },
-    composerError: { marginBottom: 6, color: "#B42318", fontSize: 10 },
+    composerError: { marginBottom: 6, color: colors.danger, fontSize: 12 },
     disabledComposer: {
       minHeight: 58,
       paddingHorizontal: 18,
@@ -1003,7 +1003,7 @@ function createStyles(colors: ThemeColors) {
       borderTopColor: colors.border,
       backgroundColor: colors.surface,
     },
-    disabledText: { color: colors.textTertiary, fontSize: 10 },
+    disabledText: { flex: 1, color: colors.textTertiary, fontSize: 13, lineHeight: 18 },
     backdrop: {
       flex: 1,
       alignItems: "center",
@@ -1047,8 +1047,8 @@ function createStyles(colors: ThemeColors) {
       marginTop: 12,
       paddingHorizontal: 18,
       color: colors.textTertiary,
-      fontSize: 9,
-      lineHeight: 14,
+      fontSize: 12,
+      lineHeight: 17,
     },
     safetyCopy: {
       paddingHorizontal: 18,
@@ -1084,8 +1084,8 @@ function createStyles(colors: ThemeColors) {
       justifyContent: "center",
       borderRadius: 23,
       borderWidth: 1,
-      borderColor: "#B42318",
+      borderColor: colors.danger,
     },
-    reportActionText: { color: "#B42318", fontSize: 13, fontWeight: "800" },
+    reportActionText: { color: colors.danger, fontSize: 13, fontWeight: "800" },
   });
 }

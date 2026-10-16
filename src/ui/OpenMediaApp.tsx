@@ -277,7 +277,7 @@ export function OpenMediaApp({
         />
       ) : null}
       <View style={styles.content}>
-        {compact || !primary.some((item) => item.id === destination) ? (
+        {compact ? (
           <Header
             destination={destination}
             onNavigate={navigate}
@@ -483,11 +483,7 @@ function Header({
         </View>
       )}
       <View style={styles.headerRight}>
-        {utility ? (
-          <Text style={styles.headerTitle}>
-            {destination[0].toUpperCase() + destination.slice(1)}
-          </Text>
-        ) : (
+        {utility ? null : (
           <>
             <IconButton
               icon="search-outline"
@@ -783,7 +779,7 @@ function createStyles(colors: ThemeColors) {
       justifyContent: "center",
       gap: 3,
     },
-    tabText: { color: colors.textTertiary, fontSize: 10, fontWeight: "600" },
+    tabText: { color: colors.textTertiary, fontSize: 11, fontWeight: "600" },
     tabTextActive: { color: colors.text },
     floatingCreate: {
       position: "absolute",
@@ -837,8 +833,8 @@ function createStyles(colors: ThemeColors) {
       borderTopWidth: 1,
       borderTopColor: colors.border,
     },
-    sharing: { color: colors.text, fontSize: 11, fontWeight: "700" },
-    draftOnly: { marginTop: 3, color: colors.textTertiary, fontSize: 9 },
+    sharing: { color: colors.textSecondary, fontSize: 12, lineHeight: 17, fontWeight: "500" },
+    draftOnly: { marginTop: 4, color: colors.textTertiary, fontSize: 12 },
     publish: {
       minHeight: 40,
       paddingHorizontal: 18,
@@ -855,7 +851,7 @@ function createStyles(colors: ThemeColors) {
     publishReady: { backgroundColor: colors.text },
     publishTextReady: { color: colors.surface },
     publishCopy: { flex: 1 },
-    overLimit: { color: "#B42318" },
-    composeError: { marginTop: 8, color: "#B42318", fontSize: 12 },
+    overLimit: { color: colors.danger },
+    composeError: { marginTop: 8, color: colors.danger, fontSize: 12 },
   });
 }

@@ -34,7 +34,7 @@ export async function syncPop3(input: MailAccountInput, limit = 50): Promise<Syn
         sourceMessageId: parsed.messageId ?? `pop-${index}`,
         mailbox: 'POP Inbox', subject: parsed.subject ?? '',
         from: parsed.from?.text ?? '', to: parsed.to ? (Array.isArray(parsed.to) ? parsed.to.map((address) => address.text) : [parsed.to.text]) : [],
-        sentAt: (parsed.date ?? new Date()).toISOString(), text: parsed.text?.slice(0, 50_000) ?? '',
+        sentAt: messageDate(parsed).toISOString(), text: parsed.text?.slice(0, 50_000) ?? '',
       });
     }
     await connection.command('QUIT');
@@ -65,4 +65,14 @@ async function connectPop3(input: MailAccountInput): Promise<PopConnection> {
   };
   await readResponse();
   return { command: async (command, multiline = false) => { socket.write(`${command}\r\n`); return readResponse(multiline); }, close: () => socket.destroy() };
+}
+
+/** The Date header, else the newest Received timestamp, so undated mail keeps a stable time across syncs. */
+export function messageDate(parsed: { date?: Date; headers: Map<string, unknown> }): Date {
+  if (parsed.date && !Number.isNaN(parsed.date.getTime())) return parsed.date;
+  const received = parsed.headers.get('received');
+  const first = Array.isArray(received) ? received[0] : received;
+  const stamp = typeof first === 'string' ? first.split(';').pop()?.trim() : undefined;
+  const date = stamp ? new Date(stamp) : undefined;
+  return date && !Number.isNaN(date.getTime()) ? date : new Date(0);
 }

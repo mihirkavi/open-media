@@ -1,40 +1,38 @@
+/**
+ * Open Media's visual system: black, white, and a few warm neutral grays.
+ * `accent` is deliberately the text color, so emphasis comes from contrast
+ * and weight rather than hue. `success` and `danger` are the only colors.
+ */
 export const lightColors = {
-  accent: '#1479FF',
-  accentSoft: '#EAF3FF',
-  chrome: '#F6F6F4',
+  accent: '#111111',
+  accentSoft: '#F1F1EE',
+  chrome: '#F4F4F1',
   surface: '#FFFFFF',
   surfaceAlt: '#FAFAF8',
-  border: '#E7E7E2',
+  border: '#E6E6E1',
   text: '#111111',
-  textSecondary: '#5F5F5B',
-  textTertiary: '#858580',
-  success: '#24A148',
-  email: '#D9485F',
-  gmail: '#D84B40',
-  icloud: '#1687FF',
+  textSecondary: '#5C5C57',
+  textTertiary: '#7E7E78',
+  success: '#2F7D47',
+  danger: '#B42318',
 };
 
 export type ThemeColors = typeof lightColors;
 export type AppearanceMode = 'system' | 'light' | 'dark';
 
 export const darkColors: ThemeColors = {
-  accent: '#8AB8FF',
-  accentSoft: '#172238',
-  chrome: '#111110',
+  accent: '#F6F6F2',
+  accentSoft: '#1A1A18',
+  chrome: '#131312',
   surface: '#0A0A0A',
   surfaceAlt: '#0E0E0D',
-  border: '#2A2A27',
+  border: '#272725',
   text: '#F6F6F2',
-  textSecondary: '#B1B1AA',
-  textTertiary: '#85857E',
-  success: '#64C782',
-  email: '#FF8191',
-  gmail: '#FF8177',
-  icloud: '#7DB7FF',
+  textSecondary: '#B4B4AD',
+  textTertiary: '#8A8A83',
+  success: '#7BC795',
+  danger: '#FF8A7A',
 };
-
-/** Legacy light palette retained for the existing messaging components. */
-export const colors = lightColors;
 
 export const radii = {
   small: 10,

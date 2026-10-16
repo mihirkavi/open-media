@@ -57,6 +57,8 @@ select throws_ok(
 
 -- Anonymous public reading
 reset role;
+-- Posts in one transaction share now(); make the order explicit.
+update public.posts set created_at = created_at + interval '1 second' where body = 'Second post';
 set local role anon;
 select set_config('request.jwt.claim.sub', '', true);
 

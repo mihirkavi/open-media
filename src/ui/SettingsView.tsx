@@ -1,15 +1,16 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import { applyContactCleanup, scanDeviceContacts } from '../contacts/deviceContacts';
 import { ConnectedMailAccount, MailAccountConfiguration, MailProtocol, connectMailAccount, disconnectMailAccount, listMailAccounts, syncMailAccount } from '../connectors/mailApiConnector';
 import { DetectedMailProvider, detectMailProvider } from '../connectors/mailAutoconfig';
-import { defaultSmtpPort, MailProviderPreset, SmtpSecurity } from '../domain/mailPresets';
 import { ContactCleanupSuggestion } from '../domain/contactCleaning';
-import { colors, radii } from '../theme';
+import { defaultSmtpPort, MailProviderPreset, SmtpSecurity } from '../domain/mailPresets';
+import { radii, ThemeColors } from '../theme';
+import { useOpenMediaTheme } from '../themeContext';
 
-interface SettingsViewProps { isCompact: boolean; onClose: () => void; onMailSynced: () => void; }
+interface SettingsViewProps { onClose: () => void; onMailSynced: () => void; }
 
 /** Form state: the account plus whether to send mail and whether servers were typed by hand. */
 interface MailForm extends Omit<MailAccountConfiguration, 'smtp'> {
@@ -24,6 +25,13 @@ const emptyMailForm: MailForm = {
   email: '', protocol: 'imap', host: '', port: 993, secure: true, username: '', password: '',
   sendEnabled: true, smtpHost: '', smtpPort: 587, smtpSecurity: 'starttls', serversEdited: false,
 };
+
+const socialNetworks: Array<{ icon: keyof typeof Ionicons.glyphMap; name: string; reason: string }> = [
+  { icon: 'logo-whatsapp', name: 'WhatsApp', reason: 'Official API covers business numbers only' },
+  { icon: 'logo-facebook', name: 'Messenger', reason: 'Official API covers Facebook Pages only' },
+  { icon: 'logo-instagram', name: 'Instagram', reason: 'Official API covers professional accounts only' },
+  { icon: 'logo-linkedin', name: 'LinkedIn', reason: 'Messaging is limited to approved partners' },
+];
 
 function withEmail(form: MailForm, email: string): MailForm {
   return { ...form, email, username: form.username && form.username !== form.email ? form.username : email };
@@ -53,13 +61,17 @@ function toConfiguration(form: MailForm): MailAccountConfiguration {
   return { ...account, email: account.email.trim(), username: account.username.trim(), host: account.host.trim(), ...(sendEnabled ? { smtp: { host: smtpHost.trim(), port: smtpPort, security: smtpSecurity } } : {}) };
 }
 
-export function SettingsView({ isCompact, onClose, onMailSynced }: SettingsViewProps) {
+export function SettingsView({ onClose, onMailSynced }: SettingsViewProps) {
+  const { colors } = useOpenMediaTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
   const [mailForm, setMailForm] = useState<MailForm>();
   const [detected, setDetected] = useState<DetectedMailProvider>();
   const [detecting, setDetecting] = useState(false);
+  const [showServers, setShowServers] = useState(false);
   const [mailAccounts, setMailAccounts] = useState<ConnectedMailAccount[]>([]);
   const [mailBusy, setMailBusy] = useState(false);
   const [mailError, setMailError] = useState('');
+  const [confirmRemove, setConfirmRemove] = useState<string>();
   const [syncedCounts, setSyncedCounts] = useState<Record<string, number>>({});
   const [contactSuggestions, setContactSuggestions] = useState<ContactCleanupSuggestion[]>([]);
   const [contactsBusy, setContactsBusy] = useState(false);
@@ -95,6 +107,9 @@ export function SettingsView({ isCompact, onClose, onMailSynced }: SettingsViewP
     return () => { controller.abort(); clearTimeout(timer); setDetecting(false); };
   }, [formEmail]);
 
+  const openForm = () => { setMailError(''); setDetected(undefined); setShowServers(false); setMailForm({ ...emptyMailForm }); };
+  const closeForm = () => { setMailForm(undefined); setMailError(''); };
+
   const submitMail = async () => {
     if (!mailForm) return;
     setMailBusy(true);
@@ -127,15 +142,6 @@ export function SettingsView({ isCompact, onClose, onMailSynced }: SettingsViewP
     }
   };
 
-  const confirmDisconnect = (account: ConnectedMailAccount) => Alert.alert(
-    'Disconnect mailbox?',
-    `This removes ${account.email}'s saved credential and imported messages from Open Media. It does not change the mailbox itself.`,
-    [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Disconnect', style: 'destructive', onPress: () => void disconnect(account) },
-    ],
-  );
-
   const disconnect = async (account: ConnectedMailAccount) => {
     setMailBusy(true);
     setMailError('');
@@ -143,6 +149,8 @@ export function SettingsView({ isCompact, onClose, onMailSynced }: SettingsViewP
       await disconnectMailAccount(account.id);
       setMailAccounts((current) => current.filter((item) => item.id !== account.id));
       setSyncedCounts((current) => { const next = { ...current }; delete next[account.id]; return next; });
+      setConfirmRemove(undefined);
+      onMailSynced();
     } catch (error) {
       setMailError(error instanceof Error ? error.message : 'Could not disconnect this mailbox.');
     } finally {
@@ -154,8 +162,7 @@ export function SettingsView({ isCompact, onClose, onMailSynced }: SettingsViewP
     setContactsBusy(true);
     setContactsError('');
     try {
-      const suggestions = await scanDeviceContacts();
-      setContactSuggestions(suggestions);
+      setContactSuggestions(await scanDeviceContacts());
       setContactsConnected(true);
     } catch (error) {
       setContactsError(error instanceof Error ? error.message : 'Could not read Contacts.');
@@ -177,98 +184,219 @@ export function SettingsView({ isCompact, onClose, onMailSynced }: SettingsViewP
     }
   };
 
+  const statusFor = (account: ConnectedMailAccount) => {
+    const count = syncedCounts[account.id];
+    const synced = count == null ? '' : ` · ${count} ${count === 1 ? 'message' : 'messages'} synced`;
+    return `${account.canSend ? 'Receive and reply' : 'Receive only'}${synced}`;
+  };
+  const missing = mailForm ? missingFields(mailForm) : [];
+  const serversCollapsed = Boolean(detected) && !showServers && !mailForm?.serversEdited;
+
   return (
-    <View style={styles.panel}>
-      <View style={styles.header}>
-        <View style={styles.headerLeading}>
-          {isCompact ? <IconButton label="Back to people" icon="chevron-back" onPress={onClose} /> : null}
-          <View><Text style={styles.eyebrow}>OPEN MEDIA</Text><Text style={styles.title}>Email & connections</Text></View>
-        </View>
-        {!isCompact ? <IconButton label="Close settings" icon="close" onPress={onClose} /> : null}
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+      <View style={styles.titleRow}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Back to Settings" onPress={onClose} style={styles.back}><Ionicons name="chevron-back" size={22} color={colors.text} /></Pressable>
+        <Text style={styles.title}>Email & connections</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
-        <SectionTitle title="Open Media account" copy="Signed in. Mailboxes are isolated to this account." />
-        <View style={styles.sectionGap} />
-        <SectionTitle title="Email" copy="Connect any mailbox that supports IMAP (or POP) for receiving and SMTP for sending. Your email shows up in Messages next to everyone else, and you can reply from there." />
-        <View style={styles.card}>
-          <ConnectionRow icon="mail-outline" color="#55616F" title="Add an email account" detail="Gmail, iCloud, Yahoo, Fastmail, Zoho, or any IMAP/SMTP provider" connected={mailAccounts.length > 0} onPress={() => { setMailError(''); setMailForm({ ...emptyMailForm }); }} />
-        </View>
-        <View style={styles.note}><Ionicons name="lock-closed-outline" size={17} color={colors.textSecondary} /><Text style={styles.noteText}>Your password goes over HTTPS to the mail-sync service, is encrypted there, and is never saved in the app or logs.</Text></View>
-        {mailError ? <Text accessibilityRole="alert" style={styles.error}>{mailError}</Text> : null}
+      <Text style={styles.sectionTitle}>Email</Text>
+      <Text style={styles.sectionCopy}>Your email shows up in Messages next to everyone else, and you can reply from there.</Text>
+      <View style={styles.card}>
         {mailAccounts.map((account) => (
-          <View key={account.id} style={styles.mailAccountCard}>
-            <View style={styles.connectionCopy}>
-              <Text style={styles.connectionName}>{account.email}</Text>
-              <Text style={[styles.connectionStatus, styles.activeText]}>{account.protocol.toUpperCase()}{account.canSend ? ' + SMTP · can reply' : ' · receive only'} · {syncedCounts[account.id] == null ? 'Connected' : `${syncedCounts[account.id]} ${syncedCounts[account.id] === 1 ? 'message' : 'messages'} synced`}</Text>
+          <View key={account.id} style={styles.row}>
+            <View style={styles.rowIcon}><Ionicons name="mail-outline" size={18} color={colors.text} /></View>
+            <View style={styles.rowCopy}>
+              <Text style={styles.rowTitle} numberOfLines={1}>{account.email}</Text>
+              <Text style={styles.rowDetail}>{confirmRemove === account.id ? 'Remove this mailbox and its imported email from Open Media? Your mailbox itself is not changed.' : statusFor(account)}</Text>
             </View>
-            <Pressable accessibilityRole="button" accessibilityLabel={`Sync ${account.email}`} disabled={mailBusy} onPress={() => syncExisting(account)} style={styles.mailAction}><Text style={styles.mailActionText}>Sync</Text></Pressable>
-            <Pressable accessibilityRole="button" accessibilityLabel={`Disconnect ${account.email}`} disabled={mailBusy} onPress={() => confirmDisconnect(account)} style={[styles.mailAction, styles.disconnectAction]}><Text style={styles.disconnectText}>Disconnect</Text></Pressable>
+            {confirmRemove === account.id ? <>
+              <TextButton label="Cancel" onPress={() => setConfirmRemove(undefined)} disabled={mailBusy} />
+              <TextButton label="Remove" danger onPress={() => disconnect(account)} disabled={mailBusy} />
+            </> : <>
+              <TextButton label="Sync" onPress={() => syncExisting(account)} disabled={mailBusy} />
+              <TextButton label="Remove" onPress={() => setConfirmRemove(account.id)} disabled={mailBusy} />
+            </>}
           </View>
         ))}
+        <Pressable accessibilityRole="button" onPress={openForm} style={[styles.row, mailAccounts.length > 0 && styles.rowDivider]}>
+          <View style={styles.rowIcon}><Ionicons name="add" size={20} color={colors.text} /></View>
+          <View style={styles.rowCopy}><Text style={styles.rowTitle}>Add email account</Text><Text style={styles.rowDetail}>Gmail, iCloud, Yahoo, Fastmail, Zoho, or any IMAP/SMTP provider</Text></View>
+          <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+        </Pressable>
+      </View>
+      {mailBusy && !mailForm ? <ActivityIndicator style={styles.inlineSpinner} color={colors.text} /> : null}
+      {mailError && !mailForm ? <Text accessibilityRole="alert" style={styles.error}>{mailError}</Text> : null}
+      <Text style={styles.footnote}>Passwords are encrypted by the mail service and never stored in the app.</Text>
 
-        <View style={styles.sectionGap} />
-        <SectionTitle title="Apple Contacts" copy="Open Media can privately normalize email and phone formatting. Every phone update stays reviewable—nothing is silently changed." />
+      {Platform.OS !== 'web' ? <>
+        <Text style={styles.sectionTitle}>Contacts</Text>
+        <Text style={styles.sectionCopy}>Tidy email and phone formatting on this device. Every change is shown for review first.</Text>
         <View style={styles.card}>
-          <View style={styles.connectionRow}>
-            <View style={[styles.providerIcon, { backgroundColor: colors.accent }]}><Ionicons name="person" size={19} color={colors.surface} /></View>
-            <View style={styles.connectionCopy}><Text style={styles.connectionName}>Contacts on this phone</Text><Text style={[styles.connectionStatus, contactsConnected && styles.activeText]}>{contactsConnected ? `${contactSuggestions.length} cleanup suggestions` : 'On-device only'}</Text></View>
-            {contactsBusy ? <ActivityIndicator color={colors.accent} /> : <Switch accessibilityLabel="Connect Apple Contacts" value={contactsConnected} onValueChange={(enabled) => enabled ? connectContacts() : (setContactsConnected(false), setContactSuggestions([]))} trackColor={{ false: '#D7D9DE', true: colors.accent }} />}
+          <View style={styles.row}>
+            <View style={styles.rowIcon}><Ionicons name="person-outline" size={18} color={colors.text} /></View>
+            <View style={styles.rowCopy}><Text style={styles.rowTitle}>Contacts on this device</Text><Text style={styles.rowDetail}>{contactsConnected ? `${contactSuggestions.length} suggestions` : 'Stays on this device'}</Text></View>
+            {contactsBusy ? <ActivityIndicator color={colors.text} /> : <Switch accessibilityLabel="Review Contacts" value={contactsConnected} onValueChange={(enabled) => enabled ? connectContacts() : (setContactsConnected(false), setContactSuggestions([]))} trackColor={{ false: colors.border, true: colors.text }} thumbColor={colors.surface} {...({ activeThumbColor: colors.surface } as object)} />}
           </View>
+          {contactSuggestions.map((suggestion) => (
+            <View key={suggestion.contactId} style={[styles.row, styles.rowDivider]}>
+              <View style={styles.rowCopy}><Text style={styles.rowTitle}>{suggestion.contactName}</Text><Text style={styles.rowDetail}>{suggestion.changes.join(' · ')}</Text></View>
+              <TextButton label="Update" onPress={() => applySuggestion(suggestion)} disabled={contactsBusy} />
+            </View>
+          ))}
         </View>
         {contactsError ? <Text style={styles.error}>{contactsError}</Text> : null}
-        {contactSuggestions.map((suggestion) => (
-          <View key={suggestion.contactId} style={styles.suggestionCard}>
-            <View style={styles.suggestionCopy}><Text style={styles.connectionName}>{suggestion.contactName}</Text><Text style={styles.connectionStatus}>{suggestion.changes.join(' · ')}</Text></View>
-            <Pressable disabled={contactsBusy} onPress={() => applySuggestion(suggestion)} style={styles.reviewButton}><Text style={styles.reviewButtonText}>Update</Text></Pressable>
+      </> : null}
+
+      <Text style={styles.sectionTitle}>Social messaging</Text>
+      <Text style={styles.sectionCopy}>These join Messages only through official APIs. Today none of them let apps read personal chats, so they stay off instead of relying on scraping.</Text>
+      <View style={styles.card}>
+        {socialNetworks.map((network, index) => (
+          <View key={network.name} style={[styles.row, index > 0 && styles.rowDivider]}>
+            <View style={styles.rowIcon}><Ionicons name={network.icon} size={18} color={colors.textTertiary} /></View>
+            <View style={styles.rowCopy}><Text style={[styles.rowTitle, styles.muted]}>{network.name}</Text><Text style={styles.rowDetail}>{network.reason}</Text></View>
+            <Text style={styles.badge}>Not available</Text>
           </View>
         ))}
+      </View>
 
-        <View style={styles.sectionGap} />
-        <SectionTitle title="Social messaging" copy="Open Media joins these conversations into Messages only through official APIs. Today their APIs don’t give apps access to personal chats, so they stay off rather than relying on scraping or unofficial bridges." />
-        <View style={[styles.card, styles.disabledCard]}><ConnectionRow icon="logo-whatsapp" color="#25D366" title="WhatsApp" detail="Official API covers business numbers only, not personal chats" disabled /><View style={styles.divider} /><ConnectionRow icon="logo-facebook" color="#0866FF" title="Facebook Messenger" detail="Official API covers Facebook Pages only, not personal inboxes" disabled /><View style={styles.divider} /><ConnectionRow icon="logo-instagram" color="#C13584" title="Instagram" detail="Official API covers professional accounts only" disabled /><View style={styles.divider} /><ConnectionRow icon="logo-linkedin" color="#0A66C2" title="LinkedIn" detail="Messaging API is restricted to approved partners" disabled /></View>
-      </ScrollView>
+      <Modal visible={Boolean(mailForm)} animationType="fade" transparent onRequestClose={closeForm}>
+        <View style={styles.backdrop}><View style={styles.sheet}>
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>Add email account</Text>
+            <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={closeForm} style={styles.back}><Ionicons name="close" size={22} color={colors.text} /></Pressable>
+          </View>
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.sheetBody}>
+            <Field label="Email address" value={mailForm?.email ?? ''} onChangeText={(email) => setMailForm((current) => current && withEmail(current, email))} autoCapitalize="none" autoComplete="email" keyboardType="email-address" placeholder="you@example.com" />
+            {detecting ? <Text style={styles.hint}>Looking up mail settings…</Text> : null}
+            {detected ? <View style={styles.note}>
+              <Text style={styles.noteTitle}>{detected.preset.label}{detected.customDomain ? ' (custom domain)' : ''}</Text>
+              {detected.customDomain && detected.preset.customDomainNote ? <Text style={styles.noteText}>{detected.preset.customDomainNote}</Text> : null}
+              <Text style={styles.noteText}>{detected.preset.passwordHelp}</Text>
+              {detected.preset.caution ? <Text style={[styles.noteText, styles.caution]}>{detected.preset.caution}</Text> : null}
+            </View> : null}
+            <Field label="Username" value={mailForm?.username ?? ''} onChangeText={(username) => setMailForm((current) => current && ({ ...current, username }))} autoCapitalize="none" />
+            <Field label="App password" value={mailForm?.password ?? ''} onChangeText={(password) => setMailForm((current) => current && ({ ...current, password }))} secureTextEntry autoComplete="off" />
 
-      <Modal visible={Boolean(mailForm)} animationType="slide" transparent onRequestClose={() => setMailForm(undefined)}>
-        <View style={styles.modalBackdrop}><View style={styles.mailCard}>
-          <Text style={styles.modalTitle}>Connect email</Text>
-          <ScrollView keyboardShouldPersistTaps="handled">
-          <Field label="Email address" value={mailForm?.email ?? ''} onChangeText={(email) => setMailForm((current) => current && withEmail(current, email))} autoCapitalize="none" autoComplete="email" keyboardType="email-address" />
-          {detecting ? <Text style={styles.connectionStatus}>Looking up mail settings for this domain…</Text> : null}
-          {detected ? <View style={styles.note}><Ionicons name="information-circle-outline" size={17} color={colors.textSecondary} /><Text style={styles.noteText}>{detected.preset.label} settings filled in{detected.customDomain ? ' from this domain’s mail records' : ''}. {detected.customDomain && detected.preset.customDomainNote ? `${detected.preset.customDomainNote} ` : ''}{detected.preset.passwordHelp}{detected.preset.caution ? `\n\n${detected.preset.caution}` : ''}</Text></View> : null}
-          <Field label="Username" value={mailForm?.username ?? ''} onChangeText={(username) => setMailForm((current) => current && ({ ...current, username }))} autoCapitalize="none" />
-          <Field label="Password (usually an app password)" value={mailForm?.password ?? ''} onChangeText={(password) => setMailForm((current) => current && ({ ...current, password }))} secureTextEntry autoComplete="off" />
-          <Text style={[styles.fieldLabel, styles.groupLabel]}>Incoming mail</Text>
-          <View style={styles.protocolRow}><ProtocolButton value="imap" active={mailForm?.protocol === 'imap'} onPress={() => setMailForm((current) => current && ({ ...current, protocol: 'imap', port: 993, serversEdited: true }))} /><ProtocolButton value="pop3" active={mailForm?.protocol === 'pop3'} onPress={() => setMailForm((current) => current && ({ ...current, protocol: 'pop3', port: 995, serversEdited: true }))} /></View>
-          <View style={styles.serverRow}><View style={styles.serverHost}><Field label="Server" placeholder={mailForm?.protocol === 'pop3' ? 'pop.example.com' : 'imap.example.com'} value={mailForm?.host ?? ''} onChangeText={(host) => setMailForm((current) => current && ({ ...current, host, serversEdited: true }))} autoCapitalize="none" /></View><View style={styles.port}><Field label="Port" value={String(mailForm?.port ?? '')} onChangeText={(port) => setMailForm((current) => current && ({ ...current, port: Number(port) || 0, serversEdited: true }))} keyboardType="number-pad" /></View></View>
-          <View style={styles.secureRow}><View style={styles.connectionCopy}><Text style={styles.fieldLabel}>Send email from Open Media (SMTP)</Text><Text style={styles.connectionStatus}>Reply to email right from Messages. Uses the same username and password.</Text></View><Switch accessibilityLabel="Send email with SMTP" value={mailForm?.sendEnabled ?? true} onValueChange={(sendEnabled) => setMailForm((current) => current && ({ ...current, sendEnabled }))} /></View>
-          {mailForm?.sendEnabled ? <>
-            <View style={styles.serverRow}><View style={styles.serverHost}><Field label="Outgoing server" placeholder="smtp.example.com" value={mailForm.smtpHost} onChangeText={(smtpHost) => setMailForm((current) => current && ({ ...current, smtpHost, serversEdited: true }))} autoCapitalize="none" /></View><View style={styles.port}><Field label="Port" value={String(mailForm.smtpPort || '')} onChangeText={(port) => setMailForm((current) => current && ({ ...current, smtpPort: Number(port) || 0, serversEdited: true }))} keyboardType="number-pad" /></View></View>
-            <View style={[styles.protocolRow, styles.field]}>{(['starttls', 'tls'] as const).map((security) => <Pressable key={security} accessibilityRole="radio" accessibilityState={{ checked: mailForm.smtpSecurity === security }} onPress={() => setMailForm((current) => current && ({ ...current, smtpSecurity: security, smtpPort: defaultSmtpPort(security), serversEdited: true }))} style={[styles.protocolButton, mailForm.smtpSecurity === security && styles.protocolButtonActive]}><Text style={[styles.protocolText, mailForm.smtpSecurity === security && styles.protocolTextActive]}>{security === 'starttls' ? 'STARTTLS (587)' : 'TLS (465)'}</Text></Pressable>)}</View>
-          </> : null}
-          <View style={styles.secureRow}><View><Text style={styles.fieldLabel}>Encrypted connection</Text><Text style={styles.connectionStatus}>TLS is required and cannot be disabled</Text></View><Switch accessibilityLabel="Encrypted connection required" disabled value /></View>
+            <View style={styles.switchRow}>
+              <View style={styles.rowCopy}><Text style={styles.rowTitle}>Reply from Open Media</Text><Text style={styles.rowDetail}>Sends through your provider’s SMTP server with the same sign-in.</Text></View>
+              <Switch accessibilityLabel="Reply from Open Media" value={mailForm?.sendEnabled ?? true} onValueChange={(sendEnabled) => setMailForm((current) => current && ({ ...current, sendEnabled }))} trackColor={{ false: colors.border, true: colors.text }} thumbColor={colors.surface} {...({ activeThumbColor: colors.surface } as object)} />
+            </View>
+
+            {serversCollapsed ? (
+              <Pressable accessibilityRole="button" onPress={() => setShowServers(true)} style={styles.disclosure}>
+                <Text style={styles.rowDetail}>Servers: {mailForm?.host}{mailForm?.sendEnabled ? ` · ${mailForm.smtpHost}` : ''}</Text>
+                <Text style={styles.link}>Edit server settings</Text>
+              </Pressable>
+            ) : <>
+              <Text style={styles.groupLabel}>Incoming mail</Text>
+              <View style={styles.segment}>
+                <SegmentButton label="IMAP" active={mailForm?.protocol === 'imap'} onPress={() => setMailForm((current) => current && ({ ...current, protocol: 'imap' as MailProtocol, port: 993, serversEdited: true }))} />
+                <SegmentButton label="POP" active={mailForm?.protocol === 'pop3'} onPress={() => setMailForm((current) => current && ({ ...current, protocol: 'pop3' as MailProtocol, port: 995, serversEdited: true }))} />
+              </View>
+              <View style={styles.serverRow}>
+                <View style={styles.serverHost}><Field label="Server" placeholder={mailForm?.protocol === 'pop3' ? 'pop.example.com' : 'imap.example.com'} value={mailForm?.host ?? ''} onChangeText={(host) => setMailForm((current) => current && ({ ...current, host, serversEdited: true }))} autoCapitalize="none" /></View>
+                <View style={styles.port}><Field label="Port" value={String(mailForm?.port || '')} onChangeText={(port) => setMailForm((current) => current && ({ ...current, port: Number(port) || 0, serversEdited: true }))} keyboardType="number-pad" /></View>
+              </View>
+              {mailForm?.sendEnabled ? <>
+                <Text style={styles.groupLabel}>Outgoing mail (SMTP)</Text>
+                <View style={styles.segment}>
+                  {(['starttls', 'tls'] as const).map((security) => <SegmentButton key={security} label={security === 'starttls' ? 'STARTTLS · 587' : 'TLS · 465'} active={mailForm.smtpSecurity === security} onPress={() => setMailForm((current) => current && ({ ...current, smtpSecurity: security, smtpPort: defaultSmtpPort(security), serversEdited: true }))} />)}
+                </View>
+                <View style={styles.serverRow}>
+                  <View style={styles.serverHost}><Field label="Server" placeholder="smtp.example.com" value={mailForm.smtpHost} onChangeText={(smtpHost) => setMailForm((current) => current && ({ ...current, smtpHost, serversEdited: true }))} autoCapitalize="none" /></View>
+                  <View style={styles.port}><Field label="Port" value={String(mailForm.smtpPort || '')} onChangeText={(port) => setMailForm((current) => current && ({ ...current, smtpPort: Number(port) || 0, serversEdited: true }))} keyboardType="number-pad" /></View>
+                </View>
+              </> : null}
+              <Text style={styles.hint}>Connections always use encryption (TLS).</Text>
+            </>}
           </ScrollView>
-          {mailError ? <Text accessibilityRole="alert" style={styles.error}>{mailError}</Text> : null}
-          {mailForm && missingFields(mailForm).length ? <Text style={styles.connectionStatus}>Still needed: {missingFields(mailForm).join(', ')}.</Text> : null}
-          <Pressable disabled={mailBusy || !mailForm || missingFields(mailForm).length > 0} onPress={submitMail} style={[styles.primaryButton, (!mailForm || missingFields(mailForm).length > 0) && styles.disabledButton]}>{mailBusy ? <ActivityIndicator color={colors.surface} /> : <Text style={styles.primaryButtonText}>{mailForm?.sendEnabled ? 'Test incoming & outgoing, then connect' : 'Test & connect'}</Text>}</Pressable>
-          <Pressable disabled={mailBusy} onPress={() => { setMailForm(undefined); setMailError(''); }} style={styles.cancelButton}><Text style={styles.cancelText}>Cancel</Text></Pressable>
+          <View style={styles.sheetFooter}>
+            {mailError ? <Text accessibilityRole="alert" style={styles.error}>{mailError}</Text> : null}
+            {missing.length ? <Text style={styles.hint}>Still needed: {missing.join(', ')}.</Text> : null}
+            <Pressable accessibilityRole="button" disabled={mailBusy || missing.length > 0} onPress={submitMail} style={[styles.primary, (mailBusy || missing.length > 0) && styles.primaryDisabled]}>
+              {mailBusy ? <ActivityIndicator color={colors.surface} /> : <Text style={styles.primaryText}>Connect</Text>}
+            </Pressable>
+            <Text style={styles.footnote}>We test the sign-in with your provider before saving.</Text>
+          </View>
         </View></View>
       </Modal>
-    </View>
+    </ScrollView>
   );
 }
 
-function SectionTitle({ title, copy }: { title: string; copy: string }) { return <View style={styles.intro}><Text style={styles.sectionTitle}>{title}</Text><Text style={styles.sectionCopy}>{copy}</Text></View>; }
-function IconButton({ label, icon, onPress }: { label: string; icon: keyof typeof Ionicons.glyphMap; onPress: () => void }) { return <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} style={styles.iconButton}><Ionicons name={icon} size={22} color={colors.textSecondary} /></Pressable>; }
-function ConnectionRow({ icon, color, title, detail, connected, disabled, onPress }: { icon: keyof typeof Ionicons.glyphMap; color: string; title: string; detail: string; connected?: boolean; disabled?: boolean; onPress?: () => void }) { return <Pressable disabled={disabled} onPress={onPress} style={styles.connectionRow}><View style={[styles.providerIcon, { backgroundColor: color }]}><Ionicons name={icon} size={19} color={colors.surface} /></View><View style={styles.connectionCopy}><Text style={styles.connectionName}>{title}</Text><Text style={[styles.connectionStatus, connected && styles.activeText]}>{connected ? 'Connected · ' : ''}{detail}</Text></View><Ionicons name={disabled ? 'lock-closed-outline' : 'chevron-forward'} size={18} color={colors.textTertiary} /></Pressable>; }
-function ProtocolButton({ value, active, onPress }: { value: MailProtocol; active: boolean; onPress: () => void }) { return <Pressable onPress={onPress} style={[styles.protocolButton, active && styles.protocolButtonActive]}><Text style={[styles.protocolText, active && styles.protocolTextActive]}>{value === 'imap' ? 'IMAP sync' : 'POP import'}</Text></Pressable>; }
-function Field(props: React.ComponentProps<typeof TextInput> & { label: string }) { const { label, ...inputProps } = props; return <View style={styles.field}><Text style={styles.fieldLabel}>{label}</Text><TextInput {...inputProps} placeholderTextColor={colors.textTertiary} style={styles.input} /></View>; }
+function useStyles() {
+  const { colors } = useOpenMediaTheme();
+  return { colors, styles: useMemo(() => createStyles(colors), [colors]) };
+}
 
-const styles = StyleSheet.create({
-  panel: { flex: 1, minWidth: 0, backgroundColor: colors.surfaceAlt }, header: { minHeight: 82, paddingHorizontal: 22, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.border }, headerLeading: { flexDirection: 'row', alignItems: 'center', gap: 12 }, eyebrow: { color: colors.accent, fontSize: 9, letterSpacing: 1.4, fontWeight: '800' }, title: { color: colors.text, fontSize: 24, fontWeight: '700' }, iconButton: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.chrome },
-  content: { width: '100%', maxWidth: 620, alignSelf: 'center', paddingHorizontal: 20, paddingTop: 28, paddingBottom: 42 }, intro: { marginBottom: 14 }, sectionTitle: { color: colors.text, fontSize: 18, fontWeight: '700' }, sectionCopy: { marginTop: 6, color: colors.textSecondary, fontSize: 13, lineHeight: 19 }, sectionGap: { height: 30 },
-  card: { overflow: 'hidden', borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }, disabledCard: { opacity: 0.58 }, divider: { height: 1, marginLeft: 67, backgroundColor: colors.border }, connectionRow: { minHeight: 72, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, gap: 13 }, providerIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }, connectionCopy: { flex: 1 }, connectionName: { color: colors.text, fontSize: 14, fontWeight: '600' }, connectionStatus: { marginTop: 3, color: colors.textTertiary, fontSize: 11 }, activeText: { color: colors.success, fontWeight: '600' },
-  note: { marginTop: 13, flexDirection: 'row', gap: 9, padding: 13, borderRadius: radii.medium, backgroundColor: colors.chrome }, noteText: { flex: 1, color: colors.textSecondary, fontSize: 11, lineHeight: 16 }, error: { marginTop: 10, color: '#B42318', fontSize: 11, lineHeight: 16 }, suggestionCard: { marginTop: 9, padding: 13, flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: radii.medium, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }, suggestionCopy: { flex: 1 }, reviewButton: { paddingHorizontal: 13, paddingVertical: 8, borderRadius: radii.pill, backgroundColor: colors.accentSoft }, reviewButtonText: { color: colors.accent, fontSize: 11, fontWeight: '700' },
-  mailAccountCard: { marginTop: 9, minHeight: 64, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: radii.medium, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }, mailAction: { minHeight: 38, justifyContent: 'center', paddingHorizontal: 12, borderRadius: radii.pill, backgroundColor: colors.accentSoft }, mailActionText: { color: colors.accent, fontSize: 11, fontWeight: '700' }, disconnectAction: { backgroundColor: '#FFF0EE' }, disconnectText: { color: '#B42318', fontSize: 11, fontWeight: '700' },
-  modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(20,22,26,0.34)' }, mailCard: { width: '100%', maxWidth: 620, maxHeight: '94%', alignSelf: 'center', padding: 22, borderTopLeftRadius: 24, borderTopRightRadius: 24, backgroundColor: colors.surface }, modalTitle: { marginBottom: 16, color: colors.text, fontSize: 20, fontWeight: '700' }, protocolRow: { marginBottom: 10, flexDirection: 'row', gap: 8 }, protocolButton: { flex: 1, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: radii.pill, backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border }, protocolButtonActive: { backgroundColor: colors.accentSoft, borderColor: colors.accent }, protocolText: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' }, protocolTextActive: { color: colors.accent }, field: { marginTop: 10 }, fieldLabel: { marginBottom: 5, color: colors.textSecondary, fontSize: 10, fontWeight: '600' }, input: { height: 43, paddingHorizontal: 12, color: colors.text, fontSize: 13, borderRadius: 11, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceAlt }, serverRow: { flexDirection: 'row', gap: 9 }, serverHost: { flex: 1 }, port: { width: 85 }, secureRow: { marginTop: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, primaryButton: { marginTop: 18, height: 46, alignItems: 'center', justifyContent: 'center', borderRadius: 23, backgroundColor: colors.accent }, primaryButtonText: { color: colors.surface, fontSize: 14, fontWeight: '700' }, cancelButton: { alignItems: 'center', paddingVertical: 12 }, cancelText: { color: colors.textSecondary, fontSize: 13, fontWeight: '600' }, groupLabel: { marginTop: 16 }, disabledButton: { opacity: 0.45 },
-});
+function Field(props: React.ComponentProps<typeof TextInput> & { label: string }) {
+  const { colors, styles } = useStyles();
+  const { label, ...inputProps } = props;
+  return <View style={styles.field}><Text style={styles.fieldLabel}>{label}</Text><TextInput {...inputProps} placeholderTextColor={colors.textTertiary} style={styles.input} /></View>;
+}
+
+function TextButton({ label, onPress, disabled, danger }: { label: string; onPress: () => void; disabled?: boolean; danger?: boolean }) {
+  const { styles } = useStyles();
+  return <Pressable accessibilityRole="button" disabled={disabled} onPress={onPress} style={styles.textButton}><Text style={[styles.textButtonLabel, danger && styles.danger]}>{label}</Text></Pressable>;
+}
+
+function SegmentButton({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  const { styles } = useStyles();
+  return <Pressable accessibilityRole="radio" accessibilityState={{ checked: active }} onPress={onPress} style={[styles.segmentButton, active && styles.segmentActive]}><Text style={[styles.segmentText, active && styles.segmentTextActive]}>{label}</Text></Pressable>;
+}
+
+function createStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    screen: { flex: 1, backgroundColor: colors.surface },
+    content: { width: '100%', maxWidth: 640, alignSelf: 'center', paddingHorizontal: 20, paddingTop: 20, paddingBottom: 64 },
+    titleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 12, marginLeft: -10 },
+    back: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+    title: { color: colors.text, fontSize: 26, fontWeight: '800', letterSpacing: -0.6 },
+    sectionTitle: { marginTop: 28, color: colors.text, fontSize: 16, fontWeight: '700' },
+    sectionCopy: { marginTop: 4, marginBottom: 12, color: colors.textSecondary, fontSize: 13, lineHeight: 19 },
+    card: { borderRadius: radii.medium, borderWidth: 1, borderColor: colors.border, overflow: 'hidden', backgroundColor: colors.surface },
+    row: { minHeight: 64, paddingHorizontal: 14, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 12 },
+    rowDivider: { borderTopWidth: 1, borderTopColor: colors.border },
+    rowIcon: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.chrome },
+    rowCopy: { flex: 1, minWidth: 0 },
+    rowTitle: { color: colors.text, fontSize: 14, fontWeight: '600' },
+    rowDetail: { marginTop: 2, color: colors.textSecondary, fontSize: 12, lineHeight: 17 },
+    muted: { color: colors.textSecondary },
+    badge: { color: colors.textTertiary, fontSize: 11, fontWeight: '600' },
+    textButton: { minHeight: 36, paddingHorizontal: 10, justifyContent: 'center', borderRadius: radii.pill },
+    textButtonLabel: { color: colors.text, fontSize: 13, fontWeight: '600' },
+    danger: { color: colors.danger },
+    inlineSpinner: { marginTop: 10 },
+    error: { marginTop: 10, color: colors.danger, fontSize: 12, lineHeight: 18 },
+    footnote: { marginTop: 10, color: colors.textTertiary, fontSize: 12, lineHeight: 17 },
+    backdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16, backgroundColor: 'rgba(0,0,0,0.45)' },
+    sheet: { width: '100%', maxWidth: 520, maxHeight: '94%', borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' },
+    sheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 22, paddingRight: 8, paddingTop: 10 },
+    sheetTitle: { color: colors.text, fontSize: 20, fontWeight: '800', letterSpacing: -0.4 },
+    sheetBody: { paddingHorizontal: 22, paddingBottom: 8 },
+    sheetFooter: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 18, borderTopWidth: 1, borderTopColor: colors.border },
+    field: { marginTop: 12 },
+    fieldLabel: { marginBottom: 6, color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
+    input: { minHeight: 46, paddingHorizontal: 14, color: colors.text, fontSize: 15, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceAlt, outlineStyle: 'none' } as object,
+    hint: { marginTop: 8, color: colors.textTertiary, fontSize: 12, lineHeight: 17 },
+    note: { marginTop: 12, padding: 14, gap: 6, borderRadius: 12, backgroundColor: colors.chrome },
+    noteTitle: { color: colors.text, fontSize: 13, fontWeight: '700' },
+    noteText: { color: colors.textSecondary, fontSize: 12, lineHeight: 18 },
+    caution: { color: colors.danger },
+    switchRow: { marginTop: 18, flexDirection: 'row', alignItems: 'center', gap: 12 },
+    disclosure: { marginTop: 14, gap: 4 },
+    link: { color: colors.text, fontSize: 13, fontWeight: '600', textDecorationLine: 'underline' },
+    groupLabel: { marginTop: 20, marginBottom: 8, color: colors.text, fontSize: 13, fontWeight: '700' },
+    segment: { flexDirection: 'row', padding: 3, gap: 3, borderRadius: radii.pill, backgroundColor: colors.chrome },
+    segmentButton: { flex: 1, minHeight: 36, alignItems: 'center', justifyContent: 'center', borderRadius: radii.pill },
+    segmentActive: { backgroundColor: colors.text },
+    segmentText: { color: colors.textSecondary, fontSize: 12, fontWeight: '700' },
+    segmentTextActive: { color: colors.surface },
+    serverRow: { flexDirection: 'row', gap: 10 },
+    serverHost: { flex: 1 },
+    port: { width: 92 },
+    primary: { marginTop: 12, minHeight: 50, alignItems: 'center', justifyContent: 'center', borderRadius: radii.pill, backgroundColor: colors.text },
+    primaryDisabled: { opacity: 0.35 },
+    primaryText: { color: colors.surface, fontSize: 15, fontWeight: '800' },
+  });
+}
