@@ -5,14 +5,15 @@ import { MailAccountInput, SyncedMessage } from './types.js';
 
 function clientFor(input: MailAccountInput): ImapFlow {
   return new ImapFlow({
-    host: input.host, port: input.port, secure: input.secure,
+    host: input.host, port: input.port, secure: input.allowPlaintext ? false : input.secure,
+    ...(input.allowPlaintext ? { doSTARTTLS: false } : {}),
     auth: { user: input.username, pass: input.password },
     logger: false, tls: { rejectUnauthorized: true, servername: input.tlsServername ?? input.host },
   });
 }
 
 export async function testImap(input: MailAccountInput): Promise<void> {
-  if (!input.secure) throw new Error('Unencrypted IMAP is disabled. Use TLS on port 993.');
+  if (!input.secure && !input.allowPlaintext) throw new Error('Unencrypted IMAP is disabled. Use TLS on port 993.');
   const client = clientFor(input);
   try { await client.connect(); } finally { if (client.usable) await client.logout(); }
 }

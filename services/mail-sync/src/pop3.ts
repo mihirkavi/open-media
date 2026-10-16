@@ -1,3 +1,4 @@
+import net from 'node:net';
 import tls from 'node:tls';
 
 import { simpleParser } from 'mailparser';
@@ -42,13 +43,15 @@ export async function syncPop3(input: MailAccountInput, limit = 50): Promise<Syn
 }
 
 async function connectPop3(input: MailAccountInput): Promise<PopConnection> {
-  if (!input.secure) throw new Error('Unencrypted POP is disabled. Use POP over TLS on port 995.');
-  const socket = tls.connect({ host: input.host, port: input.port, servername: input.tlsServername ?? input.host, rejectUnauthorized: true });
+  if (!input.secure && !input.allowPlaintext) throw new Error('Unencrypted POP is disabled. Use POP over TLS on port 995.');
+  const socket = input.allowPlaintext
+    ? net.connect({ host: input.host, port: input.port })
+    : tls.connect({ host: input.host, port: input.port, servername: input.tlsServername ?? input.host, rejectUnauthorized: true });
   let buffer = '';
   let waiter: ((line: string) => void) | undefined;
   socket.setEncoding('utf8');
   socket.on('data', (chunk) => { buffer += chunk; waiter?.(buffer); });
-  await new Promise<void>((resolve, reject) => { socket.once('secureConnect', resolve); socket.once('error', reject); });
+  await new Promise<void>((resolve, reject) => { socket.once(input.allowPlaintext ? 'connect' : 'secureConnect', () => resolve()); socket.once('error', reject); });
 
   const readResponse = async (multiline = false) => {
     const terminator = multiline ? '\r\n.\r\n' : '\r\n';

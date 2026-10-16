@@ -29,3 +29,8 @@ test('keeps different people and mailboxes apart and drops duplicates', () => {
   assert.equal(conversations.length, 3);
   assert.ok(conversations.every((conversation) => new Set(conversation.messages.map((message) => message.sourceMessageId)).size === conversation.messages.length));
 });
+
+test('cleans quoted display names', () => {
+  const [conversation] = normalizeStoredEmail([mail({ from: '"Priya Shah" <priya@example.com>' })]);
+  assert.equal(conversation.participants[0].name, 'Priya Shah');
+});

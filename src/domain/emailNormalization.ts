@@ -58,7 +58,7 @@ export function replySubject(subject: string): string {
 }
 
 export function extractEmail(value: string): string { return value.match(/<([^>]+)>/)?.[1]?.trim().toLocaleLowerCase() ?? (value.includes('@') ? value.trim().toLocaleLowerCase() : ''); }
-function extractName(value: string): string { return value.replace(/<[^>]+>/, '').replace(/^['"]|['"]$/g, '').trim(); }
+function extractName(value: string): string { return value.replace(/<[^>]+>/, '').trim().replace(/^['"]|['"]$/g, '').trim(); }
 function initialsFor(name: string): string { return name.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || '?'; }
 function stableID(value: string): string { let hash = 2166136261; for (let index = 0; index < value.length; index += 1) hash = Math.imul(hash ^ value.charCodeAt(index), 16777619); return (hash >>> 0).toString(36); }
 function colorFor(value: string): string { const colors = ['#7B61FF','#EB5757','#F2994A','#27AE60','#2F80ED','#9B51E0']; return colors[parseInt(stableID(value), 36) % colors.length]; }

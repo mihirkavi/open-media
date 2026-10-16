@@ -108,7 +108,7 @@ enabled = true
 port = 54324
 # SMTP for testing outgoing mail from the app (Settings → Email, server localhost:54325).
 smtp_port = 54325
-# pop3_port = 54326
+pop3_port = 54326
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 

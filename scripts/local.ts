@@ -81,7 +81,7 @@ async function main() {
   await waitFor(`${apiURL}/health`, 'mail service');
 
   step('Starting the web app');
-  start('web', 'npx', ['expo', 'start', '--web', '--port', '8081'], root, { CI: '1' });
+  start('web', 'npx', ['expo', 'start', '--web', '--port', '8081'], root);
   await waitFor(appURL, 'web app', 180);
 
   const smtp = readSmtpEnv();

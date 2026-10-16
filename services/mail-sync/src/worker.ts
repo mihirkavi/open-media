@@ -14,6 +14,7 @@ import { syncPop3, testPop3 } from './pop3.js';
 import { sendSmtp, SmtpConnection, testSmtp } from './smtp.js';
 import { SupabaseRestRepository } from './supabaseRestRepository.js';
 import { MailAccountInput, OutgoingMail, SmtpSettings } from './types.js';
+import { describeValidationError } from './validation.js';
 
 interface WorkerSecrets {
   SUPABASE_URL: string;
@@ -109,7 +110,9 @@ const legacyHandler = {
 
       return json(404, { error: 'Not found.' }, headers);
     } catch (error) {
-      const message = error instanceof Error ? error.message.replace(/password[^ ]*/gi, 'credential') : 'Request failed.';
+      const message = error instanceof z.ZodError
+        ? describeValidationError(error)
+        : error instanceof Error ? error.message.replace(/password[^ ]*/gi, 'credential') : 'Request failed.';
       const status = message.includes('session') ? 401 : 400;
       console.error(JSON.stringify({ event: 'mail_request_failed', method: request.method, path, status, errorType: error instanceof Error ? error.name : 'UnknownError' }));
       return json(status, { error: message }, headers);
@@ -186,8 +189,8 @@ async function testConnection(input: MailAccountInput) {
 }
 
 async function connectionInput(input: MailAccountInput, env: WorkerEnv): Promise<MailAccountInput> {
-  const { address } = await resolveMailHost(input.host, env.MAIL_ALLOW_LOCAL_SERVERS === 'true');
-  return { ...input, host: address, tlsServername: input.host };
+  const { address, local } = await resolveMailHost(input.host, env.MAIL_ALLOW_LOCAL_SERVERS === 'true');
+  return { ...input, host: address, tlsServername: input.host, allowPlaintext: local };
 }
 
 async function smtpConnection(settings: SmtpSettings, env: WorkerEnv): Promise<SmtpConnection> {

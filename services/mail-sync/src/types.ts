@@ -21,6 +21,8 @@ export interface MailAccountInput {
   smtp?: SmtpSettings;
   /** Resolved IP connections still validate TLS against the user-configured hostname. */
   tlsServername?: string;
+  /** Set only by the Worker for local test servers in development; never accepted from clients. */
+  allowPlaintext?: boolean;
 }
 
 export interface StoredMailAccount extends Omit<MailAccountInput, 'password'> {

@@ -4,7 +4,8 @@ import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, Swi
 
 import { applyContactCleanup, scanDeviceContacts } from '../contacts/deviceContacts';
 import { ConnectedMailAccount, MailAccountConfiguration, MailProtocol, connectMailAccount, disconnectMailAccount, listMailAccounts, syncMailAccount } from '../connectors/mailApiConnector';
-import { defaultSmtpPort, presetForEmail, SmtpSecurity } from '../domain/mailPresets';
+import { DetectedMailProvider, detectMailProvider } from '../connectors/mailAutoconfig';
+import { defaultSmtpPort, MailProviderPreset, SmtpSecurity } from '../domain/mailPresets';
 import { ContactCleanupSuggestion } from '../domain/contactCleaning';
 import { colors, radii } from '../theme';
 
@@ -24,12 +25,27 @@ const emptyMailForm: MailForm = {
   sendEnabled: true, smtpHost: '', smtpPort: 587, smtpSecurity: 'starttls', serversEdited: false,
 };
 
-/** Fills server settings from a known provider unless the person already edited them. */
 function withEmail(form: MailForm, email: string): MailForm {
-  const next = { ...form, email, username: form.username && form.username !== form.email ? form.username : email };
-  const preset = presetForEmail(email);
-  if (!preset || form.serversEdited) return next;
-  return { ...next, protocol: 'imap', host: preset.imap.host, port: preset.imap.port, smtpHost: preset.smtp.host, smtpPort: preset.smtp.port, smtpSecurity: preset.smtp.security };
+  return { ...form, email, username: form.username && form.username !== form.email ? form.username : email };
+}
+
+/** Fills server settings from a detected provider unless the person already edited them. */
+function withPreset(form: MailForm, preset: MailProviderPreset): MailForm {
+  if (form.serversEdited) return form;
+  return { ...form, protocol: 'imap', host: preset.imap.host, port: preset.imap.port, smtpHost: preset.smtp.host, smtpPort: preset.smtp.port, smtpSecurity: preset.smtp.security };
+}
+
+/** Plain-language list of what is still needed before connecting. */
+function missingFields(form: MailForm): string[] {
+  const missing: string[] = [];
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) missing.push('email address');
+  if (!form.username.trim()) missing.push('username');
+  if (!form.password) missing.push('password');
+  if (!form.host.trim()) missing.push('incoming server');
+  if (!(form.port > 0 && form.port < 65536)) missing.push('incoming port');
+  if (form.sendEnabled && !form.smtpHost.trim()) missing.push('outgoing server');
+  if (form.sendEnabled && !(form.smtpPort > 0 && form.smtpPort < 65536)) missing.push('outgoing port');
+  return missing;
 }
 
 function toConfiguration(form: MailForm): MailAccountConfiguration {
@@ -39,6 +55,8 @@ function toConfiguration(form: MailForm): MailAccountConfiguration {
 
 export function SettingsView({ isCompact, onClose, onMailSynced }: SettingsViewProps) {
   const [mailForm, setMailForm] = useState<MailForm>();
+  const [detected, setDetected] = useState<DetectedMailProvider>();
+  const [detecting, setDetecting] = useState(false);
   const [mailAccounts, setMailAccounts] = useState<ConnectedMailAccount[]>([]);
   const [mailBusy, setMailBusy] = useState(false);
   const [mailError, setMailError] = useState('');
@@ -53,6 +71,29 @@ export function SettingsView({ isCompact, onClose, onMailSynced }: SettingsViewP
     listMailAccounts().then((accounts) => active && setMailAccounts(accounts)).catch((error) => active && setMailError(error instanceof Error ? error.message : 'Could not load connected mailboxes.'));
     return () => { active = false; };
   }, []);
+
+  // Detect the provider (including custom domains via MX) shortly after the address is typed.
+  const formEmail = mailForm?.email.trim().toLowerCase() ?? '';
+  useEffect(() => {
+    setDetected(undefined);
+    // Auto-filled servers belong to the previous address; typed-in servers are kept.
+    setMailForm((current) => current && !current.serversEdited && current.host
+      ? { ...current, protocol: 'imap', host: '', port: 993, smtpHost: '', smtpPort: 587, smtpSecurity: 'starttls' }
+      : current);
+    if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/.test(formEmail)) return;
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      setDetecting(true);
+      detectMailProvider(formEmail, controller.signal)
+        .then((result) => {
+          if (controller.signal.aborted || !result) return;
+          setDetected(result);
+          setMailForm((current) => current && withPreset(current, result.preset));
+        })
+        .finally(() => { if (!controller.signal.aborted) setDetecting(false); });
+    }, 450);
+    return () => { controller.abort(); clearTimeout(timer); setDetecting(false); };
+  }, [formEmail]);
 
   const submitMail = async () => {
     if (!mailForm) return;
@@ -159,7 +200,7 @@ export function SettingsView({ isCompact, onClose, onMailSynced }: SettingsViewP
           <View key={account.id} style={styles.mailAccountCard}>
             <View style={styles.connectionCopy}>
               <Text style={styles.connectionName}>{account.email}</Text>
-              <Text style={[styles.connectionStatus, styles.activeText]}>{account.protocol.toUpperCase()}{account.canSend ? ' + SMTP · can reply' : ' · receive only'} · {syncedCounts[account.id] == null ? 'Connected' : `${syncedCounts[account.id]} messages synced`}</Text>
+              <Text style={[styles.connectionStatus, styles.activeText]}>{account.protocol.toUpperCase()}{account.canSend ? ' + SMTP · can reply' : ' · receive only'} · {syncedCounts[account.id] == null ? 'Connected' : `${syncedCounts[account.id]} ${syncedCounts[account.id] === 1 ? 'message' : 'messages'} synced`}</Text>
             </View>
             <Pressable accessibilityRole="button" accessibilityLabel={`Sync ${account.email}`} disabled={mailBusy} onPress={() => syncExisting(account)} style={styles.mailAction}><Text style={styles.mailActionText}>Sync</Text></Pressable>
             <Pressable accessibilityRole="button" accessibilityLabel={`Disconnect ${account.email}`} disabled={mailBusy} onPress={() => confirmDisconnect(account)} style={[styles.mailAction, styles.disconnectAction]}><Text style={styles.disconnectText}>Disconnect</Text></Pressable>
@@ -193,7 +234,8 @@ export function SettingsView({ isCompact, onClose, onMailSynced }: SettingsViewP
           <Text style={styles.modalTitle}>Connect email</Text>
           <ScrollView keyboardShouldPersistTaps="handled">
           <Field label="Email address" value={mailForm?.email ?? ''} onChangeText={(email) => setMailForm((current) => current && withEmail(current, email))} autoCapitalize="none" autoComplete="email" keyboardType="email-address" />
-          {mailForm && presetForEmail(mailForm.email) ? <View style={styles.note}><Ionicons name="information-circle-outline" size={17} color={colors.textSecondary} /><Text style={styles.noteText}>{presetForEmail(mailForm.email)!.label} settings filled in. {presetForEmail(mailForm.email)!.passwordHelp}{presetForEmail(mailForm.email)!.caution ? `\n\n${presetForEmail(mailForm.email)!.caution}` : ''}</Text></View> : null}
+          {detecting ? <Text style={styles.connectionStatus}>Looking up mail settings for this domain…</Text> : null}
+          {detected ? <View style={styles.note}><Ionicons name="information-circle-outline" size={17} color={colors.textSecondary} /><Text style={styles.noteText}>{detected.preset.label} settings filled in{detected.customDomain ? ' from this domain’s mail records' : ''}. {detected.customDomain && detected.preset.customDomainNote ? `${detected.preset.customDomainNote} ` : ''}{detected.preset.passwordHelp}{detected.preset.caution ? `\n\n${detected.preset.caution}` : ''}</Text></View> : null}
           <Field label="Username" value={mailForm?.username ?? ''} onChangeText={(username) => setMailForm((current) => current && ({ ...current, username }))} autoCapitalize="none" />
           <Field label="Password (usually an app password)" value={mailForm?.password ?? ''} onChangeText={(password) => setMailForm((current) => current && ({ ...current, password }))} secureTextEntry autoComplete="off" />
           <Text style={[styles.fieldLabel, styles.groupLabel]}>Incoming mail</Text>
@@ -207,7 +249,8 @@ export function SettingsView({ isCompact, onClose, onMailSynced }: SettingsViewP
           <View style={styles.secureRow}><View><Text style={styles.fieldLabel}>Encrypted connection</Text><Text style={styles.connectionStatus}>TLS is required and cannot be disabled</Text></View><Switch accessibilityLabel="Encrypted connection required" disabled value /></View>
           </ScrollView>
           {mailError ? <Text accessibilityRole="alert" style={styles.error}>{mailError}</Text> : null}
-          <Pressable disabled={mailBusy} onPress={submitMail} style={styles.primaryButton}>{mailBusy ? <ActivityIndicator color={colors.surface} /> : <Text style={styles.primaryButtonText}>{mailForm?.sendEnabled ? 'Test incoming & outgoing, then connect' : 'Test & connect'}</Text>}</Pressable>
+          {mailForm && missingFields(mailForm).length ? <Text style={styles.connectionStatus}>Still needed: {missingFields(mailForm).join(', ')}.</Text> : null}
+          <Pressable disabled={mailBusy || !mailForm || missingFields(mailForm).length > 0} onPress={submitMail} style={[styles.primaryButton, (!mailForm || missingFields(mailForm).length > 0) && styles.disabledButton]}>{mailBusy ? <ActivityIndicator color={colors.surface} /> : <Text style={styles.primaryButtonText}>{mailForm?.sendEnabled ? 'Test incoming & outgoing, then connect' : 'Test & connect'}</Text>}</Pressable>
           <Pressable disabled={mailBusy} onPress={() => { setMailForm(undefined); setMailError(''); }} style={styles.cancelButton}><Text style={styles.cancelText}>Cancel</Text></Pressable>
         </View></View>
       </Modal>
@@ -227,5 +270,5 @@ const styles = StyleSheet.create({
   card: { overflow: 'hidden', borderRadius: radii.large, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }, disabledCard: { opacity: 0.58 }, divider: { height: 1, marginLeft: 67, backgroundColor: colors.border }, connectionRow: { minHeight: 72, flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, gap: 13 }, providerIcon: { width: 38, height: 38, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }, connectionCopy: { flex: 1 }, connectionName: { color: colors.text, fontSize: 14, fontWeight: '600' }, connectionStatus: { marginTop: 3, color: colors.textTertiary, fontSize: 11 }, activeText: { color: colors.success, fontWeight: '600' },
   note: { marginTop: 13, flexDirection: 'row', gap: 9, padding: 13, borderRadius: radii.medium, backgroundColor: colors.chrome }, noteText: { flex: 1, color: colors.textSecondary, fontSize: 11, lineHeight: 16 }, error: { marginTop: 10, color: '#B42318', fontSize: 11, lineHeight: 16 }, suggestionCard: { marginTop: 9, padding: 13, flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: radii.medium, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }, suggestionCopy: { flex: 1 }, reviewButton: { paddingHorizontal: 13, paddingVertical: 8, borderRadius: radii.pill, backgroundColor: colors.accentSoft }, reviewButtonText: { color: colors.accent, fontSize: 11, fontWeight: '700' },
   mailAccountCard: { marginTop: 9, minHeight: 64, padding: 12, flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: radii.medium, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border }, mailAction: { minHeight: 38, justifyContent: 'center', paddingHorizontal: 12, borderRadius: radii.pill, backgroundColor: colors.accentSoft }, mailActionText: { color: colors.accent, fontSize: 11, fontWeight: '700' }, disconnectAction: { backgroundColor: '#FFF0EE' }, disconnectText: { color: '#B42318', fontSize: 11, fontWeight: '700' },
-  modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(20,22,26,0.34)' }, mailCard: { width: '100%', maxWidth: 620, maxHeight: '94%', alignSelf: 'center', padding: 22, borderTopLeftRadius: 24, borderTopRightRadius: 24, backgroundColor: colors.surface }, modalTitle: { marginBottom: 16, color: colors.text, fontSize: 20, fontWeight: '700' }, protocolRow: { marginBottom: 10, flexDirection: 'row', gap: 8 }, protocolButton: { flex: 1, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: radii.pill, backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border }, protocolButtonActive: { backgroundColor: colors.accentSoft, borderColor: colors.accent }, protocolText: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' }, protocolTextActive: { color: colors.accent }, field: { marginTop: 10 }, fieldLabel: { marginBottom: 5, color: colors.textSecondary, fontSize: 10, fontWeight: '600' }, input: { height: 43, paddingHorizontal: 12, color: colors.text, fontSize: 13, borderRadius: 11, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceAlt }, serverRow: { flexDirection: 'row', gap: 9 }, serverHost: { flex: 1 }, port: { width: 85 }, secureRow: { marginTop: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, primaryButton: { marginTop: 18, height: 46, alignItems: 'center', justifyContent: 'center', borderRadius: 23, backgroundColor: colors.accent }, primaryButtonText: { color: colors.surface, fontSize: 14, fontWeight: '700' }, cancelButton: { alignItems: 'center', paddingVertical: 12 }, cancelText: { color: colors.textSecondary, fontSize: 13, fontWeight: '600' }, groupLabel: { marginTop: 16 },
+  modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(20,22,26,0.34)' }, mailCard: { width: '100%', maxWidth: 620, maxHeight: '94%', alignSelf: 'center', padding: 22, borderTopLeftRadius: 24, borderTopRightRadius: 24, backgroundColor: colors.surface }, modalTitle: { marginBottom: 16, color: colors.text, fontSize: 20, fontWeight: '700' }, protocolRow: { marginBottom: 10, flexDirection: 'row', gap: 8 }, protocolButton: { flex: 1, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: radii.pill, backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border }, protocolButtonActive: { backgroundColor: colors.accentSoft, borderColor: colors.accent }, protocolText: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' }, protocolTextActive: { color: colors.accent }, field: { marginTop: 10 }, fieldLabel: { marginBottom: 5, color: colors.textSecondary, fontSize: 10, fontWeight: '600' }, input: { height: 43, paddingHorizontal: 12, color: colors.text, fontSize: 13, borderRadius: 11, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceAlt }, serverRow: { flexDirection: 'row', gap: 9 }, serverHost: { flex: 1 }, port: { width: 85 }, secureRow: { marginTop: 13, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }, primaryButton: { marginTop: 18, height: 46, alignItems: 'center', justifyContent: 'center', borderRadius: 23, backgroundColor: colors.accent }, primaryButtonText: { color: colors.surface, fontSize: 14, fontWeight: '700' }, cancelButton: { alignItems: 'center', paddingVertical: 12 }, cancelText: { color: colors.textSecondary, fontSize: 13, fontWeight: '600' }, groupLabel: { marginTop: 16 }, disabledButton: { opacity: 0.45 },
 });
