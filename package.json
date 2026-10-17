@@ -35,6 +35,8 @@
     "local": "node --import tsx scripts/local.ts",
     "local:stop": "npx supabase stop",
     "local:email": "node --import tsx scripts/local-email.ts",
+    "app:install": "node --import tsx scripts/install-mac-app.ts",
+    "app:uninstall": "node --import tsx scripts/install-mac-app.ts --uninstall",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",

@@ -108,6 +108,14 @@ It asks for your email address and an app password in your own terminal, checks 
 
 **Email in Messages.** In the app, open **Settings → Connections → Email & contacts → Add an email account**. Known providers fill in their IMAP and SMTP servers; most need an app password rather than your normal password. Mail syncs when the app opens and every five minutes, and you can reply from the conversation. For testing without a real mailbox, the local SMTP server is `localhost:54325`.
 
+### Open Media in your Dock (macOS)
+
+```bash
+npm run app:install
+```
+
+This adds **Open Media.app** to your user Applications folder. Open it once, then right-click its Dock icon → Options → Keep in Dock. Clicking it starts the local stack in the background when needed (first start takes a few minutes; later ones are instant), then opens Open Media in its own Chrome app window (Safari if Chrome is not installed). Logs are in `.local/logs/`. `npm run local:stop` stops the database; `npm run app:uninstall` removes the app.
+
 ### App only
 
 ```bash
