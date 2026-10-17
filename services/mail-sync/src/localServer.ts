@@ -6,6 +6,7 @@
 import { createServer } from 'node:http';
 
 import { handleMailRequest, Limiter, MailEnv } from './mailHandler.js';
+import { latestSignInCode } from './localSignIn.js';
 
 const port = Number(process.env.PORT ?? 8787);
 const host = process.env.HOST ?? '127.0.0.1';
@@ -40,8 +41,26 @@ const env: MailEnv = {
   PUBLIC_API_RATE_LIMITER: limiter(120),
 };
 
+const inboxURL = process.env.LOCAL_INBOX_URL;
+const appOrigin = process.env.CONVO_APP_ORIGIN ?? 'http://localhost:8081';
+
 createServer(async (incoming, outgoing) => {
   try {
+    // Local-only: hand the app the sign-in code from the local test inbox.
+    const requestURL = new URL(incoming.url ?? '/', 'http://local');
+    if (inboxURL && requestURL.pathname === '/local/sign-in-code') {
+      const headers = { 'access-control-allow-origin': appOrigin, 'cache-control': 'no-store', 'content-type': 'application/json' };
+      if (incoming.method === 'OPTIONS') { outgoing.writeHead(204, headers); return outgoing.end(); }
+      const email = (requestURL.searchParams.get('email') ?? '').trim().toLowerCase();
+      const since = new Date(requestURL.searchParams.get('since') ?? 0);
+      if (incoming.headers.origin !== appOrigin || !/^[^\s@"]+@[^\s@"]+$/.test(email) || Number.isNaN(since.getTime())) {
+        outgoing.writeHead(400, headers);
+        return outgoing.end(JSON.stringify({ error: 'Bad request.' }));
+      }
+      const code = await latestSignInCode(inboxURL, email, since);
+      outgoing.writeHead(code ? 200 : 404, headers);
+      return outgoing.end(JSON.stringify(code ? { code } : { error: 'No code yet.' }));
+    }
     const chunks: Buffer[] = [];
     for await (const chunk of incoming) chunks.push(Buffer.from(chunk));
     const body = chunks.length && incoming.method !== 'GET' && incoming.method !== 'HEAD' ? Buffer.concat(chunks) : undefined;

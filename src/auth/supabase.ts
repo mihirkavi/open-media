@@ -55,6 +55,31 @@ export async function signOut(): Promise<void> {
   if (error) throw error;
 }
 
+/**
+ * Local Mac setup only: sign-in emails go to the local test inbox, so the local
+ * mail service hands back the code and the app finishes sign-in by itself.
+ * Off unless `npm run local` enabled it and the API is on this computer.
+ */
+export function localAutoSignInAvailable(): boolean {
+  const api = process.env.EXPO_PUBLIC_OPEN_MEDIA_API_URL ?? '';
+  return process.env.EXPO_PUBLIC_LOCAL_AUTO_SIGN_IN === '1' && /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(api.replace(/\/$/, ''));
+}
+
+export async function waitForLocalSignInCode(email: string, since: Date, timeoutMs = 30_000): Promise<string | undefined> {
+  const api = (process.env.EXPO_PUBLIC_OPEN_MEDIA_API_URL ?? '').replace(/\/$/, '');
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${api}/local/sign-in-code?email=${encodeURIComponent(email.trim())}&since=${encodeURIComponent(since.toISOString())}`);
+      if (response.ok) return ((await response.json()) as { code?: string }).code;
+    } catch {
+      // The local service may still be starting; keep waiting.
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  return undefined;
+}
+
 /** Signs in with the one-time code from the sign-in email. Works on any browser or device. */
 export async function verifySignInCode(email: string, code: string): Promise<void> {
   const supabase = getSupabaseClient();

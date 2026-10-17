@@ -72,11 +72,14 @@ if ! ready; then
   fi
 fi
 
+# OPEN_MEDIA_NO_WINDOW=1 starts the stack without opening a window (for testing).
+if [ -n "$OPEN_MEDIA_NO_WINDOW" ]; then exit 0; fi
 if [ -d "/Applications/Google Chrome.app" ]; then
   open -na "Google Chrome" --args --app="$URL" --new-window
 else
   open -a Safari "$URL"
 fi
+exit 0
 `;
 const executable = join(contents, 'MacOS', 'Open Media');
 writeFileSync(executable, launcher);

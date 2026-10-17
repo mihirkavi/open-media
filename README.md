@@ -98,7 +98,7 @@ npm run local
 
 This starts local Supabase (database, auth, and a test inbox), the mail and public API Worker, and the web app, then opens <http://localhost:8081>. It opens Docker Desktop if needed and writes gitignored local config (`.env.development.local`, `services/mail-sync/.dev.vars`, `.local/`). Ctrl+C stops the app and Worker; `npm run local:stop` also stops the database. Your local data persists between runs.
 
-**Signing in.** Enter your email, then type the 6-digit code from the sign-in email (the link also works if you open it in the same browser). By default, sign-in emails land in the local test inbox at <http://127.0.0.1:54324>. To receive them in your real inbox, run:
+**Signing in.** Enter your email and press Continue. Running locally, sign-in emails go to the local test inbox (<http://127.0.0.1:54324>), so the app reads the code from there and signs you in automatically; nothing to copy. (This works only with the local stack; the local-only endpoint lives in the Node.js mail server, never in the deployed Worker.) To receive codes in your real inbox instead, run:
 
 ```bash
 npm run local:email

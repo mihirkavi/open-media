@@ -63,6 +63,8 @@ async function main() {
     `CONVO_APP_ORIGIN=${appURL}`,
     `EVENTS_PUBLIC_ORIGIN=${apiURL}`,
     'MAIL_ALLOW_LOCAL_SERVERS=true',
+    // Local-only: lets the app read sign-in codes from the local test inbox.
+    `LOCAL_INBOX_URL=${readSmtpEnv().enabled ? '' : inboxURL}`,
     '',
   ].join('\n'), { mode: 0o600 });
 
@@ -73,6 +75,8 @@ async function main() {
     `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${publishableKey}`,
     `EXPO_PUBLIC_OPEN_MEDIA_API_URL=${apiURL}`,
     `EXPO_PUBLIC_OPEN_MEDIA_PUBLIC_API_URL=${apiURL}`,
+    // Sign-in codes are filled in automatically when they go to the local test inbox.
+    `EXPO_PUBLIC_LOCAL_AUTO_SIGN_IN=${readSmtpEnv().enabled ? '' : '1'}`,
     '',
   ].join('\n'));
 
