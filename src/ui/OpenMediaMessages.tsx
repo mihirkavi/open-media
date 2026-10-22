@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Image,
+  Keyboard,
   Linking,
   Modal,
   Platform,
@@ -91,7 +92,7 @@ export function OpenMediaMessages({
     );
   return (
     <View style={styles.layout}>
-      <View style={styles.list}>
+      <View style={[styles.list, compact && styles.listCompact]}>
         <View style={styles.heading}>
           <View style={styles.headingCopy}>
             <Text style={styles.title}>Messages</Text>
@@ -304,6 +305,10 @@ function MessageThread({
     messageId?: string,
   ) => Promise<void>;
 }) {
+  // iOS doesn't resize the window for the keyboard: lift the composer by exactly the part of
+  // this thread the keyboard covers (the app header and tab bar make a fixed offset unreliable).
+  const threadRef = useRef<View>(null);
+  const keyboardInset = useKeyboardInset(threadRef);
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [body, setBody] = useState("");
@@ -352,7 +357,7 @@ function MessageThread({
     }
   };
   return (
-    <View style={styles.thread}>
+    <View ref={threadRef} style={[styles.thread, keyboardInset ? { paddingBottom: keyboardInset } : null]}>
       <View style={styles.threadHeader}>
         {onBack ? (
           <Pressable
@@ -1047,6 +1052,21 @@ function EmailBody({ message }: { message: Message }) {
     </View>
   );
 }
+function useKeyboardInset(target: React.RefObject<View | null>) {
+  const [inset, setInset] = useState(0);
+  useEffect(() => {
+    if (Platform.OS !== "ios") return;
+    const show = Keyboard.addListener("keyboardWillShow", (event) => {
+      target.current?.measureInWindow((_x, y, _width, height) => {
+        setInset(Math.max(0, y + height - event.endCoordinates.screenY));
+      });
+    });
+    const hide = Keyboard.addListener("keyboardWillHide", () => setInset(0));
+    return () => { show.remove(); hide.remove(); };
+  }, [target]);
+  return inset;
+}
+
 function capitalize(value: string) {
   return value[0].toUpperCase() + value.slice(1);
 }
@@ -1060,6 +1080,8 @@ function createStyles(colors: ThemeColors) {
       borderRightWidth: 1,
       borderRightColor: colors.border,
     },
+    // Phones show one pane at a time, so the list takes the full width.
+    listCompact: { maxWidth: "100%", borderRightWidth: 0 },
     heading: {
       paddingHorizontal: 18,
       paddingTop: 24,
@@ -1115,7 +1137,9 @@ function createStyles(colors: ThemeColors) {
       flex: 1,
       minHeight: 42,
       color: colors.text,
-      fontSize: 13,
+      fontSize: 15,
+      letterSpacing: 0,
+      paddingVertical: 0,
       outlineStyle: "none",
     } as object,
     filterBar: { flexGrow: 0, flexShrink: 0 },
