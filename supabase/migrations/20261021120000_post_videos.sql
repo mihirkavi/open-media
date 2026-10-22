@@ -27,6 +27,20 @@ create policy "Authors upload their own post videos"
 on storage.objects for insert to authenticated
 with check (bucket_id = 'post-videos' and (storage.foldername(name))[1] = (select auth.uid())::text);
 
+drop policy if exists "Authors delete their own post videos" on storage.objects;
+create policy "Authors delete their own post videos"
+on storage.objects for delete to authenticated
+using (bucket_id = 'post-videos' and (storage.foldername(name))[1] = (select auth.uid())::text);
+
+alter table public.posts
+  add column if not exists video_path text,
+  add column if not exists video_poster_path text,
+  add column if not exists video_duration_seconds numeric(6, 2),
+  add column if not exists video_width integer,
+  add column if not exists video_height integer,
+  add column if not exists video_content_type text,
+  add column if not exists video_sha256 text;
+
 -- Replacing a file is allowed only before a post uses it (an upload retry). Once published, a
 -- post's video can be deleted but never swapped for different content.
 create or replace function app_private.post_video_in_use(p_name text)
@@ -45,20 +59,6 @@ create policy "Authors replace their own post videos"
 on storage.objects for update to authenticated
 using (bucket_id = 'post-videos' and (storage.foldername(name))[1] = (select auth.uid())::text and not app_private.post_video_in_use(name))
 with check (bucket_id = 'post-videos' and (storage.foldername(name))[1] = (select auth.uid())::text);
-
-drop policy if exists "Authors delete their own post videos" on storage.objects;
-create policy "Authors delete their own post videos"
-on storage.objects for delete to authenticated
-using (bucket_id = 'post-videos' and (storage.foldername(name))[1] = (select auth.uid())::text);
-
-alter table public.posts
-  add column if not exists video_path text,
-  add column if not exists video_poster_path text,
-  add column if not exists video_duration_seconds numeric(6, 2),
-  add column if not exists video_width integer,
-  add column if not exists video_height integer,
-  add column if not exists video_content_type text,
-  add column if not exists video_sha256 text;
 
 -- A video post may have no text; a text post still needs some.
 alter table public.posts drop constraint if exists posts_body_check;
