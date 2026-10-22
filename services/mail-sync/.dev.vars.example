@@ -7,3 +7,7 @@ CONVO_APP_ORIGIN=http://localhost:8081
 EVENTS_PUBLIC_ORIGIN=http://127.0.0.1:8787
 # Local development only: allow mail servers on this machine (the test inbox SMTP at localhost:54325).
 MAIL_ALLOW_LOCAL_SERVERS=true
+# Optional: Farcaster cross-posting. Open Media's own Farcaster account ID and its custody mnemonic.
+# Leave empty to keep Farcaster posting off. Never use a personal account's mnemonic.
+FARCASTER_APP_FID=
+FARCASTER_APP_MNEMONIC=

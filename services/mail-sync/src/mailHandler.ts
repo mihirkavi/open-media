@@ -7,6 +7,7 @@ import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { z } from 'zod';
 
 import { decryptSecret, encryptSecret } from './crypto.js';
+import { createSignedKeyRequest, FarcasterSignerEnv, farcasterPublishingConfigured, forwardSignedMessage, parseEd25519PublicKey } from './farcasterSigner.js';
 import { UserFacingError } from './errors.js';
 import { syncImap, testImap } from './imap.js';
 import { resolveMailHost } from './networkSafety.js';
@@ -19,7 +20,7 @@ import { describeValidationError } from './validation.js';
 
 export interface Limiter { limit(options: { key: string }): Promise<{ success: boolean }> }
 
-export interface MailEnv {
+export interface MailEnv extends FarcasterSignerEnv {
   SUPABASE_URL: string;
   SUPABASE_PUBLISHABLE_KEY: string;
   MAIL_CREDENTIALS_KEY: string;
@@ -66,6 +67,8 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
     const url = new URL(request.url);
     path = url.pathname;
     if (request.method === 'GET' && url.pathname === '/health') return json(200, { ok: true }, headers);
+    // Which cross-posting networks this server can help with (no secrets, no account data).
+    if (request.method === 'GET' && url.pathname === '/v1/cross-posting/status') return json(200, { farcaster: farcasterPublishingConfigured(env) }, headers);
 
     const session = await authenticate(request, env.SUPABASE_URL);
     const repository = new SupabaseRestRepository(env.SUPABASE_URL, env.SUPABASE_PUBLISHABLE_KEY, session.token);
@@ -108,6 +111,18 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
       return json(201, { message: sent }, headers);
     }
 
+    // Cross-posting: sign a Farcaster key request for a key generated on the person's device.
+    if (request.method === 'POST' && url.pathname === '/v1/cross-posting/farcaster/signed-key-request') {
+      if (!await allowed(env.MAIL_CONNECT_RATE_LIMITER, session.userId)) return rateLimited(headers);
+      const { key } = (await readJSON(request)) as { key?: unknown };
+      return json(201, await createSignedKeyRequest(parseEd25519PublicKey(key), env), headers);
+    }
+
+    if (request.method === 'POST' && url.pathname === '/v1/cross-posting/farcaster/messages') {
+      if (!await allowed(env.MAIL_SEND_RATE_LIMITER, session.userId)) return rateLimited(headers);
+      return json(201, await forwardSignedMessage(await request.arrayBuffer()), headers);
+    }
+
     const deleteMatch = request.method === 'DELETE' && url.pathname.match(/^\/v1\/mail-accounts\/([^/]+)$/);
     if (deleteMatch) {
       const deleted = await repository.deleteAccount(session.userId, deleteMatch[1]);
@@ -131,7 +146,7 @@ async function allowed(limiter: Limiter, userId: string): Promise<boolean> {
 }
 
 function rateLimited(headers: HeadersInit): Response {
-  return json(429, { error: 'Too many mailbox requests. Wait a minute and try again.' }, { ...headers, 'retry-after': '60' });
+  return json(429, { error: 'Too many requests. Wait a minute and try again.' }, { ...headers, 'retry-after': '60' });
 }
 
 async function authenticate(request: Request, supabaseURL: string): Promise<{ token: string; userId: string }> {

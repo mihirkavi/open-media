@@ -16,7 +16,7 @@ export function getSupabaseClient(): SupabaseClient | undefined {
   if (!client) {
     client = createClient(url, publishableKey, {
       auth: {
-        storage: Platform.OS === 'web' ? AsyncStorage : (nativeStorage ??= new ChunkedSecureStorage()),
+        storage: deviceSecretStorage(),
         autoRefreshToken: true,
         persistSession: true,
         detectSessionInUrl: false,
@@ -29,6 +29,14 @@ export function getSupabaseClient(): SupabaseClient | undefined {
     }
   }
   return client;
+}
+
+/**
+ * Where this device keeps secrets such as delegated network keys: the Keychain/Keystore on phones
+ * (this device only, never backed up) and browser storage on web, the same place as the session.
+ */
+export function deviceSecretStorage(): SupportedStorage {
+  return Platform.OS === 'web' ? AsyncStorage : (nativeStorage ??= new ChunkedSecureStorage());
 }
 
 export async function getAPIAccessToken(): Promise<string | undefined> {

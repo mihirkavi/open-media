@@ -27,6 +27,7 @@
     "mailparser": "^3.9.4",
     "nodemailer": "^10.1.1",
     "structured-event-feeds": "github:mihirkavi/structured-event-feeds#v0.1.1",
+    "viem": "2.37.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

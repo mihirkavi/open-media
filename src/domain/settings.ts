@@ -15,7 +15,7 @@ export const settingIndex: SettingIndexEntry[] = [
   { id: 'email', title: 'Email', description: 'Connect and manage mail accounts.', route: 'email', keywords: ['connect gmail', 'connect outlook', 'imap', 'mail'] },
   { id: 'feed-networks', title: 'Networks in Feed', description: 'Feed mixes public posts from Open Media, Farcaster, Lens, Hive, and DeSo into one stream.', route: 'feed', keywords: ['blockchain', 'farcaster', 'lens', 'hive', 'deso', 'web3', 'decentralized', 'sources'] },
   { id: 'connected-apps', title: 'Connected apps', description: 'Review authorized networks and capabilities.', route: 'connected-apps', keywords: ['disconnect instagram', 'connections', 'providers'] },
-  { id: 'cross-posting', title: 'Cross-posting', description: 'Choose default publish destinations.', route: 'cross-posting', keywords: ['stop posting to linkedin', 'publish everywhere', 'destinations'] },
+  { id: 'cross-posting', title: 'Cross-posting', description: 'Connect Farcaster, Lens, Hive, and DeSo; every post goes to all connected networks unless you turn one off.', route: 'cross-posting', keywords: ['stop posting to farcaster', 'publish everywhere', 'destinations', 'connect farcaster', 'connect lens', 'connect hive', 'connect deso', 'post everywhere'] },
   { id: 'privacy', title: 'Privacy', description: 'Manage privacy and recommendation data boundaries.', route: 'privacy', keywords: ['private', 'recommendation data', 'tracking'] },
   { id: 'export', title: 'Export your data', description: 'Download portable account data.', route: 'data', keywords: ['export my data', 'download', 'portability'] },
 ];

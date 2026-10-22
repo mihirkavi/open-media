@@ -28,6 +28,15 @@ SUPABASE_PUBLISHABLE_KEY
 MAIL_CREDENTIALS_KEY
 ```
 
+Optional, for Farcaster cross-posting (both or neither):
+
+```text
+FARCASTER_APP_FID        Open Media's own Farcaster account ID
+FARCASTER_APP_MNEMONIC   that account's custody mnemonic (dedicated to Open Media, never a personal account)
+```
+
+Until both are set, `/v1/cross-posting/status` reports Farcaster as off and the app shows it as "Coming soon".
+
 `MAIL_CREDENTIALS_KEY` must be a base64-encoded 32-byte key and must never be placed in Expo configuration. Generate Worker types and validate the bundle with `npm run worker:types` and `npm run worker:check`. Deploy with `npm run worker:deploy`, after applying the repository's Supabase migrations to production.
 
 The production health endpoint is `https://convo-mail-sync.convo-mail-sync.workers.dev/health`.
@@ -40,6 +49,9 @@ The production health endpoint is `https://convo-mail-sync.convo-mail-sync.worke
 - `POST /v1/mail-accounts/:id/sync` — import the latest 100 messages from IMAP `INBOX` and the Sent folder, or the latest 50 POP messages
 - `POST /v1/mail-accounts/:id/send` — send a plain-text email (up to 10 recipients) through the mailbox's SMTP server, threaded with `In-Reply-To`, and store it as sent mail
 - `DELETE /v1/mail-accounts/:id` — delete the owner's encrypted credential and imported messages
+- `GET /v1/cross-posting/status` — unauthenticated; which cross-posting networks this server supports (`{ farcaster: boolean }`)
+- `POST /v1/cross-posting/farcaster/signed-key-request` — signs a Farcaster signed key request for a public key generated on the person's device (body `{ key: "0x…32 bytes" }`) and returns the `farcaster://` approval link. The device keeps the private key
+- `POST /v1/cross-posting/farcaster/messages` — forwards a cast the device already signed (raw protobuf bytes, at most 4 KB) to a public Snapchain node, because browsers can't post to the node directly
 
 Requests require a Supabase bearer JWT. Mailbox hostnames are resolved and rejected if any answer points to loopback, link-local, private, multicast, or reserved space. SMTP uses implicit TLS (port 465) or required STARTTLS (port 587), with certificate validation against the configured hostname.
 
