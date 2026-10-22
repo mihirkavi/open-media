@@ -41,7 +41,7 @@ import { ThemeColors } from "../theme";
 import { useOpenMediaTheme } from "../themeContext";
 import { FeedView, ClipsView } from "./OpenMediaFeed";
 import { OpenMediaMessages } from "./OpenMediaMessages";
-import { usePublicFeed } from "./usePublicFeed";
+import { useMixedFeed } from "./useMixedFeed";
 import {
   OpenMediaProfile,
   OpenMediaSearch,
@@ -116,7 +116,7 @@ export function OpenMediaApp({
   }, []);
   const [feedMode, setFeedMode] = useState<FeedMode>("relevant");
   const [composeOpen, setComposeOpen] = useState(false);
-  const feed = usePublicFeed(currentUserId);
+  const feed = useMixedFeed(currentUserId);
   const canPost = messageMode === "open_media";
   const viewer = useMemo(
     () => ({ id: currentUserId, initials: initialsFor(profile.displayName) }),
@@ -323,6 +323,10 @@ export function OpenMediaApp({
             hasMore={feed.hasMore}
             onRetry={feed.refresh}
             onLoadMore={feed.loadMore}
+            sources={feed.sources}
+            loadingMore={feed.loadingMore}
+            pendingCount={feed.pendingCount}
+            onShowPending={feed.showPending}
             viewer={viewer}
             composing={composeOpen}
             onComposingChange={canPost ? setComposeOpen : undefined}

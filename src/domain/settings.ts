@@ -13,6 +13,7 @@ export const settingIndex: SettingIndexEntry[] = [
   { id: 'feed-mode', title: 'Feed mode', description: 'Choose transparent Relevant or chronological Raw.', route: 'feed', keywords: ['chronological feed', 'raw', 'relevant', 'algorithm'] },
   { id: 'message-privacy', title: 'Message privacy', description: 'Control who can message you.', route: 'messages', keywords: ['who can message me', 'direct messages', 'dm privacy'] },
   { id: 'email', title: 'Email', description: 'Connect and manage mail accounts.', route: 'email', keywords: ['connect gmail', 'connect outlook', 'imap', 'mail'] },
+  { id: 'feed-networks', title: 'Networks in Feed', description: 'Feed mixes public posts from Open Media, Farcaster, Lens, Hive, and DeSo into one stream.', route: 'feed', keywords: ['blockchain', 'farcaster', 'lens', 'hive', 'deso', 'web3', 'decentralized', 'sources'] },
   { id: 'connected-apps', title: 'Connected apps', description: 'Review authorized networks and capabilities.', route: 'connected-apps', keywords: ['disconnect instagram', 'connections', 'providers'] },
   { id: 'cross-posting', title: 'Cross-posting', description: 'Choose default publish destinations.', route: 'cross-posting', keywords: ['stop posting to linkedin', 'publish everywhere', 'destinations'] },
   { id: 'privacy', title: 'Privacy', description: 'Manage privacy and recommendation data boundaries.', route: 'privacy', keywords: ['private', 'recommendation data', 'tracking'] },

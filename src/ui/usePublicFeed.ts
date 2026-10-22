@@ -43,10 +43,14 @@ export function usePublicFeed(sessionKey?: string) {
 
   useEffect(() => { refresh(); }, [refresh, sessionKey]);
 
+  /** Newest page without touching state, for live updates. */
+  const fetchLatest = useCallback(async () => (await loadPublicPosts()).posts, []);
+  const addPosts = useCallback((incoming: SocialPost[]) => setPosts((existing) => [...incoming.filter((post) => !existing.some((item) => item.id === post.id)), ...existing]), []);
+
   const addPost = useCallback((post: SocialPost) => setPosts((existing) => [post, ...existing.filter((item) => item.id !== post.id)]), []);
   const removePost = useCallback((postId: string) => setPosts((existing) => existing.filter((item) => item.id !== postId)), []);
 
-  return { posts, loading, error, hasMore: Boolean(cursor), refresh, loadMore, addPost, removePost };
+  return { posts, loading, error, hasMore: Boolean(cursor), refresh, loadMore, addPost, addPosts, removePost, fetchLatest };
 }
 
 function messageFor(reason: unknown) {

@@ -10,7 +10,7 @@ import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { OpenMediaApp } from './OpenMediaApp';
 import { FeedView } from './OpenMediaFeed';
-import { usePublicFeed } from './usePublicFeed';
+import { useMixedFeed } from './useMixedFeed';
 
 export function OpenMediaEntry() {
   const client = getSupabaseClient();
@@ -93,13 +93,13 @@ export function OpenMediaEntry() {
 /** Signed-out home: public posts are readable by anyone, without an account. */
 function PublicHome({ onSignIn }: { onSignIn: () => void }) {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
-  const feed = usePublicFeed();
+  const feed = useMixedFeed();
   const [mode, setMode] = useState<FeedMode>('raw');
   const apiURL = process.env.EXPO_PUBLIC_OPEN_MEDIA_PUBLIC_API_URL;
   return <View style={styles.screen}>
     <View style={styles.publicBar}><BrandMark compact /><Pressable accessibilityRole="button" onPress={onSignIn} style={styles.signInButton}><Text style={styles.signInText}>Sign in</Text></Pressable></View>
-    <FeedView mode={mode} onModeChange={setMode} posts={feed.posts} loading={feed.loading} error={feed.error} hasMore={feed.hasMore} onRetry={feed.refresh} onLoadMore={feed.loadMore} />
-    {apiURL ? <Pressable accessibilityRole="link" onPress={() => Linking.openURL(apiURL)} style={styles.apiLink}><Ionicons name="code-slash-outline" size={14} color={colors.textSecondary} /><Text style={styles.apiLinkText}>Open data · read these posts through the public API</Text></Pressable> : null}
+    <FeedView mode={mode} onModeChange={setMode} posts={feed.posts} loading={feed.loading} error={feed.error} hasMore={feed.hasMore} onRetry={feed.refresh} onLoadMore={feed.loadMore} sources={feed.sources} loadingMore={feed.loadingMore} pendingCount={feed.pendingCount} onShowPending={feed.showPending} />
+    {apiURL ? <Pressable accessibilityRole="link" onPress={() => Linking.openURL(apiURL)} style={styles.apiLink}><Ionicons name="code-slash-outline" size={14} color={colors.textSecondary} /><Text style={styles.apiLinkText}>Open data · read Open Media posts through the public API</Text></Pressable> : null}
   </View>;
 }
 

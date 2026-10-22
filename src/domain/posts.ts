@@ -6,6 +6,8 @@ export interface PostAuthor {
   displayName: string;
   handle: string;
   initials: string;
+  /** HTTPS image published by the author's network; initials are shown without it. */
+  avatarUrl?: string;
 }
 
 export interface PostMedia {
@@ -20,6 +22,8 @@ export interface PostMedia {
 export interface SocialPost {
   id: string;
   author: PostAuthor;
+  /** Long-form posts (for example Hive articles) carry a title; the body is then an excerpt. */
+  title?: string;
   body: string;
   kind: PostKind;
   createdAt: string;
@@ -29,12 +33,19 @@ export interface SocialPost {
   /** Present only where a source actually reports counts; Open Media has no reactions yet. */
   engagement?: { replies: number; reposts: number; likes: number };
   relevance: { followsAuthor: boolean; selectedInterestMatches: string[]; communityMatch?: string };
+  /**
+   * How an external network's post became eligible for this doorway: which public stream it was read
+   * from and which published filters were applied to that stream. Shown verbatim in “Why this?”.
+   */
+  eligibility?: { selection: string; filters: string[] };
 }
 
 export interface FeedExplanation {
   postId: string;
   mode: FeedMode;
   used: string[];
+  /** Published filters applied to the post's source before ranking. */
+  filters: string[];
   notUsed: string[];
 }
 
@@ -46,16 +57,18 @@ export function selectFeed(posts: SocialPost[], mode: FeedMode): SocialPost[] {
 }
 
 export function explainFeedPost(post: SocialPost, mode: FeedMode): FeedExplanation {
+  const source = post.eligibility ? [post.eligibility.selection] : [];
   const used = mode === 'raw'
-    ? ['Posted recently', 'Raw chronological order']
+    ? [...source, 'Posted recently', 'Raw chronological order']
     : [
         ...(post.relevance.followsAuthor ? ['You follow this author'] : []),
         ...post.relevance.selectedInterestMatches.map((topic) => `Matches your ${topic} interest`),
         ...(post.relevance.communityMatch ? [`From ${post.relevance.communityMatch}`] : []),
+        ...source,
         'Posted recently',
         'Selected by Relevant',
       ];
-  return { postId: post.id, mode, used, notUsed: forbiddenSignals };
+  return { postId: post.id, mode, used, filters: post.eligibility?.filters ?? [], notUsed: forbiddenSignals };
 }
 
 export function clipPosts(posts: SocialPost[]) {

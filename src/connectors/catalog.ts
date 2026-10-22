@@ -1,3 +1,4 @@
+import { networkConnectors } from './networkFeeds';
 import { ConnectorDescriptor } from './types';
 
 const developmentBuild = typeof __DEV__ !== 'undefined' ? __DEV__ : process.env.NODE_ENV !== 'production';
@@ -62,6 +63,7 @@ export const connectorCatalog: ConnectorDescriptor[] = [
     id: 'tiktok', displayName: 'TikTok', kind: 'social', authentication: 'oauth2-pkce', status: 'unavailable',
     capabilities: [{ operation: 'read-messages', available: false, reason: 'Approved Data Portability access can export direct-message data, but a live inbox connector is not implemented.' }, { operation: 'send-message', available: false, reason: 'TikTok does not expose live direct-message sending as a public developer capability.' }],
   },
+  ...networkConnectors.map((connector) => connector.descriptor()),
   {
     id: 'activitypub', displayName: 'ActivityPub', kind: 'protocol', authentication: 'oauth2-pkce', status: 'planned',
     capabilities: [{ operation: 'read-feed', available: false, reason: 'Instance discovery and authorization are not implemented.' }, { operation: 'publish-post', available: false, reason: 'Client-to-server publishing is not implemented.' }],
