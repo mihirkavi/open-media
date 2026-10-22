@@ -55,7 +55,13 @@ createServer(async (incoming, outgoing) => {
       if (incoming.method === 'OPTIONS') { outgoing.writeHead(204, headers); return outgoing.end(); }
       const email = (requestURL.searchParams.get('email') ?? '').trim().toLowerCase();
       const since = new Date(requestURL.searchParams.get('since') ?? 0);
-      if (incoming.headers.origin !== appOrigin || !/^[^\s@"]+@[^\s@"]+$/.test(email) || Number.isNaN(since.getTime())) {
+      // The web app sends its Origin; the iOS/Android app (simulator/emulator on this Mac) sends
+      // none. Browsers always attach an Origin to cross-site requests, so other websites can't read
+      // codes, and requests without one are accepted only from this computer.
+      const remote = incoming.socket.remoteAddress ?? '';
+      const fromThisComputer = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1';
+      const allowedCaller = incoming.headers.origin === appOrigin || (incoming.headers.origin === undefined && fromThisComputer);
+      if (!allowedCaller || !/^[^\s@"]+@[^\s@"]+$/.test(email) || Number.isNaN(since.getTime())) {
         outgoing.writeHead(400, headers);
         return outgoing.end(JSON.stringify({ error: 'Bad request.' }));
       }

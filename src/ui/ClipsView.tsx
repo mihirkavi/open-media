@@ -115,7 +115,7 @@ function Clip({ post, height, active, mounted, muted, onToggleMute, onFailed }: 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#000000' },
   clip: { width: '100%', backgroundColor: '#000000', overflow: 'hidden' },
-  overlay: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingHorizontal: 18, paddingTop: 40, paddingBottom: 22, gap: 6, backgroundColor: 'rgba(0,0,0,0.45)' },
+  overlay: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingLeft: 18, paddingRight: 88, paddingTop: 40, paddingBottom: 22, gap: 6, backgroundColor: 'rgba(0,0,0,0.45)' },
   author: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
   handle: { color: '#C9C9C4', fontWeight: '400', fontSize: 13 },
   body: { color: '#FFFFFF', fontSize: 14, lineHeight: 20 },
