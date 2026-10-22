@@ -39,7 +39,8 @@ import { FeedMode } from "../domain/posts";
 import { initialsFor } from "../domain/publicPosts";
 import { ThemeColors } from "../theme";
 import { useOpenMediaTheme } from "../themeContext";
-import { FeedView, ClipsView } from "./OpenMediaFeed";
+import { ClipsView } from "./ClipsView";
+import { FeedView } from "./OpenMediaFeed";
 import { OpenMediaMessages } from "./OpenMediaMessages";
 import { useMixedFeed } from "./useMixedFeed";
 import {
@@ -335,7 +336,7 @@ export function OpenMediaApp({
             onReportPost={canPost ? reportPost : undefined}
           />
         ) : null}
-        {destination === "clips" ? <ClipsView /> : null}
+        {destination === "clips" ? <ClipsView sessionKey={currentUserId} /> : null}
         {destination === "messages" ? (
           <OpenMediaMessages
             conversations={conversations}

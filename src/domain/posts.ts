@@ -16,6 +16,10 @@ export interface PostMedia {
   aspectRatio: number;
   durationSeconds?: number;
   altText: string;
+  /** Still image shown before a video plays. */
+  posterUrl?: string;
+  /** How a video is delivered: an HLS playlist (.m3u8) or a single progressive file (MP4/MOV). */
+  streaming?: 'hls' | 'progressive';
 }
 
 /** One canonical post is rendered in both Feed and Clips. */
@@ -71,8 +75,11 @@ export function explainFeedPost(post: SocialPost, mode: FeedMode): FeedExplanati
   return { postId: post.id, mode, used, filters: post.eligibility?.filters ?? [], notUsed: forbiddenSignals };
 }
 
+/** Clips are short videos: at most this long when the source reports a duration. */
+export const maxClipSeconds = 180;
+
 export function clipPosts(posts: SocialPost[]) {
-  return posts.filter((post) => post.kind === 'video' && post.media?.some((media) => media.kind === 'video'));
+  return posts.filter((post) => post.kind === 'video' && post.media?.some((media) => media.kind === 'video' && (media.durationSeconds === undefined || media.durationSeconds <= maxClipSeconds)));
 }
 
 function relevantScore(post: SocialPost) {

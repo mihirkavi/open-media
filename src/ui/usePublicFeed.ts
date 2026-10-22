@@ -4,14 +4,15 @@ import { loadPublicPosts, PostPage } from '../data/postService';
 import { SocialPost } from '../domain/posts';
 
 /** Live public posts with keyset paging. `sessionKey` reloads when the viewer changes. */
-export function usePublicFeed(sessionKey?: string) {
+export function usePublicFeed(sessionKey?: string, enabled = true) {
   const [posts, setPosts] = useState<SocialPost[]>([]);
   const [cursor, setCursor] = useState<PostPage['cursor']>();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState('');
   const sequence = useRef(0);
 
   const refresh = useCallback(async () => {
+    if (!enabled) return;
     const current = ++sequence.current;
     setLoading(true); setError('');
     try {
@@ -23,7 +24,7 @@ export function usePublicFeed(sessionKey?: string) {
     } finally {
       if (current === sequence.current) setLoading(false);
     }
-  }, []);
+  }, [enabled]);
 
   const loadMore = useCallback(async () => {
     if (!cursor) return;
@@ -44,7 +45,7 @@ export function usePublicFeed(sessionKey?: string) {
   useEffect(() => { refresh(); }, [refresh, sessionKey]);
 
   /** Newest page without touching state, for live updates. */
-  const fetchLatest = useCallback(async () => (await loadPublicPosts()).posts, []);
+  const fetchLatest = useCallback(async () => enabled ? (await loadPublicPosts()).posts : [], [enabled]);
   const addPosts = useCallback((incoming: SocialPost[]) => setPosts((existing) => [...incoming.filter((post) => !existing.some((item) => item.id === post.id)), ...existing]), []);
 
   const addPost = useCallback((post: SocialPost) => setPosts((existing) => [post, ...existing.filter((item) => item.id !== post.id)]), []);

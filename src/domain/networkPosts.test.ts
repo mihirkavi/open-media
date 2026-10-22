@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  collapseRepeatedPosts, DesoPostRecord, FarcasterCastMessage, farcasterProfileFromUserData, farcasterTimestamp, HivePostRecord, LensPostRecord,
+  collapseRepeatedPosts, DesoPostRecord, FarcasterCastMessage, farcasterProfileFromUserData, farcasterTimestamp, HivePostRecord, LensPostRecord, lensMediaUrl, livepeerPlaybackId, threeSpeakVideoId, videoStreaming,
   plainTextExcerpt, safeHttpsUrl, socialPostFromDeso, socialPostFromFarcaster, socialPostFromHive, socialPostFromLens, sourceName,
 } from './networkPosts';
-import { explainFeedPost } from './posts';
+import { clipPosts, explainFeedPost } from './posts';
 
 const channel = { id: 'farcaster', parentUrl: 'chain://eip155:7777777/erc721:0xabc' };
 const cast = (overrides: Partial<NonNullable<FarcasterCastMessage['data']['castAddBody']>> = {}): FarcasterCastMessage => ({
@@ -142,4 +142,31 @@ test('Identical posts by the same account collapse to the newest copy', () => {
   const copy = { ...first, id: 'farcaster:0xother', createdAt: '2030-01-01T00:00:00Z' };
   const other = { ...first, id: 'farcaster:0xthird', body: 'Different text' };
   assert.deepEqual(collapseRepeatedPosts([first, copy, other]).map((post) => post.id), ['farcaster:0xother', 'farcaster:0xthird']);
+});
+
+test('Video URLs are recognised and lens:// content maps to Grove', () => {
+  assert.equal(lensMediaUrl('lens://434742793ebf0a2a29cad3edc95d3bf63df841b4'), 'https://api.grove.storage/434742793ebf0a2a29cad3edc95d3bf63df841b4');
+  assert.equal(lensMediaUrl('ipfs://abc'), undefined);
+  assert.equal(videoStreaming('https://stream.farcaster.xyz/v1/video/01a1.m3u8'), 'hls');
+  assert.equal(videoStreaming('https://example.com/a.mp4?x=1'), 'progressive');
+  assert.equal(videoStreaming('https://example.com/page'), undefined);
+  assert.equal(livepeerPlaybackId('https://lvpr.tv/?v=409cspil39veu12o'), '409cspil39veu12o');
+  assert.equal(threeSpeakVideoId({ json_metadata: { video: { info: { author: 'someone', permlink: 'b8zuuvvp' } } } as never }), 'someone/b8zuuvvp');
+  assert.equal(threeSpeakVideoId({ json_metadata: { video: { info: { author: '../x', permlink: 'p' } } } as never }), undefined);
+});
+
+test('Network videos become canonical video posts that Clips can show', () => {
+  const farcaster = socialPostFromFarcaster(cast({ embeds: [{ url: 'https://stream.farcaster.xyz/v1/video/abc.m3u8' }] }), profile, channel)!;
+  assert.equal(farcaster.kind, 'video');
+  assert.equal(farcaster.media?.[0]?.streaming, 'hls');
+  assert.ok(!farcaster.body.includes('stream.farcaster.xyz'), 'the video is played, not pasted as a link');
+  const lensVideo = socialPostFromLens(lens({ metadata: { __typename: 'VideoMetadata', content: 'Clip', contentWarning: null, video: { item: 'lens://434742793ebf0a2a29cad3edc95d3bf63df841b4', cover: 'https://example.com/c.jpg', duration: 17 } } }))!;
+  assert.equal(lensVideo.media?.[0]?.posterUrl, 'https://example.com/c.jpg');
+  assert.equal(lensVideo.media?.[0]?.durationSeconds, 17);
+  const resolved = new Map([['409cspil39veu12o', { url: 'https://vod.example/a.mp4', streaming: 'progressive' as const }]]);
+  assert.equal(socialPostFromDeso(deso({ Body: '', ImageURLs: [], VideoURLs: ['https://lvpr.tv/?v=409cspil39veu12o'] }), resolved)?.media?.[0]?.url, 'https://vod.example/a.mp4');
+  assert.equal(socialPostFromDeso(deso({ Body: '', ImageURLs: [], VideoURLs: ['https://lvpr.tv/?v=unknown'] }), resolved), undefined);
+  assert.deepEqual(clipPosts([farcaster, lensVideo]).length, 2);
+  const long = { ...lensVideo, media: [{ ...lensVideo.media![0], durationSeconds: 600 }] };
+  assert.equal(clipPosts([long]).length, 0, 'Clips are short videos');
 });

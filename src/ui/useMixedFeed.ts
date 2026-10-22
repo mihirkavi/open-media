@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 
-import { networkConnectors } from '../connectors/networkFeeds';
+import { FeedKind, networkConnectors } from '../connectors/networkFeeds';
 import { NetworkId } from '../domain/networkPosts';
 import { SocialPost } from '../domain/posts';
 import { usePublicFeed } from './usePublicFeed';
@@ -23,8 +23,11 @@ const initialNetworkState = (): Record<NetworkId, NetworkState> => Object.fromEn
  * New posts are checked for continuously and held in `pending` until the Feed shows them, so a
  * reader who has scrolled down is never moved by content arriving above them.
  */
-export function useMixedFeed(sessionKey?: string) {
-  const openMedia = usePublicFeed(sessionKey);
+export function useMixedFeed(sessionKey?: string, kind: FeedKind = 'feed') {
+  // Clips are short videos; Open Media posts are text-only until video upload exists.
+  const includeOpenMedia = kind === 'feed';
+  const openMedia = usePublicFeed(sessionKey, includeOpenMedia);
+  const fetchPage = useCallback((connector: (typeof networkConnectors)[number], cursor?: string) => kind === 'clips' ? connector.fetchClips(cursor) : connector.fetchFeed!(cursor), [kind]);
   const [state, setState] = useState(initialNetworkState);
   const [pending, setPending] = useState<SocialPost[]>([]);
   const generation = useRef(0);
@@ -33,7 +36,7 @@ export function useMixedFeed(sessionKey?: string) {
     const connector = networkConnectors.find((item) => item.id === id)!;
     setState((existing) => ({ ...existing, [id]: { ...existing[id], loading: true, error: '' } }));
     try {
-      const page = await connector.fetchFeed!(cursor);
+      const page = await fetchPage(connector, cursor);
       if (current !== generation.current) return;
       setState((existing) => {
         const previous = append ? existing[id].posts : [];
@@ -44,7 +47,7 @@ export function useMixedFeed(sessionKey?: string) {
       if (current !== generation.current) return;
       setState((existing) => ({ ...existing, [id]: { ...existing[id], loading: false, error: `Couldn’t reach ${connector.descriptor().displayName} right now.` } }));
     }
-  }, []);
+  }, [fetchPage]);
 
   const refreshNetworks = useCallback(() => {
     const current = ++generation.current;
@@ -75,7 +78,7 @@ export function useMixedFeed(sessionKey?: string) {
     const current = generation.current;
     const results = await Promise.allSettled([
       openMedia.fetchLatest(),
-      ...networkConnectors.map((connector) => connector.fetchFeed!().then((page) => page.posts)),
+      ...networkConnectors.map((connector) => fetchPage(connector).then((page) => page.posts)),
     ]);
     if (current !== generation.current) return;
     const arrivals = results.flatMap((result) => result.status === 'fulfilled' ? result.value : []).filter((post) => !knownIds.current.has(post.id));
@@ -85,7 +88,7 @@ export function useMixedFeed(sessionKey?: string) {
     shown.forEach((post) => newest.set(post.provenance.connectorId, Math.max(newest.get(post.provenance.connectorId) ?? 0, Date.parse(post.createdAt) || 0)));
     const fresh = arrivals.filter((post) => (Date.parse(post.createdAt) || 0) >= (newest.get(post.provenance.connectorId) ?? 0) - 60_000);
     if (fresh.length) setPending((existing) => [...fresh.filter((post) => !existing.some((item) => item.id === post.id)), ...existing]);
-  }, [openMedia.fetchLatest, shown]);
+  }, [openMedia.fetchLatest, shown, fetchPage]);
 
   const checkRef = useRef(checkForNewPosts);
   useEffect(() => { checkRef.current = checkForNewPosts; }, [checkForNewPosts]);
@@ -123,9 +126,9 @@ export function useMixedFeed(sessionKey?: string) {
   }, [pending, openMedia.addPosts]);
 
   const sources: FeedSourceStatus[] = useMemo(() => [
-    { id: 'open-media', loading: openMedia.loading, error: openMedia.error },
+    ...(includeOpenMedia ? [{ id: 'open-media' as const, loading: openMedia.loading, error: openMedia.error }] : []),
     ...networkConnectors.map((connector) => ({ id: connector.id, loading: state[connector.id].loading, error: state[connector.id].error })),
-  ], [openMedia.loading, openMedia.error, state]);
+  ], [includeOpenMedia, openMedia.loading, openMedia.error, state]);
 
   const loading = sources.some((source) => source.loading) && !shown.length;
   const failed = sources.filter((source) => source.error);

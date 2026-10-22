@@ -54,6 +54,40 @@ export function sourceName(connectorId: string): string {
 
 export const maxNetworkBodyLength = 1200;
 
+/** A playable video, after any lookup a network needs (DeSo's Livepeer, Hive's 3Speak). */
+export interface ResolvedVideo { url: string; streaming: 'hls' | 'progressive'; posterUrl?: string; durationSeconds?: number; aspectRatio?: number }
+
+/** `lens://<hash>` content lives on Grove; https URLs pass through. */
+export function lensMediaUrl(value: string | null | undefined): string | undefined {
+  if (!value) return undefined;
+  const lens = value.match(/^lens:\/\/([0-9a-f]{20,})$/i);
+  return lens ? `https://api.grove.storage/${lens[1]}` : safeHttpsUrl(value);
+}
+
+export function videoStreaming(url: string): 'hls' | 'progressive' | undefined {
+  if (/\.m3u8(\?|$)/i.test(url) || /^https:\/\/stream\.farcaster\.xyz\/v1\/video\//.test(url)) return 'hls';
+  if (/\.(mp4|mov|m4v|webm)(\?|$)/i.test(url)) return 'progressive';
+  return undefined;
+}
+
+/** Livepeer playback ID from a DeSo video URL such as `https://lvpr.tv/?v=<id>`. */
+export function livepeerPlaybackId(url: string): string | undefined {
+  try {
+    const parsed = new URL(url);
+    if (parsed.hostname === 'lvpr.tv') return parsed.searchParams.get('v') ?? undefined;
+    return parsed.pathname.match(/\/hls\/([a-z0-9]+)\//i)?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
+/** `author/permlink` of the 3Speak video attached to a Hive post, if any. */
+export function threeSpeakVideoId(record: Pick<HivePostRecord, 'json_metadata'>): string | undefined {
+  const video = (record.json_metadata as { video?: { info?: { author?: unknown; permlink?: unknown; platform?: unknown } } } | null | undefined)?.video;
+  const author = video?.info?.author; const permlink = video?.info?.permlink;
+  return typeof author === 'string' && typeof permlink === 'string' && /^[a-z0-9.-]+$/.test(author) && /^[a-z0-9-]+$/i.test(permlink) ? `${author}/${permlink}` : undefined;
+}
+
 // ---------- Farcaster (Snapchain HTTP API) ----------
 
 export interface FarcasterCastMessage {
@@ -98,9 +132,10 @@ export function socialPostFromFarcaster(message: FarcasterCastMessage, profile: 
   if (!profile?.username || !avatarUrl) return undefined;
   const urls = (body.embeds ?? []).map((embed) => safeHttpsUrl(embed.url)).filter((url): url is string => Boolean(url));
   const images = urls.filter(looksLikeImage);
-  const links = urls.filter((url) => !images.includes(url) && !(body.text ?? '').includes(url));
+  const videoUrl = urls.find((url) => videoStreaming(url));
+  const links = urls.filter((url) => !images.includes(url) && url !== videoUrl && !(body.text ?? '').includes(url));
   const text = [body.text?.trim() ?? '', ...links].filter(Boolean).join('\n');
-  if (!text && !images.length) return undefined;
+  if (!text && !images.length && !videoUrl) return undefined;
   return networkPost({
     network: 'farcaster',
     externalId: message.hash,
@@ -109,6 +144,7 @@ export function socialPostFromFarcaster(message: FarcasterCastMessage, profile: 
     body: text,
     createdAt: farcasterTimestamp(message.data.timestamp),
     images,
+    video: videoUrl ? { url: videoUrl, streaming: videoStreaming(videoUrl)!, aspectRatio: 9 / 16 } : undefined,
     selection: `Newest public cast in the /${channel.id} channel on Farcaster`,
   });
 }
@@ -122,7 +158,7 @@ export interface LensPostRecord {
   timestamp: string;
   author: { address: string; score?: number | null; username?: { localName: string } | null; metadata?: { name?: string | null; picture?: string | null } | null };
   stats?: { comments: number; reposts: number; quotes: number; reactions: number } | null;
-  metadata?: { __typename?: string; title?: string | null; content?: string | null; contentWarning?: string | null; image?: { item?: string | null; altTag?: string | null } | null; sharingLink?: string | null } | null;
+  metadata?: { __typename?: string; title?: string | null; content?: string | null; contentWarning?: string | null; image?: { item?: string | null; altTag?: string | null } | null; sharingLink?: string | null; video?: { item?: string | null; cover?: string | null; duration?: number | null; altTag?: string | null } | null } | null;
 }
 
 export function socialPostFromLens(record: LensPostRecord): SocialPost | undefined {
@@ -135,7 +171,9 @@ export function socialPostFromLens(record: LensPostRecord): SocialPost | undefin
   const link = safeHttpsUrl(metadata.sharingLink ?? undefined);
   const content = metadata.content?.trim() ?? '';
   const text = link && !content.includes(link) ? [content, link].filter(Boolean).join('\n') : content;
-  if (!text && !image) return undefined;
+  const videoUrl = lensMediaUrl(metadata.video?.item);
+  const video: ResolvedVideo | undefined = videoUrl ? { url: videoUrl, streaming: videoStreaming(videoUrl) ?? 'progressive', posterUrl: lensMediaUrl(metadata.video?.cover), durationSeconds: metadata.video?.duration ?? undefined } : undefined;
+  if (!text && !image && !video) return undefined;
   const handle = localName ? `@${localName}` : shortAddress(record.author.address);
   return networkPost({
     network: 'lens',
@@ -146,7 +184,8 @@ export function socialPostFromLens(record: LensPostRecord): SocialPost | undefin
     body: text,
     createdAt: record.timestamp,
     images: image ? [image] : [],
-    imageAlt: metadata.image?.altTag ?? undefined,
+    imageAlt: metadata.image?.altTag ?? metadata.video?.altTag ?? undefined,
+    video,
     engagement: record.stats ? { replies: record.stats.comments, reposts: record.stats.reposts + record.stats.quotes, likes: record.stats.reactions } : undefined,
     selection: 'Newest public post on Lens',
   });
@@ -169,7 +208,7 @@ export interface HivePostRecord {
   community_title?: string;
 }
 
-export function socialPostFromHive(record: HivePostRecord): SocialPost | undefined {
+export function socialPostFromHive(record: HivePostRecord, videos?: Map<string, ResolvedVideo>): SocialPost | undefined {
   if (record.depth !== 0 || record.stats?.gray || record.stats?.hide) return undefined;
   const tags = Array.isArray(record.json_metadata?.tags) ? record.json_metadata.tags.filter((tag): tag is string => typeof tag === 'string') : [];
   if (tags.some((tag) => tag.toLowerCase() === 'nsfw')) return undefined;
@@ -185,6 +224,7 @@ export function socialPostFromHive(record: HivePostRecord): SocialPost | undefin
     body: excerpt,
     createdAt: hiveTimestamp(record.created),
     images: firstImage ? [firstImage] : [],
+    video: (() => { const id = threeSpeakVideoId(record); return id ? videos?.get(id) : undefined; })(),
     topics: tags.filter((tag) => !/^hive-\d+$/.test(tag)).slice(0, 5),
     engagement: { replies: record.children, reposts: record.reblogs ?? 0, likes: record.stats?.total_votes ?? 0 },
     selection: record.community_title ? `Newest public post on Hive, in ${record.community_title}` : 'Newest public post on Hive',
@@ -204,6 +244,7 @@ export interface DesoPostRecord {
   ParentStakeID?: string;
   Body?: string;
   ImageURLs?: string[] | null;
+  VideoURLs?: string[] | null;
   TimestampNanos: number;
   IsHidden?: boolean;
   RepostedPostEntryResponse?: unknown;
@@ -214,13 +255,14 @@ export interface DesoPostRecord {
   ProfileEntryResponse?: { Username?: string; ExtraData?: Record<string, string> | null } | null;
 }
 
-export function socialPostFromDeso(record: DesoPostRecord): SocialPost | undefined {
+export function socialPostFromDeso(record: DesoPostRecord, videos?: Map<string, ResolvedVideo>): SocialPost | undefined {
   if (record.IsHidden || record.ParentStakeID) return undefined;
   const username = record.ProfileEntryResponse?.Username;
   if (!username) return undefined;
   const body = record.Body?.trim() ?? '';
   const images = (record.ImageURLs ?? []).map((url) => safeHttpsUrl(url)).filter((url): url is string => Boolean(url));
-  if (!body && !images.length) return undefined;
+  const video = desoVideo(record, videos);
+  if (!body && !images.length && !video) return undefined;
   const key = record.PosterPublicKeyBase58Check;
   return networkPost({
     network: 'deso',
@@ -230,6 +272,7 @@ export function socialPostFromDeso(record: DesoPostRecord): SocialPost | undefin
     body,
     createdAt: new Date(Math.floor(record.TimestampNanos / 1e6)).toISOString(),
     images,
+    video,
     engagement: { replies: record.CommentCount ?? 0, reposts: (record.RepostCount ?? 0) + (record.QuoteRepostCount ?? 0), likes: record.LikeCount ?? 0 },
     selection: 'Newest public post on DeSo',
   });
@@ -249,6 +292,15 @@ export function collapseRepeatedPosts(posts: SocialPost[]): SocialPost[] {
   });
 }
 
+function desoVideo(record: DesoPostRecord, videos?: Map<string, ResolvedVideo>): ResolvedVideo | undefined {
+  const url = record.VideoURLs?.map((item) => safeHttpsUrl(item)).find((item): item is string => Boolean(item));
+  if (!url) return undefined;
+  const playbackId = livepeerPlaybackId(url);
+  if (playbackId) return videos?.get(playbackId);
+  const streaming = videoStreaming(url);
+  return streaming ? { url, streaming } : undefined;
+}
+
 // ---------- shared helpers ----------
 
 interface NetworkPostInput {
@@ -261,19 +313,23 @@ interface NetworkPostInput {
   createdAt: string;
   images: string[];
   imageAlt?: string;
+  video?: ResolvedVideo;
   topics?: string[];
   engagement?: SocialPost['engagement'];
   selection: string;
 }
 
 function networkPost(input: NetworkPostInput): SocialPost {
-  const media: PostMedia[] = input.images.slice(0, 1).map((url) => ({ kind: 'image', url, aspectRatio: 4 / 3, altText: input.imageAlt?.trim() || `Image shared on ${networks[input.network].displayName}` }));
+  const name = networks[input.network].displayName;
+  const media: PostMedia[] = input.video
+    ? [{ kind: 'video', url: input.video.url, streaming: input.video.streaming, posterUrl: input.video.posterUrl ?? input.images[0], durationSeconds: input.video.durationSeconds, aspectRatio: input.video.aspectRatio ?? 9 / 16, altText: input.imageAlt?.trim() || `Video shared on ${name}` }]
+    : input.images.slice(0, 1).map((url) => ({ kind: 'image', url, aspectRatio: 4 / 3, altText: input.imageAlt?.trim() || `Image shared on ${name}` }));
   return {
     id: `${input.network}:${input.externalId}`,
     author: { ...input.author, initials: initialsFor(input.author.displayName) },
     title: input.title,
     body: truncate(input.body, maxNetworkBodyLength),
-    kind: media.length ? 'image' : 'text',
+    kind: input.video ? 'video' : media.length ? 'image' : 'text',
     createdAt: input.createdAt,
     media: media.length ? media : undefined,
     topics: input.topics ?? [],
