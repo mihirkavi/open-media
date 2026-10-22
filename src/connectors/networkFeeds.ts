@@ -28,13 +28,13 @@ export const farcasterChannels: FarcasterChannel[] = [
 
 /** Public Snapchain nodes, tried in order. */
 const snapchainNodes = ['https://crackle.farcaster.xyz:3381', 'https://haatz.quilibrium.com'];
-const lensEndpoint = 'https://api.lens.xyz/graphql';
-const hiveEndpoint = 'https://api.hive.blog';
-const desoEndpoint = 'https://node.deso.org/api/v0';
+export const lensEndpoint = 'https://api.lens.xyz/graphql';
+export const hiveEndpoint = 'https://api.hive.blog';
+export const desoEndpoint = 'https://node.deso.org/api/v0';
 
-async function requestJSON<T>(url: string, init?: RequestInit): Promise<T> {
+export async function requestJSON<T>(url: string, init?: RequestInit, timeoutMs = requestTimeoutMs): Promise<T> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const response = await fetch(url, { ...init, signal: controller.signal, headers: { accept: 'application/json', ...(init?.body ? { 'content-type': 'application/json' } : {}), ...init?.headers } });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -92,7 +92,7 @@ export async function fetchFarcasterFeed(cursor?: string, kind: FeedKind = 'feed
 
 // ---------- Lens ----------
 
-const lensPostsQuery = `query OpenMediaLensPosts($request: PostsRequest!) {
+export const lensPostsQuery = `query OpenMediaLensPosts($request: PostsRequest!) {
   posts(request: $request) {
     items { __typename ... on Post {
       id slug timestamp
@@ -175,7 +175,7 @@ async function resolveAll(ids: string[], resolve: (id: string) => Promise<Resolv
 }
 
 /** DeSo videos are hosted on Livepeer; its public playback API lists the playable files. */
-function resolveLivepeer(ids: string[]) {
+export function resolveLivepeer(ids: string[]) {
   return resolveAll(ids, (id) => cached(`livepeer:${id}`, async () => {
     const info = await requestJSON<{ meta?: { source?: { type?: string; url?: string; width?: number; height?: number }[] } }>(`https://livepeer.studio/api/playback/${encodeURIComponent(id)}`);
     const sources = info.meta?.source ?? [];
@@ -188,7 +188,7 @@ function resolveLivepeer(ids: string[]) {
 }
 
 /** Hive videos are hosted by 3Speak; its embed API (the one its own player uses) returns the stream. */
-function resolveThreeSpeak(ids: string[]) {
+export function resolveThreeSpeak(ids: string[]) {
   return resolveAll(ids, (id) => cached(`3speak:${id}`, async () => {
     const info = await requestJSON<{ success?: boolean; videoUrl?: string; thumbnail?: string; duration?: number; isPlaceholder?: boolean }>(`https://play.3speak.tv/api/embed?v=${encodeURIComponent(id)}`);
     if (!info.success || info.isPlaceholder || !info.videoUrl?.startsWith('https://')) return undefined;

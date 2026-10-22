@@ -149,6 +149,41 @@ export function socialPostFromFarcaster(message: FarcasterCastMessage, profile: 
   });
 }
 
+/** A cast from Farcaster's public client search API (`/v2/search-casts`). */
+export interface FarcasterSearchCast {
+  hash: string;
+  text?: string;
+  timestamp: number;
+  author: { fid: number; username?: string; displayName?: string; pfp?: { url?: string } };
+  embeds?: { images?: { url?: string; alt?: string }[]; videos?: { url?: string; sourceUrl?: string }[]; urls?: { openGraph?: { url?: string } }[] };
+  replies?: { count?: number };
+  reactions?: { count?: number };
+  combinedRecastCount?: number;
+}
+
+export function socialPostFromFarcasterSearch(cast: FarcasterSearchCast, query: string): SocialPost | undefined {
+  const username = cast.author.username;
+  const avatarUrl = safeHttpsUrl(cast.author.pfp?.url);
+  if (!username || !avatarUrl || !cast.hash) return undefined;
+  const images = (cast.embeds?.images ?? []).map((image) => safeHttpsUrl(image.url)).filter((url): url is string => Boolean(url));
+  const videoUrl = (cast.embeds?.videos ?? []).map((video) => safeHttpsUrl(video.url ?? video.sourceUrl)).find((url): url is string => Boolean(url && videoStreaming(url)));
+  const text = cast.text?.trim() ?? '';
+  if (!text && !images.length && !videoUrl) return undefined;
+  return networkPost({
+    network: 'farcaster',
+    externalId: cast.hash,
+    canonicalURL: `https://farcaster.xyz/${encodeURIComponent(username)}/${cast.hash.slice(0, 10)}`,
+    author: { id: `farcaster:${cast.author.fid}`, displayName: cast.author.displayName || username, handle: `@${username}`, avatarUrl },
+    body: text,
+    createdAt: new Date(cast.timestamp).toISOString(),
+    images,
+    imageAlt: cast.embeds?.images?.[0]?.alt,
+    video: videoUrl ? { url: videoUrl, streaming: videoStreaming(videoUrl)!, aspectRatio: 9 / 16 } : undefined,
+    engagement: { replies: cast.replies?.count ?? 0, reposts: cast.combinedRecastCount ?? 0, likes: cast.reactions?.count ?? 0 },
+    selection: `Matches “${query}” in Farcaster’s public search`,
+  });
+}
+
 // ---------- Lens (Lens API v3 GraphQL) ----------
 
 export interface LensPostRecord {

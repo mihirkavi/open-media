@@ -40,12 +40,12 @@ import { initialsFor } from "../domain/publicPosts";
 import { ThemeColors } from "../theme";
 import { useOpenMediaTheme } from "../themeContext";
 import { ClipsView } from "./ClipsView";
+import { SearchView } from "./SearchView";
 import { FeedView } from "./OpenMediaFeed";
 import { OpenMediaMessages } from "./OpenMediaMessages";
 import { useMixedFeed } from "./useMixedFeed";
 import {
   OpenMediaProfile,
-  OpenMediaSearch,
   OpenMediaSettings,
 } from "./OpenMediaUtilities";
 
@@ -353,7 +353,7 @@ export function OpenMediaApp({
           />
         ) : null}
         {destination === "search" ? (
-          <OpenMediaSearch
+          <SearchView
             posts={feed.posts}
             conversations={conversations}
             onNavigate={navigate}
@@ -408,6 +408,15 @@ function DesktopRail({
       >
         <BrandIcon />
         <Text style={styles.wordmarkText}>Open Media</Text>
+      </Pressable>
+      <Pressable
+        accessibilityRole="search"
+        accessibilityLabel="Search everything"
+        onPress={() => onNavigate("search")}
+        style={[styles.railSearch, destination === "search" && styles.railSearchActive]}
+      >
+        <Ionicons name="search" size={16} color={colors.textSecondary} />
+        <Text style={styles.railSearchText}>Search everything</Text>
       </Pressable>
       <View style={styles.primary}>
         {primary.map((item) => (
@@ -616,6 +625,20 @@ function createStyles(colors: ThemeColors) {
     app: { flex: 1, flexDirection: "row", backgroundColor: colors.surface },
     appCompact: { flexDirection: "column" },
     content: { flex: 1, minWidth: 0 },
+    railSearch: {
+      minHeight: 40,
+      marginBottom: 14,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+      paddingHorizontal: 12,
+      borderRadius: 20,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surfaceAlt,
+    },
+    railSearchActive: { borderColor: colors.text },
+    railSearchText: { color: colors.textTertiary, fontSize: 13 },
     rail: {
       width: 218,
       padding: 16,

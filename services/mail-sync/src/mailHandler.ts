@@ -12,6 +12,7 @@ import { UserFacingError } from './errors.js';
 import { syncImap, testImap } from './imap.js';
 import { resolveMailHost } from './networkSafety.js';
 import { handlePublicApiRequest, isPublicApiPath } from './publicApi.js';
+import { runSearchAssist, SearchAssistEnv } from './searchAssist.js';
 import { syncPop3, testPop3 } from './pop3.js';
 import { sendSmtp, SmtpConnection, testSmtp } from './smtp.js';
 import { SupabaseRestRepository } from './supabaseRestRepository.js';
@@ -20,7 +21,7 @@ import { describeValidationError } from './validation.js';
 
 export interface Limiter { limit(options: { key: string }): Promise<{ success: boolean }> }
 
-export interface MailEnv extends FarcasterSignerEnv {
+export interface MailEnv extends FarcasterSignerEnv, SearchAssistEnv {
   SUPABASE_URL: string;
   SUPABASE_PUBLISHABLE_KEY: string;
   MAIL_CREDENTIALS_KEY: string;
@@ -69,6 +70,13 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
     if (request.method === 'GET' && url.pathname === '/health') return json(200, { ok: true }, headers);
     // Which cross-posting networks this server can help with (no secrets, no account data).
     if (request.method === 'GET' && url.pathname === '/v1/cross-posting/status') return json(200, { farcaster: farcasterPublishingConfigured(env) }, headers);
+    // Basic AI search over public posts; no account needed, rate limited per IP.
+    if (request.method === 'POST' && url.pathname === '/v1/search/assist') {
+      const limiter = env.PUBLIC_API_RATE_LIMITER;
+      if (limiter && !(await limiter.limit({ key: `assist:${request.headers.get('cf-connecting-ip') ?? 'local'}` })).success) return rateLimited(headers);
+      if (!env.AI) return json(503, { error: 'AI summaries aren’t available on this server.' }, headers);
+      return json(200, await runSearchAssist(await readJSON(request), env), headers);
+    }
 
     const session = await authenticate(request, env.SUPABASE_URL);
     const repository = new SupabaseRestRepository(env.SUPABASE_URL, env.SUPABASE_PUBLISHABLE_KEY, session.token);

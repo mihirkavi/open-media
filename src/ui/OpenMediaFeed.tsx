@@ -232,7 +232,7 @@ export function FeedPicker({ value, onChange }: { value: FeedMode; onChange: (mo
   return <View accessibilityRole="tablist" style={styles.segment}>{(['relevant', 'raw'] as const).map((mode) => <Pressable key={mode} accessibilityRole="tab" accessibilityState={{ selected: value === mode }} onPress={() => onChange(mode)} style={[styles.segmentButton, value === mode && styles.segmentActive]}><Text style={[styles.segmentText, value === mode && styles.segmentTextActive]}>{mode === 'relevant' ? 'Relevant' : 'Raw'}</Text></Pressable>)}</View>;
 }
 
-function PostCard({ post, mode, viewer, onDelete, onReport }: { post: SocialPost; mode: FeedMode; viewer?: FeedViewer; onDelete?: (postId: string) => Promise<void>; onReport?: (postId: string, reason: PostReportReason) => Promise<void> }) {
+export function PostCard({ post, mode, viewer, onDelete, onReport }: { post: SocialPost; mode: FeedMode; viewer?: FeedViewer; onDelete?: (postId: string) => Promise<void>; onReport?: (postId: string, reason: PostReportReason) => Promise<void> }) {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]); const [expanded, setExpanded] = useState(false); const [menuOpen, setMenuOpen] = useState(false); const explanation = explainFeedPost(post, mode);
   const native = post.provenance.connectorId === 'open-media';
   const own = Boolean(native && viewer && viewer.id === post.author.id);
