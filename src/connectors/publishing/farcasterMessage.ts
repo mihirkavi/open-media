@@ -34,7 +34,7 @@ export function encodeCastAddData(input: CastInput): Uint8Array {
   const body = new ProtoWriter();
   body.packedVarints(2, []); // mentions
   if (input.parentUrl) body.string(7, input.parentUrl);
-  body.string(4, input.text);
+  if (input.text) body.string(4, input.text); // proto3 omits empty strings (a video-only cast)
   body.packedVarints(5, []); // mentionsPositions
   for (const url of input.embedUrls ?? []) body.message(6, new ProtoWriter().string(1, url));
   const data = new ProtoWriter();

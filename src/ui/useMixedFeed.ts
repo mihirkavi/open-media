@@ -24,9 +24,8 @@ const initialNetworkState = (): Record<NetworkId, NetworkState> => Object.fromEn
  * reader who has scrolled down is never moved by content arriving above them.
  */
 export function useMixedFeed(sessionKey?: string, kind: FeedKind = 'feed') {
-  // Clips are short videos; Open Media posts are text-only until video upload exists.
-  const includeOpenMedia = kind === 'feed';
-  const openMedia = usePublicFeed(sessionKey, includeOpenMedia);
+  // Clips page through Open Media's video posts only; the server filters, so text posts never fill a page.
+  const openMedia = usePublicFeed(sessionKey, true, kind === 'clips' ? 'video' : undefined);
   const fetchPage = useCallback((connector: (typeof networkConnectors)[number], cursor?: string) => kind === 'clips' ? connector.fetchClips(cursor) : connector.fetchFeed!(cursor), [kind]);
   const [state, setState] = useState(initialNetworkState);
   const [pending, setPending] = useState<SocialPost[]>([]);
@@ -126,9 +125,9 @@ export function useMixedFeed(sessionKey?: string, kind: FeedKind = 'feed') {
   }, [pending, openMedia.addPosts]);
 
   const sources: FeedSourceStatus[] = useMemo(() => [
-    ...(includeOpenMedia ? [{ id: 'open-media' as const, loading: openMedia.loading, error: openMedia.error }] : []),
+    { id: 'open-media' as const, loading: openMedia.loading, error: openMedia.error },
     ...networkConnectors.map((connector) => ({ id: connector.id, loading: state[connector.id].loading, error: state[connector.id].error })),
-  ], [includeOpenMedia, openMedia.loading, openMedia.error, state]);
+  ], [openMedia.loading, openMedia.error, state]);
 
   const loading = sources.some((source) => source.loading) && !shown.length;
   const failed = sources.filter((source) => source.error);

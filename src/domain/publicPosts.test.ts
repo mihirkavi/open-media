@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { clipPosts } from './posts';
 import { formatRelativeTime, initialsFor, isPublicPostRecord, socialPostFromPublic } from './publicPosts';
 
 const record = {
@@ -39,4 +40,28 @@ test('formats relative times in human units', () => {
   assert.equal(formatRelativeTime('2026-09-24T12:00:00Z', now), '3d');
   assert.equal(formatRelativeTime('2026-08-15T12:00:00Z', now), 'Aug 15');
   assert.equal(formatRelativeTime('2025-08-15T12:00:00Z', now), 'Aug 15, 2025');
+});
+
+test('maps an attached video to a canonical video post that Clips can show', () => {
+  const author = '10000000-0000-0000-0000-000000000001';
+  const id = '0f8fad5b-d9cb-469f-a165-70867728950e';
+  const post = socialPostFromPublic({
+    ...record,
+    body: '',
+    video: { path: `${author}/${id}.mp4`, posterPath: `${author}/${id}.jpg`, durationSeconds: 12.5, width: 720, height: 1280, contentType: 'video/mp4', sha256: 'b'.repeat(64) },
+  }, 'http://127.0.0.1:54321');
+  assert.equal(post.kind, 'video');
+  assert.deepEqual(post.media?.[0], {
+    kind: 'video',
+    url: `http://127.0.0.1:54321/storage/v1/object/public/post-videos/${author}/${id}.mp4`,
+    posterUrl: `http://127.0.0.1:54321/storage/v1/object/public/post-videos/${author}/${id}.jpg`,
+    durationSeconds: 12.5,
+    aspectRatio: 720 / 1280,
+    altText: 'Video by Maya Chen',
+    streaming: 'progressive',
+    sha256: 'b'.repeat(64),
+  });
+  assert.deepEqual(clipPosts([post]), [post]);
+  // Without a storage URL (or with an invalid record) the post is shown as text.
+  assert.equal(socialPostFromPublic({ ...record, video: { path: '../x' } as never }, 'http://127.0.0.1:54321').kind, 'text');
 });

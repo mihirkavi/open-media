@@ -59,7 +59,15 @@
         }
       ],
       "expo-secure-store",
-      "expo-video"
+      "expo-video",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Open Media to pick a video you choose to post publicly.",
+          "cameraPermission": "Allow Open Media to record a short video you choose to post publicly.",
+          "microphonePermission": "Allow Open Media to record sound with the short videos you post."
+        }
+      ]
     ],
     "extra": {
       "eas": {

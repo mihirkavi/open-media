@@ -10,7 +10,7 @@ import { useMixedFeed } from './useMixedFeed';
 
 /**
  * Clips: the same canonical posts as Feed, shown as an immersive vertical stream of short videos
- * from Farcaster, Lens, Hive, and DeSo. One clip per screen; swipe or scroll to the next. It is
+ * from Open Media, Farcaster, Lens, Hive, and DeSo. One clip per screen; swipe or scroll to the next. It is
  * continuous (more clips load near the end) and live: new clips are announced by a pill and added on
  * top when tapped, so the clip someone is watching never moves or gets interrupted.
  */

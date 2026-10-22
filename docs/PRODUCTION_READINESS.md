@@ -30,6 +30,18 @@ This checklist defines “production ready” for the current onboarding private
 - [ ] Push the sign-in email templates (`supabase/templates/magic_link.html`, `confirmation.html`) to production with `npx supabase config push`, or paste them into Auth → Email Templates. They add the one-time code that lets people sign in when the link opens in a different browser or app than the one that requested it.
 - [ ] Decide who handles community-hidden posts until an operator console exists.
 
+## Short-video posting (2026-10-21, not yet in production)
+
+- [x] `20261021120000_post_videos.sql`: public `post-videos` bucket (100 MB, MP4/MOV/WebM/JPEG, author-folder write policies), video columns and constraints on `public.posts`, video in the public projection, `p_media` filter, and `open_media_create_post(..., p_video)` that only accepts the author's own uploaded file. 14 new database assertions (96 total).
+- [x] Public API returns `video` (file URL, poster, duration, size, SHA-256) and `?media=video`; API version 1.1.0. Worker tests pass.
+- [x] Local browser flow: attach a test MP4 carrying GPS metadata, upload with progress, publish, play in Feed and Clips, read it from the public API (stored file has no location, SHA-256 matches), per-network results, delete removes the files.
+- [ ] Hosted Supabase: raise the project's global upload limit to at least 100 MB (the Free plan caps files at 50 MB), then apply the migration.
+- [ ] Decide on Cloudflare Stream for playback before public launch (ADR 0009): account ID and Stream API token on the Worker, direct-upload endpoint, ready-state handling.
+- [ ] Add a cleanup job for uploads that never became posts.
+- [ ] Hidden or moderator-removed video posts: their files stay reachable by direct URL (public bucket). Before launch, serve video through signed URLs (Cloudflare Stream or a private bucket via the Worker), or make moderation removal also delete the Storage object.
+- [ ] New iOS/Android development and store builds for `expo-image-picker` and `expo-file-system` (camera, microphone, photo-library permission strings), then verify picking and recording on a device.
+- [ ] Post a video to each live network with real connected accounts (Lens/Grove, DeSo/Livepeer, Farcaster embed, Hive link) and confirm how each app displays it.
+
 ## Email in Messages and SMTP sending (2026-10-15, not yet in production)
 
 - [x] `20261015120000_mail_smtp_and_inbox.sql`: optional per-mailbox SMTP settings (all-or-nothing constraint), `open_media_*` save/get/list functions alongside the deployed `convo_*` ones, and `open_media_list_mail_messages` for the Messages inbox. Nine new database assertions (72 total) and a clean lint.

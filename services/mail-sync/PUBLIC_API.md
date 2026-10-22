@@ -12,7 +12,7 @@ Production host: `https://convo-mail-sync.convo-mail-sync.workers.dev` (the host
 | --- | --- | --- |
 | GET | `/` or `/v1` | Machine-readable description of the API |
 | GET | `/v1/openapi.json` | OpenAPI 3.1 document |
-| GET | `/v1/posts?limit=&cursor=` | Public posts, newest first |
+| GET | `/v1/posts?limit=&cursor=&media=` | Public posts, newest first; `media=video` lists only video posts |
 | GET | `/v1/posts/{id}` | One public post |
 | GET | `/v1/profiles/{handle}` | One public profile |
 | GET | `/v1/profiles/{handle}/posts?limit=&cursor=` | A profile's public posts, newest first |
@@ -33,6 +33,7 @@ curl "https://convo-mail-sync.convo-mail-sync.workers.dev/v1/posts?limit=2"
       "text": "Hello from Open Media!",
       "createdAt": "2026-09-28T05:24:34.195608+00:00",
       "url": "https://<api-host>/v1/posts/21a32464-edf1-4987-a1ed-a9447b1254cb",
+      "video": null,
       "author": {
         "handle": "tester",
         "displayName": "tester",
@@ -44,6 +45,8 @@ curl "https://convo-mail-sync.convo-mail-sync.workers.dev/v1/posts?limit=2"
   "pagination": { "limit": 2, "nextCursor": null, "next": null }
 }
 ```
+
+A post may carry one short video (at most 3 minutes). `video` is then an object with `url` (the file, as uploaded, with location metadata removed), `posterUrl` (or `null`), `streaming` (`progressive`), `contentType`, `durationSeconds`, `width`, `height`, and `sha256` (of the file, for integrity checks). The post's `text` may be empty. See [ADR 0009](../../docs/adrs/0009-short-video-posting.md).
 
 Errors use `{ "error": { "code", "message" } }` with `400`, `404`, `405`, `429` (see `Retry-After`), or `502`.
 
@@ -62,7 +65,7 @@ npm run typecheck --prefix services/mail-sync
 
 ## Deploy
 
-The public routes ship with the mail Worker. The Worker already holds `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`; no new secrets are needed. Apply `supabase/migrations/20260927120000_public_posts.sql` to production first, otherwise public routes return `502`.
+The public routes ship with the mail Worker. The Worker already holds `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`; no new secrets are needed. Apply `supabase/migrations/20260927120000_public_posts.sql` and `20261021120000_post_videos.sql` to production first, otherwise public routes return `502`.
 
 ```bash
 cd services/mail-sync

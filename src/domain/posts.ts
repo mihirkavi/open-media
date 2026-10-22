@@ -20,6 +20,8 @@ export interface PostMedia {
   posterUrl?: string;
   /** How a video is delivered: an HLS playlist (.m3u8) or a single progressive file (MP4/MOV). */
   streaming?: 'hls' | 'progressive';
+  /** SHA-256 (hex) of the media bytes, when the source records one (Open Media's own videos do). */
+  sha256?: string;
 }
 
 /** One canonical post is rendered in both Feed and Clips. */

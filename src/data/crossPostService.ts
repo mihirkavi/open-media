@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { publishingConnectors } from '../connectors/publishing';
 import { PublishedCopy, PublishingConnector, PublishingError } from '../connectors/publishing/types';
-import { CrossPostOutcome, CrossPostPreferences, crossPostNetworks, defaultCrossPostPreferences, prepareCrossPost } from '../domain/crossPosting';
+import { CrossPostOutcome, CrossPostPreferences, crossPostNetworks, CrossPostVideo, defaultCrossPostPreferences, prepareCrossPost } from '../domain/crossPosting';
 import { NetworkId, networks } from '../domain/networkPosts';
 
 const preferencesKey = 'open-media.cross-posting.preferences';
@@ -44,14 +44,15 @@ async function remember(key: string, copy: PublishedCopy) {
 /**
  * Publishes an already-saved Open Media post to each chosen network in parallel. `postId` is the
  * canonical Open Media post's client ID; with it, a retry skips networks that already have the post.
+ * `video` is the post's video, already stored by Open Media (ADR 0009).
  */
-export async function crossPost(body: string, destinations: NetworkId[], postId: string): Promise<CrossPostOutcome[]> {
+export async function crossPost(body: string, destinations: NetworkId[], postId: string, video?: CrossPostVideo): Promise<CrossPostOutcome[]> {
   const ledger = await readLedger();
   return Promise.all(destinations.map(async (network): Promise<CrossPostOutcome> => {
     const key = `${postId}:${network}`;
     const existing = ledger[key];
     if (existing) return { network, status: 'published', url: existing.url, externalId: existing.externalId };
-    const prepared = prepareCrossPost(body, network);
+    const prepared = prepareCrossPost(body, network, video);
     if (!prepared.ok) return { network, status: 'skipped', message: prepared.reason };
     const connector = publishingConnector(network);
     const availability = await connector.availability();
@@ -60,7 +61,7 @@ export async function crossPost(body: string, destinations: NetworkId[], postId:
       if (!(await connector.account())) return { network, status: 'skipped', message: `Connect ${networks[network].displayName} in Settings → Cross-posting.` };
       const copy = await connector.publish(prepared.content, key);
       await remember(key, copy);
-      return { network, status: 'published', url: copy.url, externalId: copy.externalId };
+      return { network, status: 'published', url: copy.url, externalId: copy.externalId, message: prepared.note };
     } catch (error) {
       return { network, status: 'failed', message: error instanceof PublishingError ? error.message : `${networks[network].displayName} didn’t accept the post. Try again.` };
     }

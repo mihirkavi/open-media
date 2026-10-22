@@ -118,7 +118,7 @@ export const farcasterPublisher: PublishingConnector = {
     if (!stored) throw new PublishingError('Connect Farcaster in Settings → Cross-posting.');
     const key = fromHex(stored.privateKey);
     try {
-      const message = signCastAdd({ fid: stored.fid, text: content.text }, key);
+      const message = signCastAdd({ fid: stored.fid, text: content.text, embedUrls: content.video ? [content.video.url] : undefined }, key);
       const token = await getAPIAccessToken();
       if (!token) throw new PublishingError('Sign in to Open Media first.');
       const response = await fetch(`${apiURL()}/v1/cross-posting/farcaster/messages`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream' }, body: message.bytes as unknown as BodyInit });

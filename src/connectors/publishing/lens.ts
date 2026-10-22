@@ -1,13 +1,16 @@
 import { Platform } from 'react-native';
 
 import { deviceSecretStorage } from '../../auth/supabase';
+import { CrossPostContent } from '../../domain/crossPosting';
+import { isPubliclyReachableUrl } from '../../domain/postVideo';
 import { NetworkAccount, PublishingConnector, PublishingError } from './types';
 
 /**
  * Lens: the person signs Lens's "Sign in with Ethereum" message in their browser wallet, which
  * gives Open Media a revocable Lens session (no keys). Post text is stored on Grove, Lens's public
  * storage, and the post itself is a Lens Chain transaction the wallet approves and pays for in GHO
- * (a fraction of a cent) unless Lens sponsors it. Web only for now: phones need a wallet connector.
+ * (a fraction of a cent) unless Lens sponsors it. A video is uploaded to Grove too (immutable, at
+ * most 125 MB) and posted as Lens video metadata. Web only for now: phones need a wallet connector.
  *
  * App identity: EXPO_PUBLIC_LENS_APP_ADDRESS, falling back to Lens's public test app, which Lens
  * provides for development. Register Open Media's own Lens app before launch.
@@ -107,10 +110,8 @@ export const lensPublisher: PublishingConnector = {
     if (!provider) throw new PublishingError('Your browser wallet isn’t available.');
     const token = await accessToken(stored);
 
-    const metadata = { $schema: 'https://json-schemas.lens.dev/posts/text-only/3.0.0.json', lens: { id: uuidFrom(idempotencyKey), content: content.text, locale: 'en', mainContentFocus: 'TEXT_ONLY' } };
-    const upload = await fetch(grove, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(metadata) });
-    const { uri } = await upload.json().catch(() => ({})) as { uri?: string };
-    if (!upload.ok || !uri?.startsWith('lens://')) throw new PublishingError('Lens storage didn’t accept the post. Try again.');
+    const metadata = content.video ? await videoMetadata(content, idempotencyKey) : { $schema: 'https://json-schemas.lens.dev/posts/text-only/3.0.0.json', lens: { id: uuidFrom(idempotencyKey), content: content.text, locale: 'en', mainContentFocus: 'TEXT_ONLY' } };
+    const uri = await groveUpload(JSON.stringify(metadata), 'application/json');
 
     const { post } = await gql<{ post: { __typename: string; hash?: string; reason?: string; raw?: Record<string, unknown> } }>(
       'mutation Post($request: CreatePostRequest!) { post(request: $request) { __typename ... on PostResponse { hash } ... on SelfFundedTransactionRequest { reason raw { to from data value gasLimit maxFeePerGas maxPriorityFeePerGas chainId } } ... on SponsoredTransactionRequest { reason } ... on TransactionWillFail { reason } ... on PostOperationValidationFailed { reason } } }',
@@ -142,6 +143,36 @@ export const lensPublisher: PublishingConnector = {
     return { externalId: hash!, url: `https://explorer.lens.xyz/tx/${hash}` };
   },
 };
+
+/** One-step immutable Grove upload; returns the `lens://` URI. */
+async function groveUpload(body: BodyInit, contentType: string): Promise<string> {
+  const upload = await fetch(grove, { method: 'POST', headers: { 'content-type': contentType }, body });
+  const { uri } = await upload.json().catch(() => ({})) as { uri?: string };
+  if (!upload.ok || !uri?.startsWith('lens://')) throw new PublishingError(contentType.startsWith('video/') ? 'Lens storage didn’t accept the video. Try again.' : 'Lens storage didn’t accept the post. Try again.');
+  return uri;
+}
+
+/** Lens video metadata (posts/video/3.0.0): the file goes to Grove; Open Media's public URL is the fallback. */
+async function videoMetadata(content: CrossPostContent, idempotencyKey: string) {
+  const video = content.video!;
+  const item = video.bytes ? await groveUpload(video.bytes as unknown as BodyInit, video.contentType) : video.url;
+  return {
+    $schema: 'https://json-schemas.lens.dev/posts/video/3.0.0.json',
+    lens: {
+      id: uuidFrom(idempotencyKey),
+      locale: 'en',
+      mainContentFocus: 'SHORT_VIDEO',
+      ...(content.text ? { content: content.text } : {}),
+      video: {
+        item,
+        type: video.contentType,
+        duration: Math.max(1, Math.round(video.durationSeconds)),
+        altTag: video.altText,
+        ...(video.posterUrl && isPubliclyReachableUrl(video.posterUrl) ? { cover: video.posterUrl } : {}),
+      },
+    },
+  };
+}
 
 /** Stable UUID-shaped id from the idempotency key, as Lens metadata requires a UUID. */
 function uuidFrom(key: string): string {

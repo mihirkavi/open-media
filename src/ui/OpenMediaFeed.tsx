@@ -5,13 +5,16 @@ import { ActivityIndicator, Image, Linking, NativeScrollEvent, NativeSyntheticEv
 import { createClientId } from '../data/openMediaService';
 import { crossPost } from '../data/crossPostService';
 import { PostReportReason, publishPost } from '../data/postService';
-import { CrossPostOutcome, destinationSummary, outcomeSummary, prepareCrossPost } from '../domain/crossPosting';
+import { crossPostVideo, discardPreparedVideo, draftCrossPostVideo, prepareVideo, PreparedVideo, uploadPostVideo, UploadedVideo, VideoError } from '../data/videoUpload';
+import { CrossPostOutcome, CrossPostVideo, destinationSummary, outcomeSummary, prepareCrossPost } from '../domain/crossPosting';
 import { NetworkId, networks, safeHttpsUrl, sourceName } from '../domain/networkPosts';
 import { explainFeedPost, FeedMode, selectFeed, SocialPost } from '../domain/posts';
+import { formatBytes, formatDuration, maxVideoBytes, maxVideoSeconds } from '../domain/postVideo';
 import { formatRelativeTime, maxPostLength } from '../domain/publicPosts';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { ClipVideo } from './ClipVideo';
+import { canRecordVideo, pickVideo } from './pickVideo';
 import { useCrossPosting } from './useCrossPosting';
 import type { FeedSourceStatus } from './useMixedFeed';
 
@@ -76,10 +79,14 @@ export function FeedView({ mode, onModeChange, posts, loading, error, hasMore, o
   </View>;
 }
 
+/** Where a post is in publishing. Video posts upload first, then the Open Media post is created. */
+type PublishStage = 'idle' | 'preparing' | 'uploading' | 'publishing' | 'crossPosting';
+
 /** Writing happens right in the feed: tap the row to expand it, publish, and it collapses. */
 function Composer({ viewer, open, onOpenChange, onPublished }: { viewer: FeedViewer; open: boolean; onOpenChange: (open: boolean) => void; onPublished: (post: SocialPost) => void }) {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
-  const [body, setBody] = useState(''); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
+  const [body, setBody] = useState(''); const [stage, setStage] = useState<PublishStage>('idle'); const [error, setError] = useState('');
+  const busy = stage !== 'idle';
   // One client ID per draft keeps retries idempotent on the server and on every network.
   const clientId = useRef(createClientId());
   const input = useRef<TextInput>(null);
@@ -88,45 +95,95 @@ function Composer({ viewer, open, onOpenChange, onPublished }: { viewer: FeedVie
   const [override, setOverride] = useState<NetworkId[]>();
   const destinations = (override ?? crossPosting.defaults).filter((network) => crossPosting.connected.includes(network));
   const [showDestinations, setShowDestinations] = useState(false);
-  const [retry, setRetry] = useState<{ body: string; postId: string; outcomes: CrossPostOutcome[] }>();
+  const [retry, setRetry] = useState<{ body: string; postId: string; outcomes: CrossPostOutcome[]; video?: CrossPostVideo }>();
   const [notice, setNotice] = useState('');
+  // The attached video, already cleaned of location metadata on this device.
+  const [video, setVideo] = useState<PreparedVideo>();
+  const [progress, setProgress] = useState(0);
+  const upload = useRef<AbortController>(undefined);
   useEffect(() => { if (open) setTimeout(() => input.current?.focus(), 0); }, [open]);
   useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(''), 6000); return () => clearTimeout(timer); }, [notice]);
+  useEffect(() => () => discardPreparedVideo(video), [video]);
   const length = body.trim().length;
-  const ready = !busy && length > 0 && length <= maxPostLength;
-  const finish = (outcomes: CrossPostOutcome[], text: string, postId: string) => {
-    const missed = outcomes.filter((outcome) => outcome.status !== 'published');
-    if (missed.length) setRetry({ body: text, postId, outcomes });
+  const ready = !busy && (length > 0 || Boolean(video)) && length <= maxPostLength;
+  const draftVideo = video ? draftCrossPostVideo(video) : undefined;
+  const finish = (outcomes: CrossPostOutcome[], text: string, postId: string, sent?: CrossPostVideo) => {
+    // Keep the per-network result open when something was skipped, failed, or arrived differently.
+    if (outcomes.some((outcome) => outcome.status !== 'published' || outcome.message)) setRetry({ body: text, postId, outcomes, video: sent });
     else { setRetry(undefined); setNotice(outcomeSummary(outcomes)); onOpenChange(false); }
   };
+  const attach = async (source: 'library' | 'camera') => {
+    setError('');
+    const picked = await pickVideo(source);
+    if ('cancelled' in picked) return;
+    if ('error' in picked) { setError(picked.error); return; }
+    setStage('preparing');
+    try { setVideo(await prepareVideo(picked.video)); }
+    catch (reason) { setError(reason instanceof VideoError ? reason.message : 'Open Media couldn’t use that video. Try another one.'); }
+    finally { setStage('idle'); }
+  };
   const publish = async () => {
-    setBusy(true); setError(''); setRetry(undefined);
-    const text = body; const postId = clientId.current; const chosen = destinations;
+    setError(''); setRetry(undefined);
+    const text = body; const postId = clientId.current; const chosen = destinations; const attached = video;
     try {
-      const post = await publishPost(text, postId);
+      let uploaded: UploadedVideo | undefined;
+      if (attached) {
+        setStage('uploading'); setProgress(0);
+        upload.current = new AbortController();
+        uploaded = await uploadPostVideo(attached, postId, setProgress, upload.current.signal);
+      }
+      setStage('publishing');
+      const post = await publishPost(text, postId, uploaded?.stored);
+      const sent = attached && uploaded ? crossPostVideo(attached, uploaded, post.media?.[0]?.altText ?? 'Video') : undefined;
       setBody(''); clientId.current = createClientId(); setOverride(undefined); setShowDestinations(false); onPublished(post);
-      finish(chosen.length ? await crossPost(text, chosen, postId) : [], text, postId);
+      setStage('crossPosting');
+      finish(chosen.length ? await crossPost(text, chosen, postId, sent) : [], text, postId, sent);
+      setVideo(undefined);
     }
-    catch (reason) { setError(reason instanceof Error ? reason.message : 'Publishing failed.'); }
-    finally { setBusy(false); }
+    catch (reason) {
+      if (reason instanceof Error && reason.name === 'AbortError') setError('Upload cancelled. Your draft is still here.');
+      else setError(reason instanceof Error ? reason.message : 'Publishing failed.');
+    }
+    finally { setStage('idle'); upload.current = undefined; }
   };
   const retryMissed = async () => {
     if (!retry) return;
-    setBusy(true);
-    try { finish(await crossPost(retry.body, retry.outcomes.map((outcome) => outcome.network), retry.postId), retry.body, retry.postId); }
-    finally { setBusy(false); }
+    setStage('crossPosting');
+    const missed = retry.outcomes.filter((outcome) => outcome.status !== 'published').map((outcome) => outcome.network);
+    try { finish(await crossPost(retry.body, missed, retry.postId, retry.video), retry.body, retry.postId, retry.video); }
+    finally { setStage('idle'); }
+  };
+  const cancel = () => {
+    if (stage === 'uploading') { upload.current?.abort(); return; }
+    setError(''); onOpenChange(false);
   };
   const toggle = (network: NetworkId) => setOverride(destinations.includes(network) ? destinations.filter((item) => item !== network) : [...destinations, network]);
   if (!open) return <View>
     <Pressable accessibilityRole="button" accessibilityLabel="Write a public post" onPress={() => onOpenChange(true)} style={styles.composer}><Avatar initials={viewer.initials} /><Text style={styles.composerText}>Share something publicly…</Text></Pressable>
     {notice ? <Text accessibilityLiveRegion="polite" style={styles.composerNotice}>{notice}</Text> : null}
   </View>;
+  const status = stage === 'preparing' ? 'Checking the video and removing location data…'
+    : stage === 'uploading' ? `Uploading video… ${Math.round(progress * 100)}%`
+    : stage === 'publishing' ? 'Publishing to Open Media…'
+    : stage === 'crossPosting' ? (video ? 'Sending to your other networks. Videos can take a minute…' : 'Sending to your other networks…')
+    : '';
   return <View style={[styles.composer, styles.composerOpen]}>
-    <View style={styles.composerTop}><Avatar initials={viewer.initials} /><TextInput ref={input} accessibilityLabel="Post text" multiline maxLength={maxPostLength + 200} value={body} onChangeText={setBody} placeholder="What’s on your mind?" placeholderTextColor={colors.textTertiary} style={styles.composerInput} /></View>
+    <View style={styles.composerTop}><Avatar initials={viewer.initials} /><TextInput ref={input} accessibilityLabel="Post text" multiline maxLength={maxPostLength + 200} value={body} onChangeText={setBody} placeholder={video ? 'Say something about your video (optional)' : 'What’s on your mind?'} placeholderTextColor={colors.textTertiary} style={styles.composerInput} /></View>
+    {video ? <View style={styles.attachment}>
+      <FeedVideo uri={video.previewUri} streaming="progressive" posterUrl={undefined} aspectRatio={video.width / video.height} altText="Your video" />
+      <View style={styles.attachmentRow}>
+        <Text style={styles.attachmentMeta}>{formatDuration(video.durationSeconds)} · {formatBytes(video.bytes.length)}{video.removedMetadata ? ' · Location and device details removed' : ''}</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="Remove video" disabled={busy} onPress={() => setVideo(undefined)} style={styles.menuChip}><Text style={styles.menuText}>Remove</Text></Pressable>
+      </View>
+    </View> : null}
+    {status ? <View accessibilityLiveRegion="polite" style={styles.progress}>
+      <Text style={styles.composerHint}>{status}</Text>
+      {stage === 'uploading' ? <View accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: 100, now: Math.round(progress * 100) }} style={styles.progressTrack}><View style={[styles.progressFill, { width: `${Math.round(progress * 100)}%` }]} /></View> : null}
+    </View> : null}
     {error ? <Text accessibilityLiveRegion="assertive" style={styles.composerError}>{error}</Text> : null}
     {retry ? <View style={styles.crossPostResult}>
       <Text accessibilityLiveRegion="polite" style={styles.crossPostResultText}>{outcomeSummary(retry.outcomes)}</Text>
-      {retry.outcomes.filter((outcome) => outcome.status !== 'published').map((outcome) => <Text key={outcome.network} style={styles.crossPostReason}>{networks[outcome.network].displayName}: {outcome.message}</Text>)}
+      {retry.outcomes.filter((outcome) => outcome.message).map((outcome) => <Text key={outcome.network} style={styles.crossPostReason}>{networks[outcome.network].displayName} · {outcomeLabel(outcome)}: {outcome.message}</Text>)}
       <View style={styles.menuRow}>
         {retry.outcomes.some((outcome) => outcome.status === 'failed') ? <Pressable accessibilityRole="button" disabled={busy} onPress={retryMissed} style={styles.menuChip}><Text style={styles.menuText}>Try again</Text></Pressable> : null}
         <Pressable accessibilityRole="button" disabled={busy} onPress={() => { setRetry(undefined); onOpenChange(false); }} style={styles.menuChip}><Text style={styles.menuText}>Done</Text></Pressable>
@@ -138,24 +195,32 @@ function Composer({ viewer, open, onOpenChange, onPublished }: { viewer: FeedVie
         const name = networks[item.network].displayName;
         if (!item.account) return <View key={item.network} style={styles.destination}><Ionicons name="ellipse-outline" size={20} color={colors.textTertiary} /><Text style={[styles.destinationName, styles.destinationOff]}>{name}</Text><Text style={styles.destinationNote}>{item.availability.available ? 'Connect in Settings → Cross-posting' : item.availability.setup === 'device' ? 'Set up in Settings → Cross-posting' : 'Coming soon'}</Text></View>;
         const selected = destinations.includes(item.network);
-        const prepared = prepareCrossPost(body || ' x', item.network);
+        const prepared = prepareCrossPost(body || (draftVideo ? '' : ' x'), item.network, draftVideo);
         return <Pressable key={item.network} accessibilityRole="checkbox" accessibilityState={{ checked: selected }} onPress={() => toggle(item.network)} style={styles.destination}>
           <Ionicons name={selected ? 'checkmark-circle' : 'ellipse-outline'} size={20} color={selected ? colors.text : colors.textTertiary} />
           <Text style={styles.destinationName}>{name}</Text>
-          <Text numberOfLines={1} style={[styles.destinationNote, selected && !prepared.ok && styles.composerOver]}>{selected && !prepared.ok ? prepared.reason : item.account.handle}</Text>
+          <Text numberOfLines={2} style={[styles.destinationNote, selected && !prepared.ok && styles.composerOver]}>{selected && !prepared.ok ? prepared.reason : selected && prepared.ok && prepared.note ? prepared.note : item.account.handle}</Text>
         </Pressable>;
       })}
     </View> : null}
     <View style={styles.composerFooter}>
+      {!video ? <>
+        <Pressable accessibilityRole="button" accessibilityLabel="Add a video" disabled={busy} onPress={() => attach('library')} style={styles.attachButton}><Ionicons name="film-outline" size={20} color={colors.textSecondary} /></Pressable>
+        {canRecordVideo ? <Pressable accessibilityRole="button" accessibilityLabel="Record a video" disabled={busy} onPress={() => attach('camera')} style={styles.attachButton}><Ionicons name="videocam-outline" size={20} color={colors.textSecondary} /></Pressable> : null}
+      </> : null}
       <Pressable accessibilityRole="button" accessibilityState={{ expanded: showDestinations }} accessibilityLabel={`Sharing to ${destinationSummary(destinations)}. Change destinations`} onPress={() => setShowDestinations((value) => !value)} style={styles.sharingTo}>
         <Text numberOfLines={1} style={[styles.composerHint, length > maxPostLength && styles.composerOver]}>Sharing to <Text style={styles.sharingToStrong}>{destinationSummary(destinations)}</Text>{length > maxPostLength - 200 ? ` · ${length}/${maxPostLength}` : ''}</Text>
         <Ionicons name={showDestinations ? 'chevron-up' : 'chevron-down'} size={14} color={colors.textTertiary} />
       </Pressable>
-      <Pressable accessibilityRole="button" disabled={busy} onPress={() => { setError(''); onOpenChange(false); }} style={styles.composerCancel}><Text style={styles.composerCancelText}>Cancel</Text></Pressable>
+      <Pressable accessibilityRole="button" disabled={busy && stage !== 'uploading'} onPress={cancel} style={styles.composerCancel}><Text style={styles.composerCancelText}>{stage === 'uploading' ? 'Stop upload' : 'Cancel'}</Text></Pressable>
       <Pressable accessibilityRole="button" disabled={!ready} onPress={publish} style={[styles.composerPost, !ready && styles.composerPostDisabled]}>{busy ? <ActivityIndicator color={colors.surface} /> : <Text style={styles.composerPostText}>Post</Text>}</Pressable>
     </View>
-    <Text style={styles.composerPublic}>Public · anyone can read it, here and on every network it goes to</Text>
+    <Text style={styles.composerPublic}>Public · anyone can read it{video ? ' and watch the video' : ''}, here and on every network it goes to · Videos up to {formatDuration(maxVideoSeconds)} and {formatBytes(maxVideoBytes)}</Text>
   </View>;
+}
+
+function outcomeLabel(outcome: CrossPostOutcome) {
+  return outcome.status === 'published' ? 'Posted' : outcome.status === 'skipped' ? 'Skipped' : 'Failed';
 }
 
 function listFormat(items: string[]) {
@@ -233,5 +298,5 @@ function PostImage({ url, altText }: { url: string; altText: string }) {
 function Action({ icon, count }: { icon: keyof typeof Ionicons.glyphMap; count: number }) { const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]); return <View style={styles.action}><Ionicons name={icon} size={17} color={colors.textSecondary} /><Text style={styles.actionText}>{count}</Text></View>; }
 
 function createStyles(colors: ThemeColors) { return StyleSheet.create({
-  screen: { flex: 1, backgroundColor: colors.surface }, stream: { width: '100%', maxWidth: 680, alignSelf: 'center', paddingHorizontal: 18, paddingTop: 26, paddingBottom: 70 }, header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 22 }, headerCopy: { flex: 1 }, title: { color: colors.text, fontSize: 28, fontWeight: '800', letterSpacing: -0.8 }, subtitle: { marginTop: 5, color: colors.textSecondary, fontSize: 13 }, segment: { flexDirection: 'row', padding: 3, borderRadius: 18, backgroundColor: colors.chrome }, segmentButton: { minHeight: 32, paddingHorizontal: 13, alignItems: 'center', justifyContent: 'center', borderRadius: 16 }, segmentActive: { backgroundColor: colors.text }, segmentText: { color: colors.textSecondary, fontSize: 12, fontWeight: '700' }, segmentTextActive: { color: colors.surface }, composer: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8, paddingHorizontal: 4, borderBottomWidth: 1, borderColor: colors.border }, composerText: { flex: 1, color: colors.textTertiary, fontSize: 16 }, composerOpen: { flexDirection: 'column', alignItems: 'stretch', paddingVertical: 14, gap: 10 }, composerTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 }, composerInput: { flex: 1, minHeight: 96, paddingTop: 8, color: colors.text, fontSize: 17, lineHeight: 24, textAlignVertical: 'top', outlineStyle: 'none' } as object, composerFooter: { flexDirection: 'row', alignItems: 'center', gap: 8 }, composerHint: { flex: 1, color: colors.textTertiary, fontSize: 12 }, composerOver: { color: colors.danger }, composerError: { color: colors.danger, fontSize: 13 }, composerCancel: { minHeight: 40, paddingHorizontal: 14, justifyContent: 'center' }, composerCancelText: { color: colors.textSecondary, fontSize: 14, fontWeight: '600' }, composerPost: { minHeight: 40, minWidth: 76, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center', borderRadius: 20, backgroundColor: colors.text }, composerPostDisabled: { opacity: 0.35 }, composerPostText: { color: colors.surface, fontSize: 14, fontWeight: '700' }, avatar: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.text }, avatarText: { color: colors.surface, fontSize: 12, fontWeight: '800' }, avatarImage: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.chrome }, post: { paddingVertical: 20, borderBottomWidth: 1, borderBottomColor: colors.border }, postHeader: { flexDirection: 'row', alignItems: 'center', gap: 11 }, author: { flex: 1 }, authorName: { color: colors.text, fontSize: 14, fontWeight: '700' }, meta: { marginTop: 2, color: colors.textTertiary, fontSize: 12 }, body: { marginTop: 13, color: colors.text, fontSize: 16, lineHeight: 23 }, postTitle: { marginTop: 13, color: colors.text, fontSize: 18, lineHeight: 24, fontWeight: '700', letterSpacing: -0.2 }, bodyAfterTitle: { marginTop: 6, color: colors.textSecondary, fontSize: 15, lineHeight: 22 }, postImage: { width: '100%', marginTop: 15, borderRadius: 18, backgroundColor: colors.chrome }, newPosts: { position: 'absolute', zIndex: 10, top: 14, alignSelf: 'center', minHeight: 36, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, borderRadius: 18, backgroundColor: colors.text, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 4 }, newPostsText: { color: colors.surface, fontSize: 13, fontWeight: '700' }, composerNotice: { paddingHorizontal: 4, paddingBottom: 10, color: colors.textSecondary, fontSize: 12, lineHeight: 17 }, composerPublic: { color: colors.textTertiary, fontSize: 11 }, sharingTo: { flex: 1, minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 4 }, sharingToStrong: { color: colors.text, fontWeight: '700' }, destinations: { gap: 2, padding: 8, borderRadius: 14, backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border }, destination: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 6 }, destinationName: { color: colors.text, fontSize: 14, fontWeight: '600' }, destinationOff: { color: colors.textTertiary }, destinationNote: { flex: 1, textAlign: 'right', color: colors.textTertiary, fontSize: 12 }, crossPostResult: { gap: 6, padding: 12, borderRadius: 14, backgroundColor: colors.chrome }, crossPostResultText: { color: colors.text, fontSize: 13, fontWeight: '600', lineHeight: 18 }, crossPostReason: { color: colors.textSecondary, fontSize: 12, lineHeight: 17 }, feedVideo: { width: '100%', marginTop: 15, borderRadius: 18, overflow: 'hidden', backgroundColor: '#000000', alignItems: 'center', justifyContent: 'center' }, feedVideoPlay: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center', borderRadius: 32, backgroundColor: 'rgba(0,0,0,0.55)' }, showMore: { alignSelf: 'flex-start', minHeight: 32, justifyContent: 'center' }, original: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: 'auto' }, sourceNotice: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 14, backgroundColor: colors.chrome }, sourceNoticeText: { flex: 1, color: colors.textSecondary, fontSize: 12, lineHeight: 17 }, sourceNoticeButton: { minHeight: 32, paddingHorizontal: 12, justifyContent: 'center', borderRadius: 16, borderWidth: 1, borderColor: colors.border }, explanationSubtitle: { marginTop: 10, marginBottom: 4, color: colors.text, fontSize: 12, fontWeight: '700' }, media: { minHeight: 240, marginTop: 15, padding: 22, alignItems: 'center', justifyContent: 'center', gap: 10, borderRadius: 18, backgroundColor: '#545451' }, video: { minHeight: 360, backgroundColor: '#222220' }, alt: { maxWidth: 300, color: '#FFFFFF', textAlign: 'center', fontSize: 12, lineHeight: 18 }, actions: { marginTop: 15, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 22, rowGap: 4 }, action: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 6 }, actionText: { color: colors.textSecondary, fontSize: 12 }, why: { marginLeft: 'auto', minHeight: 32, justifyContent: 'center' }, whyAfterLink: { marginLeft: 0 }, whyText: { color: colors.textSecondary, fontSize: 12, textDecorationLine: 'underline' }, explanation: { marginTop: 10, padding: 14, borderRadius: 14, backgroundColor: colors.chrome }, explanationTitle: { color: colors.text, fontSize: 12, fontWeight: '700', marginBottom: 8 }, explanationItem: { color: colors.textSecondary, fontSize: 12, lineHeight: 17 }, notUsed: { marginTop: 8, color: colors.textTertiary, fontSize: 12, lineHeight: 15 }, status: { alignItems: 'center', gap: 8, paddingVertical: 36 }, statusText: { color: colors.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 19 }, emptyTitle: { color: colors.text, fontSize: 15, fontWeight: '700' }, statusButton: { minHeight: 40, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center', borderRadius: 20, borderWidth: 1, borderColor: colors.border }, statusButtonText: { color: colors.text, fontSize: 12, fontWeight: '700' }, loadMore: { alignSelf: 'center', marginTop: 20 }, menuButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22 }, menu: { marginTop: 12, padding: 10, gap: 4, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceAlt }, menuRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, menuChip: { minHeight: 36, paddingHorizontal: 14, justifyContent: 'center', borderRadius: 18, borderWidth: 1, borderColor: colors.border }, menuLabel: { paddingBottom: 4, color: colors.textTertiary, fontSize: 12, fontWeight: '700' }, menuItem: { minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 4 }, menuText: { color: colors.text, fontSize: 13, fontWeight: '600' }, menuChipDanger: { borderColor: colors.danger }, menuDanger: { color: colors.danger, fontSize: 13, fontWeight: '700' }, menuNotice: { padding: 4, color: colors.textSecondary, fontSize: 12, lineHeight: 17 },
+  screen: { flex: 1, backgroundColor: colors.surface }, stream: { width: '100%', maxWidth: 680, alignSelf: 'center', paddingHorizontal: 18, paddingTop: 26, paddingBottom: 70 }, header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 22 }, headerCopy: { flex: 1 }, title: { color: colors.text, fontSize: 28, fontWeight: '800', letterSpacing: -0.8 }, subtitle: { marginTop: 5, color: colors.textSecondary, fontSize: 13 }, segment: { flexDirection: 'row', padding: 3, borderRadius: 18, backgroundColor: colors.chrome }, segmentButton: { minHeight: 32, paddingHorizontal: 13, alignItems: 'center', justifyContent: 'center', borderRadius: 16 }, segmentActive: { backgroundColor: colors.text }, segmentText: { color: colors.textSecondary, fontSize: 12, fontWeight: '700' }, segmentTextActive: { color: colors.surface }, composer: { minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8, paddingHorizontal: 4, borderBottomWidth: 1, borderColor: colors.border }, composerText: { flex: 1, color: colors.textTertiary, fontSize: 16 }, composerOpen: { flexDirection: 'column', alignItems: 'stretch', paddingVertical: 14, gap: 10 }, composerTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 }, composerInput: { flex: 1, minHeight: 96, paddingTop: 8, color: colors.text, fontSize: 17, lineHeight: 24, textAlignVertical: 'top', outlineStyle: 'none' } as object, composerFooter: { flexDirection: 'row', alignItems: 'center', gap: 8 }, composerHint: { flex: 1, color: colors.textTertiary, fontSize: 12 }, composerOver: { color: colors.danger }, composerError: { color: colors.danger, fontSize: 13 }, composerCancel: { minHeight: 40, paddingHorizontal: 14, justifyContent: 'center' }, composerCancelText: { color: colors.textSecondary, fontSize: 14, fontWeight: '600' }, composerPost: { minHeight: 40, minWidth: 76, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center', borderRadius: 20, backgroundColor: colors.text }, composerPostDisabled: { opacity: 0.35 }, composerPostText: { color: colors.surface, fontSize: 14, fontWeight: '700' }, avatar: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.text }, avatarText: { color: colors.surface, fontSize: 12, fontWeight: '800' }, avatarImage: { width: 38, height: 38, borderRadius: 19, backgroundColor: colors.chrome }, post: { paddingVertical: 20, borderBottomWidth: 1, borderBottomColor: colors.border }, postHeader: { flexDirection: 'row', alignItems: 'center', gap: 11 }, author: { flex: 1 }, authorName: { color: colors.text, fontSize: 14, fontWeight: '700' }, meta: { marginTop: 2, color: colors.textTertiary, fontSize: 12 }, body: { marginTop: 13, color: colors.text, fontSize: 16, lineHeight: 23 }, postTitle: { marginTop: 13, color: colors.text, fontSize: 18, lineHeight: 24, fontWeight: '700', letterSpacing: -0.2 }, bodyAfterTitle: { marginTop: 6, color: colors.textSecondary, fontSize: 15, lineHeight: 22 }, postImage: { width: '100%', marginTop: 15, borderRadius: 18, backgroundColor: colors.chrome }, newPosts: { position: 'absolute', zIndex: 10, top: 14, alignSelf: 'center', minHeight: 36, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, borderRadius: 18, backgroundColor: colors.text, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 3 }, elevation: 4 }, newPostsText: { color: colors.surface, fontSize: 13, fontWeight: '700' }, composerNotice: { paddingHorizontal: 4, paddingBottom: 10, color: colors.textSecondary, fontSize: 12, lineHeight: 17 }, composerPublic: { color: colors.textTertiary, fontSize: 11 }, attachButton: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 20 }, attachment: { gap: 8 }, attachmentRow: { flexDirection: 'row', alignItems: 'center', gap: 8 }, attachmentMeta: { flex: 1, color: colors.textSecondary, fontSize: 12 }, progress: { gap: 6 }, progressTrack: { height: 4, borderRadius: 2, overflow: 'hidden', backgroundColor: colors.chrome }, progressFill: { height: 4, borderRadius: 2, backgroundColor: colors.text }, sharingTo: { flex: 1, minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 4 }, sharingToStrong: { color: colors.text, fontWeight: '700' }, destinations: { gap: 2, padding: 8, borderRadius: 14, backgroundColor: colors.surfaceAlt, borderWidth: 1, borderColor: colors.border }, destination: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 6 }, destinationName: { color: colors.text, fontSize: 14, fontWeight: '600' }, destinationOff: { color: colors.textTertiary }, destinationNote: { flex: 1, textAlign: 'right', color: colors.textTertiary, fontSize: 12 }, crossPostResult: { gap: 6, padding: 12, borderRadius: 14, backgroundColor: colors.chrome }, crossPostResultText: { color: colors.text, fontSize: 13, fontWeight: '600', lineHeight: 18 }, crossPostReason: { color: colors.textSecondary, fontSize: 12, lineHeight: 17 }, feedVideo: { width: '100%', marginTop: 15, borderRadius: 18, overflow: 'hidden', backgroundColor: '#000000', alignItems: 'center', justifyContent: 'center' }, feedVideoPlay: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center', borderRadius: 32, backgroundColor: 'rgba(0,0,0,0.55)' }, showMore: { alignSelf: 'flex-start', minHeight: 32, justifyContent: 'center' }, original: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 4, marginLeft: 'auto' }, sourceNotice: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6, paddingVertical: 10, paddingHorizontal: 14, borderRadius: 14, backgroundColor: colors.chrome }, sourceNoticeText: { flex: 1, color: colors.textSecondary, fontSize: 12, lineHeight: 17 }, sourceNoticeButton: { minHeight: 32, paddingHorizontal: 12, justifyContent: 'center', borderRadius: 16, borderWidth: 1, borderColor: colors.border }, explanationSubtitle: { marginTop: 10, marginBottom: 4, color: colors.text, fontSize: 12, fontWeight: '700' }, media: { minHeight: 240, marginTop: 15, padding: 22, alignItems: 'center', justifyContent: 'center', gap: 10, borderRadius: 18, backgroundColor: '#545451' }, video: { minHeight: 360, backgroundColor: '#222220' }, alt: { maxWidth: 300, color: '#FFFFFF', textAlign: 'center', fontSize: 12, lineHeight: 18 }, actions: { marginTop: 15, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 22, rowGap: 4 }, action: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 6 }, actionText: { color: colors.textSecondary, fontSize: 12 }, why: { marginLeft: 'auto', minHeight: 32, justifyContent: 'center' }, whyAfterLink: { marginLeft: 0 }, whyText: { color: colors.textSecondary, fontSize: 12, textDecorationLine: 'underline' }, explanation: { marginTop: 10, padding: 14, borderRadius: 14, backgroundColor: colors.chrome }, explanationTitle: { color: colors.text, fontSize: 12, fontWeight: '700', marginBottom: 8 }, explanationItem: { color: colors.textSecondary, fontSize: 12, lineHeight: 17 }, notUsed: { marginTop: 8, color: colors.textTertiary, fontSize: 12, lineHeight: 15 }, status: { alignItems: 'center', gap: 8, paddingVertical: 36 }, statusText: { color: colors.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 19 }, emptyTitle: { color: colors.text, fontSize: 15, fontWeight: '700' }, statusButton: { minHeight: 40, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center', borderRadius: 20, borderWidth: 1, borderColor: colors.border }, statusButtonText: { color: colors.text, fontSize: 12, fontWeight: '700' }, loadMore: { alignSelf: 'center', marginTop: 20 }, menuButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 22 }, menu: { marginTop: 12, padding: 10, gap: 4, borderRadius: 14, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceAlt }, menuRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 }, menuChip: { minHeight: 36, paddingHorizontal: 14, justifyContent: 'center', borderRadius: 18, borderWidth: 1, borderColor: colors.border }, menuLabel: { paddingBottom: 4, color: colors.textTertiary, fontSize: 12, fontWeight: '700' }, menuItem: { minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 4 }, menuText: { color: colors.text, fontSize: 13, fontWeight: '600' }, menuChipDanger: { borderColor: colors.danger }, menuDanger: { color: colors.danger, fontSize: 13, fontWeight: '700' }, menuNotice: { padding: 4, color: colors.textSecondary, fontSize: 12, lineHeight: 17 },
 }); }

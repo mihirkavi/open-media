@@ -15,11 +15,22 @@ export interface PublicApiEnv {
   PUBLIC_API_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
 }
 
+interface UpstreamVideo {
+  path: string;
+  posterPath: string | null;
+  durationSeconds: number;
+  width: number;
+  height: number;
+  contentType: string;
+  sha256: string;
+}
+
 interface UpstreamPost {
   id: string;
   body: string;
   createdAt: string;
   author: { handle: string; displayName: string; avatarUrl: string | null };
+  video?: UpstreamVideo | null;
 }
 
 interface UpstreamProfile {
@@ -35,7 +46,7 @@ export interface Cursor { createdAt: string; id: string }
 
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 
-const apiVersion = '1.0.0';
+const apiVersion = '1.1.0';
 const defaultLimit = 20;
 const maxLimit = 50;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -87,7 +98,7 @@ export async function handlePublicApiRequest(request: Request, env: PublicApiEnv
       if (!uuidPattern.test(id)) return errorResponse(404, 'not_found', 'Post not found.');
       const post = await callRpc<UpstreamPost | null>(env, fetchImpl, 'open_media_public_post', { p_post_id: id });
       if (!post) return errorResponse(404, 'not_found', 'Post not found.');
-      return jsonResponse({ data: formatPost(post, url.origin) }, 30);
+      return jsonResponse({ data: formatPost(post, url.origin, env.SUPABASE_URL) }, 30);
     }
 
     const profileMatch = path.match(/^\/v1\/profiles\/([^/]+)(\/posts)?$/);
@@ -109,6 +120,8 @@ export async function handlePublicApiRequest(request: Request, env: PublicApiEnv
 
 async function listPosts(url: URL, env: PublicApiEnv, fetchImpl: Fetch, authorHandle?: string): Promise<Response> {
   const limit = parseLimit(url.searchParams.get('limit'));
+  const media = url.searchParams.get('media');
+  if (media !== null && media !== 'video') throw new BadRequest('media must be "video" (or left out for all posts).');
   const cursorParam = url.searchParams.get('cursor');
   const cursor = cursorParam ? decodeCursor(cursorParam) : undefined;
   if (cursorParam && !cursor) throw new BadRequest('The cursor is invalid. Use the value from a previous response.');
@@ -123,24 +136,26 @@ async function listPosts(url: URL, env: PublicApiEnv, fetchImpl: Fetch, authorHa
     p_before_created_at: cursor?.createdAt ?? null,
     p_before_id: cursor?.id ?? null,
     p_author_handle: authorHandle ?? null,
+    p_media: media,
   });
   const items = Array.isArray(posts) ? posts : [];
   const last = items[items.length - 1];
   const nextCursor = items.length === limit && last ? encodeCursor({ createdAt: last.createdAt, id: last.id }) : null;
-  const next = nextCursor ? withParams(url, { cursor: nextCursor, limit: String(limit) }) : null;
+  const next = nextCursor ? withParams(url, { cursor: nextCursor, limit: String(limit), ...(media ? { media } : {}) }) : null;
   return jsonResponse(
-    { data: items.map((post) => formatPost(post, url.origin)), pagination: { limit, nextCursor, next } },
+    { data: items.map((post) => formatPost(post, url.origin, env.SUPABASE_URL)), pagination: { limit, nextCursor, next } },
     30,
     next ? { link: `<${next}>; rel="next"` } : {},
   );
 }
 
-function formatPost(post: UpstreamPost, origin: string) {
+function formatPost(post: UpstreamPost, origin: string, supabaseUrl: string) {
   return {
     id: post.id,
     type: 'post',
     text: post.body,
     createdAt: post.createdAt,
+    video: post.video ? formatVideo(post.video, supabaseUrl) : null,
     url: `${origin}/v1/posts/${post.id}`,
     author: {
       handle: post.author.handle,
@@ -148,6 +163,21 @@ function formatPost(post: UpstreamPost, origin: string) {
       avatarUrl: post.author.avatarUrl,
       url: `${origin}/v1/profiles/${post.author.handle}`,
     },
+  };
+}
+
+/** Videos are files in the public `post-videos` bucket; the database stores paths, not URLs. */
+export function formatVideo(video: UpstreamVideo, supabaseUrl: string) {
+  const publicUrl = (path: string) => `${supabaseUrl.replace(/\/$/, '')}/storage/v1/object/public/post-videos/${path.split('/').map(encodeURIComponent).join('/')}`;
+  return {
+    url: publicUrl(video.path),
+    posterUrl: video.posterPath ? publicUrl(video.posterPath) : null,
+    streaming: 'progressive',
+    contentType: video.contentType,
+    durationSeconds: Number(video.durationSeconds),
+    width: video.width,
+    height: video.height,
+    sha256: video.sha256,
   };
 }
 
@@ -260,6 +290,7 @@ function describeApi(origin: string) {
       profilePosts: `${origin}/v1/profiles/{handle}/posts`,
     },
     pagination: 'Newest first. Follow pagination.next (or the Link rel="next" header) until it is null. limit is 1–50, default 20.',
+    media: 'Posts may carry one short video (at most 3 minutes) in `video`, with a public file URL, poster, and SHA-256 of the file. Add media=video to list only video posts.',
     rateLimit: 'Requests are rate limited per client IP. On HTTP 429, wait for Retry-After seconds.',
     scope: 'Only public posts and profiles are available. Private messages, email, and contacts are never exposed. Removed or reported-and-hidden posts disappear from the API.',
   };
@@ -268,13 +299,28 @@ function describeApi(origin: string) {
 export function openApiDocument(origin: string) {
   const postSchema = {
     type: 'object',
-    required: ['id', 'type', 'text', 'createdAt', 'url', 'author'],
+    required: ['id', 'type', 'text', 'createdAt', 'url', 'video', 'author'],
     properties: {
       id: { type: 'string', format: 'uuid' },
       type: { type: 'string', enum: ['post'] },
-      text: { type: 'string', maxLength: 2000 },
+      text: { type: 'string', maxLength: 2000, description: 'May be empty when the post is a video.' },
       createdAt: { type: 'string', format: 'date-time' },
       url: { type: 'string', format: 'uri' },
+      video: {
+        type: ['object', 'null'],
+        description: 'One short video attached to the post, or null.',
+        required: ['url', 'posterUrl', 'streaming', 'contentType', 'durationSeconds', 'width', 'height', 'sha256'],
+        properties: {
+          url: { type: 'string', format: 'uri' },
+          posterUrl: { type: ['string', 'null'], format: 'uri' },
+          streaming: { type: 'string', enum: ['progressive', 'hls'] },
+          contentType: { type: 'string', enum: ['video/mp4', 'video/quicktime', 'video/webm'] },
+          durationSeconds: { type: 'number', maximum: 180 },
+          width: { type: 'integer' },
+          height: { type: 'integer' },
+          sha256: { type: 'string', pattern: '^[0-9a-f]{64}$', description: 'SHA-256 of the video file as uploaded.' },
+        },
+      },
       author: {
         type: 'object',
         required: ['handle', 'displayName', 'url'],
@@ -315,6 +361,7 @@ export function openApiDocument(origin: string) {
   const pageParams = [
     { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: maxLimit, default: defaultLimit } },
     { name: 'cursor', in: 'query', schema: { type: 'string' }, description: 'Opaque cursor from pagination.nextCursor.' },
+    { name: 'media', in: 'query', schema: { type: 'string', enum: ['video'] }, description: 'Only posts with a video.' },
   ];
   const error = { description: 'Error', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } };
   return {

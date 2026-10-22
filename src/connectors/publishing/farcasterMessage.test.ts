@@ -22,6 +22,7 @@ async function reference(text: string, embeds: string[], parentUrl?: string) {
 for (const [name, text, embeds, parentUrl] of [
   ['plain text', 'Hello from Open Media 👋', [], undefined],
   ['embeds and channel', 'With a link', ['https://example.com/a', 'https://example.com/b'], 'https://warpcast.com/~/channel/dev'],
+  ['video embed without text', '', ['https://abc.supabase.co/storage/v1/object/public/post-videos/a/b.mp4'], undefined],
 ] as const) {
   test(`CastAdd bytes match @farcaster/core (${name})`, async () => {
     const expected = await reference(text, [...embeds], parentUrl);

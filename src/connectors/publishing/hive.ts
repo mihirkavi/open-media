@@ -80,7 +80,7 @@ export const hivePublisher: PublishingConnector = {
     const title = content.title ?? content.text.slice(0, 80);
     // Derived from the post's idempotency key, so a retry edits the same permlink instead of duplicating.
     const permlink = hivePermlink(title, hashToBase36(idempotencyKey));
-    const metadata = JSON.stringify({ tags: [appTag, 'crosspost'], app: 'openmedia/1.0', format: 'markdown' });
+    const metadata = JSON.stringify({ tags: [appTag, 'crosspost', ...(content.video ? ['video'] : [])], app: 'openmedia/1.0', format: 'markdown', ...(content.video ? { links: [content.video.url], ...(content.video.posterUrl ? { image: [content.video.posterUrl] } : {}) } : {}) });
     const txId = await new Promise<string>((resolve, reject) => {
       extension.requestPost(name, title, content.text, appTag, '', metadata, permlink, '', (response) => {
         if (response.success) resolve(response.result?.id ?? response.result?.tx_id ?? permlink);

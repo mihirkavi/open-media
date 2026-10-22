@@ -1,11 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
+import { CrossPostVideo } from '../../domain/crossPosting';
+import { videoExtension } from '../../domain/postVideo';
 import { NetworkAccount, PublishingConnector, PublishingError } from './types';
 
 /**
  * DeSo: DeSo Identity issues a derived key that may only submit posts and can spend at most
- * 0.01 DESO in fees. The key is created in this browser and never sent anywhere. Web only for now:
+ * 0.01 DESO in fees. The key is created in this browser and never sent anywhere. Videos are uploaded
+ * through DeSo's media API (which stores them with Livepeer) and attached as VideoURLs. Web only for now:
  * the DeSo SDK needs crypto shims and a WebView crypto bridge on iOS and Android.
  */
 const accountKey = 'open-media.network.deso';
@@ -88,11 +91,13 @@ export const desoPublisher: PublishingConnector = {
     if (current !== stored.publicKey) throw new PublishingError('DeSo signed out on this browser. Reconnect DeSo in Settings.');
     try {
       // Never open a permission pop-up mid-publish (browsers block it); explain instead.
-      const result = await deso.submitPost({ UpdaterPublicKeyBase58Check: stored.publicKey, BodyObj: { Body: content.text, ImageURLs: [], VideoURLs: [] } }, { checkPermissions: false });
+      const videoURLs = content.video ? [await uploadVideo(deso, stored.publicKey, content.video)] : [];
+      const result = await deso.submitPost({ UpdaterPublicKeyBase58Check: stored.publicKey, BodyObj: { Body: content.text, ImageURLs: [], VideoURLs: videoURLs } }, { checkPermissions: false });
       const hash = (result.constructedTransactionResponse as { PostHashHex?: string }).PostHashHex ?? (result.submittedTransactionResponse as { TxnHashHex?: string } | undefined)?.TxnHashHex;
       if (!hash) throw new Error('missing hash');
       return { externalId: hash, url: `https://focus.xyz/post/${hash}` };
     } catch (error) {
+      if (error instanceof PublishingError) throw error;
       const text = error instanceof Error ? error.message : String(error);
       if (/insufficient|balance|fee/i.test(text)) throw new PublishingError('Your DeSo account needs a little more DESO for network fees.');
       if (/spending limit|derived key|not authorized/i.test(text)) throw new PublishingError('Open Media’s DeSo key has expired or reached its limit. Reconnect DeSo in Settings.');
@@ -100,3 +105,17 @@ export const desoPublisher: PublishingConnector = {
     }
   },
 };
+
+/** Uploads the cleaned file to DeSo's media API; DeSo apps play `lvpr.tv` links natively. */
+async function uploadVideo(deso: DesoSdk, publicKey: string, video: CrossPostVideo): Promise<string> {
+  if (!video.bytes) throw new PublishingError('DeSo needs the video file itself, which isn’t available on this device any more.');
+  try {
+    const file = new File([video.bytes as unknown as BlobPart], `open-media.${videoExtension(video.contentType)}`, { type: video.contentType });
+    const response = await deso.uploadVideo({ UserPublicKeyBase58Check: publicKey, file });
+    const playbackId = response.asset?.playbackId;
+    if (!playbackId) throw new Error('missing playback id');
+    return `https://lvpr.tv/?v=${encodeURIComponent(playbackId)}`;
+  } catch {
+    throw new PublishingError('DeSo didn’t accept the video upload. Try again.');
+  }
+}

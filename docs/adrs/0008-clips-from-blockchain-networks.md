@@ -1,6 +1,6 @@
 # ADR 0008: Clips from blockchain social networks
 
-- Status: accepted
+- Status: accepted (Open Media's own video posts were added to Clips by [ADR 0009](0009-short-video-posting.md))
 - Date: 2026-10-21
 
 ## Context

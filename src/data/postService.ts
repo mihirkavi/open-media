@@ -1,5 +1,7 @@
 import { getSupabaseClient } from '../auth/supabase';
+import { deletePostVideoFiles } from './videoUpload';
 import { SocialPost } from '../domain/posts';
+import { StoredPostVideo } from '../domain/postVideo';
 import { isPublicPostRecord, maxPostLength, PublicPostRecord, socialPostFromPublic } from '../domain/publicPosts';
 
 export type PostReportReason = 'spam' | 'harassment' | 'other';
@@ -18,36 +20,49 @@ function requireClient() {
   return client;
 }
 
-/** Public posts, newest first. Works signed out; signed in it also hides blocked authors. */
-export async function loadPublicPosts(options: { before?: PostPage['cursor']; authorHandle?: string } = {}): Promise<PostPage> {
+const supabaseUrl = () => process.env.EXPO_PUBLIC_SUPABASE_URL;
+const fromRecord = (record: PublicPostRecord) => socialPostFromPublic(record, supabaseUrl());
+
+/**
+ * Public posts, newest first. Works signed out; signed in it also hides blocked authors.
+ * `media: 'video'` returns only posts with a video (for Clips).
+ */
+export async function loadPublicPosts(options: { before?: PostPage['cursor']; authorHandle?: string; media?: 'video' } = {}): Promise<PostPage> {
   const { data, error } = await requireClient().rpc('open_media_public_posts', {
     p_limit: pageSize,
     p_before_created_at: options.before?.createdAt ?? null,
     p_before_id: options.before?.id ?? null,
     p_author_handle: options.authorHandle ?? null,
+    p_media: options.media ?? null,
   });
   if (error) throw error;
   const records = (Array.isArray(data) ? data : []).filter(isPublicPostRecord) as PublicPostRecord[];
   const last = records[records.length - 1];
   return {
-    posts: records.map(socialPostFromPublic),
+    posts: records.map(fromRecord),
     cursor: records.length === pageSize && last ? { createdAt: last.createdAt, id: last.id } : undefined,
   };
 }
 
-export async function publishPost(body: string, clientId: string): Promise<SocialPost> {
+/** Creates the canonical Open Media post. A video must already be uploaded (see `videoUpload.ts`). */
+export async function publishPost(body: string, clientId: string, video?: StoredPostVideo): Promise<SocialPost> {
   const text = body.trim();
-  if (!text) throw new Error('Write something before publishing.');
+  if (!text && !video) throw new Error('Write something before publishing.');
   if (text.length > maxPostLength) throw new Error(`Posts can be up to ${maxPostLength} characters.`);
-  const { data, error } = await requireClient().rpc('open_media_create_post', { p_client_id: clientId, p_body: text });
+  const { data, error } = await requireClient().rpc('open_media_create_post', { p_client_id: clientId, p_body: text, p_video: video ?? null });
   if (error) throw error;
   if (!isPublicPostRecord(data)) throw new Error('Open Media returned an unexpected post.');
-  return socialPostFromPublic(data);
+  return fromRecord(data);
 }
 
+/** Deletes the post, then its video files (authors can read their own post rows for the paths). */
 export async function deletePost(postId: string): Promise<void> {
-  const { error } = await requireClient().rpc('open_media_delete_post', { p_post_id: postId });
+  const client = requireClient();
+  const { data: row } = await client.from('posts').select('video_path, video_poster_path').eq('id', postId).maybeSingle();
+  const { error } = await client.rpc('open_media_delete_post', { p_post_id: postId });
   if (error) throw error;
+  const paths = [row?.video_path, row?.video_poster_path].filter((path): path is string => typeof path === 'string');
+  if (paths.length) await deletePostVideoFiles(paths);
 }
 
 export async function reportPost(postId: string, reason: PostReportReason, details = ''): Promise<void> {

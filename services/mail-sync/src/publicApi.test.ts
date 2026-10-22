@@ -37,12 +37,13 @@ test('lists public posts with a stable, email-free schema', async () => {
     text: 'Hello, open web',
     createdAt: '2026-09-27T10:00:00+00:00',
     url: `https://api.openmedia.test/v1/posts/${postId}`,
+    video: null,
     author: { handle: 'maya', displayName: 'Maya', avatarUrl: null, url: 'https://api.openmedia.test/v1/profiles/maya' },
   });
   assert.equal(json.pagination.nextCursor, null);
   assert.equal(calls[0].url, 'https://db.example.test/rest/v1/rpc/open_media_public_posts');
   assert.equal(calls[0].apikey, 'publishable-key');
-  assert.deepEqual(calls[0].body, { p_limit: 20, p_before_created_at: null, p_before_id: null, p_author_handle: null });
+  assert.deepEqual(calls[0].body, { p_limit: 20, p_before_created_at: null, p_before_id: null, p_author_handle: null, p_media: null });
 });
 
 test('returns a next cursor and Link header for full pages', async () => {
@@ -54,6 +55,32 @@ test('returns a next cursor and Link header for full pages', async () => {
   const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
   await handlePublicApiRequest(get(`/v1/posts?limit=1&cursor=${json.pagination.nextCursor}`), env, fakeUpstream({ open_media_public_posts: [] }, calls));
   assert.equal(calls[0].body.p_before_id, postId);
+});
+
+test('returns a post video as public file URLs and filters to video posts', async () => {
+  const authorId = '10000000-0000-0000-0000-000000000001';
+  const videoPost = {
+    ...post,
+    body: '',
+    video: { path: `${authorId}/${postId}.mp4`, posterPath: `${authorId}/${postId}.jpg`, durationSeconds: 12.5, width: 720, height: 1280, contentType: 'video/mp4', sha256: 'a'.repeat(64) },
+  };
+  const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const response = await handlePublicApiRequest(get('/v1/posts?media=video&limit=1'), env, fakeUpstream({ open_media_public_posts: [videoPost] }, calls));
+  const json = await response.json() as { data: Array<{ text: string; video: Record<string, unknown> }>; pagination: { next: string } };
+  assert.equal(calls[0].body.p_media, 'video');
+  assert.equal(json.data[0].text, '');
+  assert.deepEqual(json.data[0].video, {
+    url: `https://db.example.test/storage/v1/object/public/post-videos/${authorId}/${postId}.mp4`,
+    posterUrl: `https://db.example.test/storage/v1/object/public/post-videos/${authorId}/${postId}.jpg`,
+    streaming: 'progressive',
+    contentType: 'video/mp4',
+    durationSeconds: 12.5,
+    width: 720,
+    height: 1280,
+    sha256: 'a'.repeat(64),
+  });
+  assert.match(json.pagination.next, /media=video/);
+  assert.equal((await handlePublicApiRequest(get('/v1/posts?media=audio'), env, fakeUpstream({ open_media_public_posts: [] }))).status, 400);
 });
 
 test('rejects invalid limits and cursors', async () => {
