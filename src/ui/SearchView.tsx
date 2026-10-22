@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { Conversation } from '../domain/models';
 import { networks, sourceName } from '../domain/networkPosts';
@@ -27,7 +27,7 @@ export function SearchView({ posts, conversations, onNavigate, onClose }: { post
   const hasQuery = Boolean(search.parsed.raw);
   const nothing = hasQuery && !search.searching && !search.posts.length && !search.settings.length && !search.messages.length;
 
-  return <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+  return <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
     <View style={styles.titleRow}>
       {onClose ? <Pressable accessibilityRole="button" accessibilityLabel="Close search" onPress={onClose} style={styles.close}><Ionicons name="chevron-back" size={22} color={colors.text} /></Pressable> : null}
       <Text style={styles.title}>Search</Text>
@@ -35,7 +35,7 @@ export function SearchView({ posts, conversations, onNavigate, onClose }: { post
     <Text style={styles.subtitle}>People, posts on every network, Clips, messages, email, and settings, in one place.</Text>
     <View style={styles.field}>
       <Ionicons name="search" size={18} color={colors.textSecondary} />
-      <TextInput accessibilityLabel="Search everything" autoFocus value={query} onChangeText={setQuery} placeholder="Search everything" placeholderTextColor={colors.textTertiary} returnKeyType="search" style={styles.input} />
+      <TextInput accessibilityLabel="Search everything" autoFocus value={query} onChangeText={setQuery} placeholder="Search everything" placeholderTextColor={colors.textTertiary} returnKeyType="search" onSubmitEditing={() => Keyboard.dismiss()} style={styles.input} />
       {query ? <Pressable accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => setQuery('')} style={styles.clear}><Ionicons name="close-circle" size={18} color={colors.textTertiary} /></Pressable> : null}
     </View>
 
