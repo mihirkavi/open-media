@@ -30,9 +30,14 @@ export interface ApprovalPrompt {
   qrCode?: string;
 }
 
+/** A short value the person types while connecting, such as their Hive username. */
+export interface TextRequest { title: string; message: string; placeholder: string }
+
 export interface ConnectContext {
   /** Shows (or, with `undefined`, clears) an approval step while the connector waits for it. */
   showApproval(prompt: ApprovalPrompt | undefined): void;
+  /** Asks for a short value; rejects if the person cancels. */
+  requestText(request: TextRequest): Promise<string>;
   signal: AbortSignal;
 }
 

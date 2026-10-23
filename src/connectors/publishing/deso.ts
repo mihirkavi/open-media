@@ -1,28 +1,44 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
 
 import { CrossPostVideo } from '../../domain/crossPosting';
 import { videoExtension } from '../../domain/postVideo';
+import { prepareNativeCrypto } from './nativeCrypto';
 import { NetworkAccount, PublishingConnector, PublishingError } from './types';
 
 /**
  * DeSo: DeSo Identity issues a derived key that may only submit posts and can spend at most
  * 0.01 DESO in fees. The key is created in this browser and never sent anywhere. Videos are uploaded
- * through DeSo's media API (which stores them with Livepeer) and attached as VideoURLs. Web only for now:
- * the DeSo SDK needs crypto shims and a WebView crypto bridge on iOS and Android.
+ * through DeSo's media API (which stores them with Livepeer) and attached as VideoURLs. On iOS and
+ * Android, DeSo Identity opens in a secure in-app browser (an auth session) and returns to
+ * `openmedia://deso-auth`; the derived key is then kept in the app's storage.
  */
 const accountKey = 'open-media.network.deso';
 const nodeURI = 'https://node.deso.org';
+const nativeRedirectURI = 'openmedia://deso-auth';
+/** Set while a native sign-in window is open, so closing it ends the wait instead of hanging. */
+let cancelNativeLogin: ((reason: Error) => void) | undefined;
 
 type DesoSdk = typeof import('deso-protocol');
 let sdk: Promise<DesoSdk> | undefined;
 
 /** Loaded on first use so the SDK isn't evaluated unless someone connects DeSo. */
 function desoSdk() {
-  sdk ??= import('deso-protocol').then((module) => {
+  sdk ??= prepareNativeCrypto().then(() => import('deso-protocol')).then((module) => {
+    const native = Platform.OS !== 'web';
     module.configure({
       appName: 'Open Media',
       nodeURI,
+      ...(native ? {
+        redirectURI: nativeRedirectURI,
+        storageProvider: AsyncStorage,
+        identityPresenter: async (url: string) => {
+          const result = await WebBrowser.openAuthSessionAsync(url, nativeRedirectURI);
+          if (result.type === 'success') module.identity.handleRedirectURI(result.url);
+          else cancelNativeLogin?.(new PublishingError('DeSo sign-in was closed before it finished.'));
+        },
+      } : {}),
       spendingLimitOptions: {
         GlobalDESOLimit: 0.01 * 1e9,
         TransactionCountLimitMap: { SUBMIT_POST: 'UNLIMITED', AUTHORIZE_DERIVED_KEY: 1 },
@@ -48,10 +64,9 @@ export const desoPublisher: PublishingConnector = {
   revokeHint: 'Open Media’s DeSo key can only post and spend at most 0.01 DESO in fees. You can remove it in any DeSo app’s settings.',
 
   async availability() {
-    if (Platform.OS === 'web') desoSdk().catch(() => { sdk = undefined; }); // Preload so Connect opens DeSo's window right on the click.
-    return Platform.OS === 'web'
-      ? { available: true }
-      : { available: false, setup: 'device', reason: 'For now, connect DeSo from Open Media on the web.' };
+    // Preload so Connect opens DeSo's window right on the tap (browsers block late pop-ups).
+    desoSdk().catch(() => { sdk = undefined; });
+    return { available: true };
   },
 
   async account() {
@@ -62,12 +77,16 @@ export const desoPublisher: PublishingConnector = {
   async connect() {
     const deso = await desoSdk();
     try {
-      await deso.identity.login({ getFreeDeso: true });
+      const cancelled = new Promise<never>((_, reject) => { cancelNativeLogin = reject; });
+      await Promise.race([deso.identity.login({ getFreeDeso: true }), cancelled]);
     } catch (error) {
+      if (error instanceof PublishingError) throw error;
       const type = (error as { type?: string }).type;
       throw new PublishingError(type === 'NO_MONEY'
         ? 'Your DeSo account needs a little DESO to pay network fees (well under a cent per post). Add some in DeSo, then connect again.'
-        : 'DeSo sign-in didn’t finish. Allow pop-ups for Open Media and try again.');
+        : Platform.OS === 'web' ? 'DeSo sign-in didn’t finish. Allow pop-ups for Open Media and try again.' : 'DeSo sign-in didn’t finish. Try again.');
+    } finally {
+      cancelNativeLogin = undefined;
     }
     const publicKey = (await deso.identity.snapshot()).currentUser?.publicKey;
     if (!publicKey) throw new PublishingError('DeSo sign-in didn’t finish. Try again.');
@@ -109,6 +128,7 @@ export const desoPublisher: PublishingConnector = {
 /** Uploads the cleaned file to DeSo's media API; DeSo apps play `lvpr.tv` links natively. */
 async function uploadVideo(deso: DesoSdk, publicKey: string, video: CrossPostVideo): Promise<string> {
   if (!video.bytes) throw new PublishingError('DeSo needs the video file itself, which isn’t available on this device any more.');
+  if (typeof File === 'undefined') throw new PublishingError('Posting videos to DeSo works from Open Media on the web for now.');
   try {
     const file = new File([video.bytes as unknown as BlobPart], `open-media.${videoExtension(video.contentType)}`, { type: video.contentType });
     const response = await deso.uploadVideo({ UserPublicKeyBase58Check: publicKey, file });

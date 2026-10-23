@@ -67,7 +67,9 @@
           "cameraPermission": "Allow Open Media to record a short video you choose to post publicly.",
           "microphonePermission": "Allow Open Media to record sound with the short videos you post."
         }
-      ]
+      ],
+      "./plugins/with-ios-scene-lifecycle",
+      "expo-web-browser"
     ],
     "extra": {
       "eas": {

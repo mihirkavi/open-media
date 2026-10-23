@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 
-import { ApprovalPrompt, NetworkAccount, PublishAvailability } from '../connectors/publishing/types';
+import { ApprovalPrompt, NetworkAccount, PublishAvailability, PublishingError, TextRequest } from '../connectors/publishing/types';
 import { loadCrossPostPreferences, publishingConnector, saveCrossPostPreferences } from '../data/crossPostService';
 import { CrossPostPreferences, crossPostNetworks, defaultCrossPostPreferences, defaultDestinations } from '../domain/crossPosting';
 import { NetworkId } from '../domain/networkPosts';
@@ -13,6 +13,8 @@ export interface CrossPostNetworkState {
   error: string;
   /** An approval step to finish outside Open Media (for example a QR code for Farcaster). */
   approval?: ApprovalPrompt;
+  /** A short value the connector is waiting for (for example a Hive username). */
+  textRequest?: TextRequest;
 }
 
 interface Snapshot { loaded: boolean; preferences: CrossPostPreferences; networks: CrossPostNetworkState[] }
@@ -26,6 +28,7 @@ let snapshot: Snapshot = {
 const listeners = new Set<() => void>();
 let loading: Promise<void> | undefined;
 const pendingConnections = new Map<NetworkId, AbortController>();
+const pendingText = new Map<NetworkId, { resolve: (value: string) => void; reject: (reason: Error) => void }>();
 
 function update(change: (current: Snapshot) => Snapshot) {
   snapshot = change(snapshot);
@@ -60,7 +63,12 @@ export function useCrossPosting() {
     pendingConnections.set(network, controller);
     updateNetwork(network, { busy: true, error: '', approval: undefined });
     try {
-      const account = await publishingConnector(network).connect({ signal: controller.signal, showApproval: (approval) => updateNetwork(network, { approval }) });
+      const requestText = (request: TextRequest) => new Promise<string>((resolve, reject) => {
+        pendingText.set(network, { resolve, reject });
+        updateNetwork(network, { textRequest: request });
+        controller.signal.addEventListener('abort', () => reject(new PublishingError('Connecting was cancelled.')), { once: true });
+      }).finally(() => { pendingText.delete(network); updateNetwork(network, { textRequest: undefined }); });
+      const account = await publishingConnector(network).connect({ signal: controller.signal, showApproval: (approval) => updateNetwork(network, { approval }), requestText });
       updateNetwork(network, { account, busy: false, approval: undefined });
     } catch (error) {
       updateNetwork(network, { busy: false, approval: undefined, error: controller.signal.aborted ? '' : error instanceof Error ? error.message : 'Connecting didn’t finish. Try again.' });
@@ -70,6 +78,7 @@ export function useCrossPosting() {
   }, []);
 
   const cancelConnect = useCallback((network: NetworkId) => { pendingConnections.get(network)?.abort(); }, []);
+  const submitText = useCallback((network: NetworkId, value: string) => { pendingText.get(network)?.resolve(value); }, []);
 
   const disconnect = useCallback(async (network: NetworkId) => {
     updateNetwork(network, { busy: true, error: '' });
@@ -98,6 +107,7 @@ export function useCrossPosting() {
     defaults: defaultDestinations(connected, state.preferences),
     connect,
     cancelConnect,
+    submitText,
     disconnect,
     setIncludedByDefault,
   };
