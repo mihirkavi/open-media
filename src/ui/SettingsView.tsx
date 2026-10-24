@@ -188,7 +188,7 @@ export function SettingsView({ onClose, onMailSynced }: SettingsViewProps) {
 
   if (mailForm) {
     return (
-      <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
         <View style={styles.titleRow}>
           <Pressable accessibilityRole="button" accessibilityLabel="Back to Email & connections" onPress={closeForm} style={styles.back}><Ionicons name="chevron-back" size={22} color={colors.text} /></Pressable>
           <Text style={styles.title}>Add email account</Text>
@@ -250,7 +250,8 @@ export function SettingsView({ onClose, onMailSynced }: SettingsViewProps) {
   }
 
   return (
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+    // The keyboard pushes the page up so sign-in fields for chat networks stay visible.
+    <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
       <View style={styles.titleRow}>
         <Pressable accessibilityRole="button" accessibilityLabel="Back to Settings" onPress={onClose} style={styles.back}><Ionicons name="chevron-back" size={22} color={colors.text} /></Pressable>
         <Text style={styles.title}>Email & connections</Text>

@@ -187,7 +187,7 @@ function FlowCard({ flow, phone, error, onBegin, onClose, onSubmit, onValues }: 
     <Text style={styles.name}>Before you connect {flow.name}</Text>
     <Text style={styles.detail}>• {flow.name} doesn’t officially support this. It may limit or ban accounts that use unofficial apps.</Text>
     <Text style={styles.detail}>• Open Media’s bridge server keeps your {flow.name} session and can read the chats it brings into Messages. These chats aren’t end-to-end encrypted inside Open Media.</Text>
-    <Text style={styles.detail}>• You can disconnect any time, here or in {flow.name}’s linked devices.</Text>
+    <Text style={styles.detail}>• You can disconnect any time here{flow.network === 'whatsapp' || flow.network === 'signal' ? ` or in ${flow.name}’s linked devices` : ''}.</Text>
     <View style={styles.rowWrap}>
       {flow.network === 'whatsapp' ? <>
         <Button label={phone ? 'Use a pairing code' : 'Scan a QR code'} primary onPress={() => onBegin(phone ? 'phone' : 'qr')} />
