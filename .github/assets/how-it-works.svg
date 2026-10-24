@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="560" viewBox="0 0 1200 560" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#8a8781"/>
+    </marker>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#000" flood-opacity="0.10"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="560" rx="24" fill="#f4f2ed"/>
+
+  <!-- Column labels -->
+  <g font-size="13" font-weight="600" fill="#8a8781" letter-spacing="1.5">
+    <text x="130" y="58" text-anchor="middle">YOU</text>
+    <text x="600" y="58" text-anchor="middle">OPEN MEDIA</text>
+    <text x="1015" y="58" text-anchor="middle">YOUR NETWORKS</text>
+  </g>
+
+  <!-- You -->
+  <g filter="url(#shadow)">
+    <rect x="40" y="120" width="180" height="76" rx="16" fill="#fff"/>
+    <rect x="40" y="242" width="180" height="76" rx="16" fill="#fff"/>
+    <rect x="40" y="364" width="180" height="76" rx="16" fill="#fff"/>
+  </g>
+  <g fill="#111" text-anchor="middle">
+    <text x="130" y="154" font-size="19" font-weight="700">One feed</text>
+    <text x="130" y="178" font-size="13" fill="#6b6862">read everything</text>
+    <text x="130" y="276" font-size="19" font-weight="700">One inbox</text>
+    <text x="130" y="300" font-size="13" fill="#6b6862">talk to everyone</text>
+    <text x="130" y="398" font-size="19" font-weight="700">One post</text>
+    <text x="130" y="422" font-size="13" fill="#6b6862">publish everywhere</text>
+  </g>
+
+  <!-- Arrows you -> open media -->
+  <g stroke="#8a8781" stroke-width="2" fill="none" marker-end="url(#arrow)" marker-start="url(#arrow)">
+    <line x1="228" y1="158" x2="318" y2="158"/>
+    <line x1="228" y1="280" x2="318" y2="280"/>
+    <line x1="228" y1="402" x2="318" y2="402"/>
+  </g>
+
+  <!-- Open Media -->
+  <g filter="url(#shadow)">
+    <rect x="326" y="84" width="548" height="420" rx="24" fill="#111"/>
+  </g>
+  <g fill="#fff">
+    <rect x="350" y="120" width="500" height="76" rx="14" fill="#232323"/>
+    <text x="372" y="152" font-size="18" font-weight="700">Feed and Clips</text>
+    <text x="372" y="176" font-size="13" fill="#b9b6b0">Raw or Relevant, and "Why this?" on every ranked post</text>
+    <rect x="350" y="242" width="500" height="76" rx="14" fill="#232323"/>
+    <text x="372" y="274" font-size="18" font-weight="700">Messages</text>
+    <text x="372" y="298" font-size="13" fill="#b9b6b0">chats and email together, organised by person</text>
+    <rect x="350" y="364" width="500" height="76" rx="14" fill="#232323"/>
+    <text x="372" y="396" font-size="18" font-weight="700">Composer</text>
+    <text x="372" y="420" font-size="13" fill="#b9b6b0">write once, choose where it goes</text>
+    <text x="600" y="476" font-size="13" fill="#b9b6b0" text-anchor="middle">Connectors use official APIs and open protocols only. No scraping, no seed phrases.</text>
+  </g>
+
+  <!-- Arrows open media -> networks -->
+  <g stroke="#8a8781" stroke-width="2" fill="none" marker-end="url(#arrow)" marker-start="url(#arrow)">
+    <line x1="882" y1="158" x2="932" y2="140"/>
+    <line x1="882" y1="280" x2="932" y2="236"/>
+    <line x1="882" y1="300" x2="932" y2="332"/>
+    <line x1="882" y1="402" x2="932" y2="428"/>
+  </g>
+
+  <!-- Networks -->
+  <g filter="url(#shadow)">
+    <rect x="940" y="102" width="220" height="76" rx="16" fill="#fff"/>
+    <rect x="940" y="198" width="220" height="76" rx="16" fill="#fff"/>
+    <rect x="940" y="294" width="220" height="76" rx="16" fill="#fff"/>
+    <rect x="940" y="390" width="220" height="76" rx="16" fill="#fff"/>
+  </g>
+  <g fill="#111">
+    <text x="960" y="134" font-size="16" font-weight="700">Open networks</text>
+    <text x="960" y="157" font-size="13" fill="#6b6862">Farcaster · Lens · Hive · DeSo</text>
+    <text x="960" y="230" font-size="16" font-weight="700">Email</text>
+    <text x="960" y="253" font-size="13" fill="#6b6862">Gmail · iCloud · Yahoo · IMAP</text>
+    <text x="960" y="326" font-size="16" font-weight="700">Chat apps (optional)</text>
+    <text x="960" y="349" font-size="13" fill="#6b6862">WhatsApp · Signal · and more</text>
+    <text x="960" y="422" font-size="16" font-weight="700">Open Media network</text>
+    <text x="960" y="445" font-size="13" fill="#6b6862">posts, profiles and chats</text>
+  </g>
+  <text x="1050" y="500" font-size="12.5" fill="#8a8781" text-anchor="middle">Public posts are also open to</text>
+  <text x="1050" y="518" font-size="12.5" fill="#8a8781" text-anchor="middle">people and AI agents via a free API</text>
+</svg>

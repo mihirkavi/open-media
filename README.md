@@ -85,36 +85,9 @@ Most importantly, **Open Media is useful on day one, even if none of your friend
 
 ## How it works
 
-```mermaid
-flowchart LR
-    subgraph You["You"]
-        A["One feed"]
-        B["One inbox"]
-        C["One post"]
-    end
-    subgraph OM["Open Media"]
-        D["Feed and Clips<br/>Raw or Relevant, with Why this?"]
-        E["Messages<br/>organised by person"]
-        F["Composer<br/>publish once"]
-        G["Connectors<br/>official APIs and open protocols only"]
-    end
-    subgraph Nets["Your networks"]
-        H["Farcaster · Lens · Hive · DeSo"]
-        I["Email: Gmail, iCloud, Yahoo, any IMAP"]
-        J["Chat bridges: WhatsApp, Signal and more (optional)"]
-        K["Open Media's own network"]
-    end
-    A --- D
-    B --- E
-    C --- F
-    D --- G
-    E --- G
-    F --- G
-    G --- H
-    G --- I
-    G --- J
-    G --- K
-```
+<p align="center">
+  <img alt="How Open Media works: you get one feed, one inbox and one post; Open Media connects them to open networks, email, optional chat apps and its own network" src=".github/assets/how-it-works.svg" width="100%">
+</p>
 
 Open Media never pretends a connection exists when it does not. Each network tells the app what it genuinely allows (reading, posting, messaging, and so on), and the app only shows those actions. Open Media never asks for your seed phrase or master password.
 
