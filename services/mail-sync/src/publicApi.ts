@@ -15,7 +15,7 @@ export interface PublicApiEnv {
   PUBLIC_API_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
 }
 
-interface UpstreamVideo {
+export interface UpstreamVideo {
   path: string;
   posterPath: string | null;
   durationSeconds: number;
@@ -25,7 +25,7 @@ interface UpstreamVideo {
   sha256: string;
 }
 
-interface UpstreamPost {
+export interface UpstreamPost {
   id: string;
   body: string;
   createdAt: string;
@@ -33,7 +33,7 @@ interface UpstreamPost {
   video?: UpstreamVideo | null;
 }
 
-interface UpstreamProfile {
+export interface UpstreamProfile {
   handle: string;
   displayName: string;
   bio: string;
@@ -149,7 +149,7 @@ async function listPosts(url: URL, env: PublicApiEnv, fetchImpl: Fetch, authorHa
   );
 }
 
-function formatPost(post: UpstreamPost, origin: string, supabaseUrl: string) {
+export function formatPost(post: UpstreamPost, origin: string, supabaseUrl: string) {
   return {
     id: post.id,
     type: 'post',
@@ -181,7 +181,7 @@ export function formatVideo(video: UpstreamVideo, supabaseUrl: string) {
   };
 }
 
-function formatProfile(profile: UpstreamProfile, origin: string) {
+export function formatProfile(profile: UpstreamProfile, origin: string) {
   return {
     type: 'profile',
     handle: profile.handle,
@@ -195,7 +195,7 @@ function formatProfile(profile: UpstreamProfile, origin: string) {
   };
 }
 
-async function callRpc<T>(env: PublicApiEnv, fetchImpl: Fetch, name: string, args: Record<string, unknown>): Promise<T> {
+export async function callRpc<T>(env: PublicApiEnv, fetchImpl: Fetch, name: string, args: Record<string, unknown>): Promise<T> {
   const response = await fetchImpl(`${env.SUPABASE_URL.replace(/\/$/, '')}/rest/v1/rpc/${name}`, {
     method: 'POST',
     headers: {

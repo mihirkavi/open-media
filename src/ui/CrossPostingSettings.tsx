@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, Image, Linking, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Image, Linking, Pressable, StyleSheet, Switch, View } from 'react-native';
+import { Text, TextInput } from './Text';
 
 import { publishingConnector } from '../data/crossPostService';
 import { networks } from '../domain/networkPosts';

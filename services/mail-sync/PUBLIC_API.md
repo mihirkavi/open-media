@@ -6,6 +6,10 @@ It is served by Open Media's single production Cloudflare Worker (the same Worke
 
 Production host: `https://convo-mail-sync.convo-mail-sync.workers.dev` (the hostname is kept for installed-app continuity).
 
+## More for programs and agents
+
+The same Worker also serves the mixed feed, cross-network search, networks, settings, the mission, an account API and MCP servers (`src/agentApi.ts`). Start at `/llms.txt` or `/v1`, which list every interface; `/v1/openapi.json` describes all of them. See [ADR 0012](../../docs/adrs/0012-agent-interfaces-and-design-system.md).
+
 ## Endpoints
 
 | Method | Path | Returns |

@@ -1,13 +1,18 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Session } from '@supabase/supabase-js';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Image, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Image, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from './Text';
 
 import { completeSignInURL, getSupabaseClient, localAutoSignInAvailable, sendSignInLink, signOut, verifySignInCode, waitForLocalSignInCode } from '../auth/supabase';
 import { getCurrentProfile, OpenMediaProfile, saveCurrentProfile } from '../data/openMediaService';
 import { FeedMode } from '../domain/posts';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
+import { BrandMark } from './BrandMark';
+import { DevelopersPage } from './DevelopersPage';
+import { LandingPage, PublicPage } from './LandingPage';
+import { MissionPage } from './MissionPage';
 import { OpenMediaApp } from './OpenMediaApp';
 import { FeedView } from './OpenMediaFeed';
 import { SearchView } from './SearchView';
@@ -85,24 +90,56 @@ export function OpenMediaEntry() {
   if (!client) return <ConfigurationRequired onMatrixDemo={matrixAvailable ? () => setMatrixDemo(true) : undefined} />;
   if (loading) return <CenteredStatus label="Opening Open Media…" />;
   if (loadFailed) return <RetryStatus error={error} onRetry={() => setRetryVersion((value) => value + 1)} onSignOut={session ? async () => { await signOut(); setSession(undefined); setLoadFailed(false); } : undefined} />;
-  if (!session && !signingIn) return <PublicHome onSignIn={() => { setError(''); setSigningIn(true); }} />;
+  if (!session && !signingIn) return <PublicSite onSignIn={() => { setError(''); setSigningIn(true); }} />;
   if (!session) return <SignInScreen error={error} onError={setError} onBack={() => setSigningIn(false)} onMatrixDemo={matrixAvailable ? () => setMatrixDemo(true) : undefined} />;
   if (!profile) return <ProfileSetup session={session} error={error} onError={setError} onComplete={(nextProfile) => { loadedUserId.current = session.user.id; setProfile(nextProfile); }} onSignOut={async () => { await signOut(); setSession(undefined); }} />;
   return <OpenMediaApp currentUserId={session.user.id} profile={profile} onSignOut={async () => { await signOut(); setSession(undefined); setProfile(undefined); }} onAccountDeleted={() => { setSession(undefined); setProfile(undefined); }} />;
 }
 
-/** Signed-out home: public posts are readable by anyone, without an account. */
-function PublicHome({ onSignIn }: { onSignIn: () => void }) {
+const publicPages: PublicPage[] = ['landing', 'feed', 'mission', 'developers'];
+
+function pageFromHash(): PublicPage {
+  if (Platform.OS !== 'web' || typeof window === 'undefined') return 'feed';
+  const hash = window.location.hash.replace('#', '') as PublicPage;
+  return publicPages.includes(hash) && hash !== 'landing' ? hash : 'landing';
+}
+
+/**
+ * Signed out. On the web this is the website: the landing page at /, then #feed, #mission and
+ * #developers, each a real link that survives reloads. The phone apps open straight to the feed.
+ */
+function PublicSite({ onSignIn }: { onSignIn: () => void }) {
+  const [page, setPage] = useState<PublicPage>(pageFromHash);
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const onHash = () => setPage(pageFromHash());
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  const navigate = (next: PublicPage) => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.location.hash = next === 'landing' ? '' : next;
+      window.scrollTo?.(0, 0);
+    }
+    setPage(Platform.OS === 'web' || next !== 'landing' ? next : 'feed');
+  };
+  if (page === 'landing') return <LandingPage onNavigate={navigate} onSignIn={onSignIn} />;
+  if (page === 'mission') return <MissionPage chrome={Platform.OS === 'web' ? 'public' : 'app'} onNavigate={navigate} onSignIn={onSignIn} onBack={() => navigate('feed')} />;
+  if (page === 'developers') return <DevelopersPage chrome={Platform.OS === 'web' ? 'public' : 'app'} onNavigate={navigate} onSignIn={onSignIn} onBack={() => navigate('feed')} />;
+  return <PublicHome onSignIn={onSignIn} onNavigate={navigate} />;
+}
+
+/** Signed-out feed: public posts are readable by anyone, without an account. */
+function PublicHome({ onSignIn, onNavigate }: { onSignIn: () => void; onNavigate: (page: PublicPage) => void }) {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
   const feed = useMixedFeed();
   const [mode, setMode] = useState<FeedMode>('raw');
   const [searching, setSearching] = useState(false);
   if (searching) return <View style={styles.screen}><SearchView posts={feed.posts} conversations={[]} onClose={() => setSearching(false)} /></View>;
-  const apiURL = process.env.EXPO_PUBLIC_OPEN_MEDIA_PUBLIC_API_URL;
   return <View style={styles.screen}>
-    <View style={styles.publicBar}><BrandMark compact /><View style={styles.publicActions}><Pressable accessibilityRole="search" accessibilityLabel="Search everything" onPress={() => setSearching(true)} style={styles.publicSearch}><Ionicons name="search" size={20} color={colors.text} /></Pressable><Pressable accessibilityRole="button" onPress={onSignIn} style={styles.signInButton}><Text style={styles.signInText}>Sign in</Text></Pressable></View></View>
+    <View style={styles.publicBar}><Pressable accessibilityRole="link" accessibilityLabel={Platform.OS === 'web' ? 'Open Media home' : 'About Open Media'} onPress={() => onNavigate(Platform.OS === 'web' ? 'landing' : 'mission')}><BrandMark compact /></Pressable><View style={styles.publicActions}>{Platform.OS !== 'web' ? <Pressable accessibilityRole="button" accessibilityLabel="Our mission" onPress={() => onNavigate('mission')} style={styles.publicSearch}><Ionicons name="information-circle-outline" size={22} color={colors.text} /></Pressable> : null}<Pressable accessibilityRole="search" accessibilityLabel="Search everything" onPress={() => setSearching(true)} style={styles.publicSearch}><Ionicons name="search" size={20} color={colors.text} /></Pressable><Pressable accessibilityRole="button" onPress={onSignIn} style={styles.signInButton}><Text style={styles.signInText}>Sign in</Text></Pressable></View></View>
     <FeedView mode={mode} onModeChange={setMode} posts={feed.posts} loading={feed.loading} error={feed.error} hasMore={feed.hasMore} onRetry={feed.refresh} onLoadMore={feed.loadMore} sources={feed.sources} loadingMore={feed.loadingMore} pendingCount={feed.pendingCount} onShowPending={feed.showPending} />
-    {apiURL ? <Pressable accessibilityRole="link" onPress={() => Linking.openURL(apiURL)} style={styles.apiLink}><Ionicons name="code-slash-outline" size={14} color={colors.textSecondary} /><Text style={styles.apiLinkText}>Open data · read Open Media posts through the public API</Text></Pressable> : null}
+    <Pressable accessibilityRole="link" onPress={() => onNavigate('developers')} style={styles.apiLink}><Ionicons name="code-slash-outline" size={14} color={colors.textSecondary} /><Text style={styles.apiLinkText}>Open data · APIs and MCP for developers and agents</Text></Pressable>
   </View>;
 }
 
@@ -184,7 +221,6 @@ function EntryShell({ children }: React.PropsWithChildren) {
   return <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'ios' ? 'padding' : undefined}><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.shell}>{children}</ScrollView></KeyboardAvoidingView>;
 }
 
-function BrandMark({ compact }: { compact?: boolean }) { const { colors } = useOpenMediaTheme(); const styles = createStyles(colors); return <View accessibilityLabel="Open Media" style={[styles.brand, compact && styles.brandCompact]}><Image source={require('../../assets/icon.png')} style={styles.brandIcon} /><Text style={styles.wordmark}>Open Media</Text></View>; }
 function messageFor(reason: unknown) { return reason instanceof Error ? reason.message : 'Something went wrong. Please try again.'; }
 
 function createStyles(colors: ThemeColors) { return StyleSheet.create({

@@ -1,14 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Image,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-  useWindowDimensions,
-} from "react-native";
+import { Image, Platform, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
+import { Text } from "./Text";
 
 import {
   listMailAccounts,
@@ -566,10 +559,15 @@ function Header({
 }
 
 function BrandIcon() {
-  const { colors } = useOpenMediaTheme();
+  const { colors, isDark } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  // The transparent mark, dark on light and light on dark (assets/brand).
   return (
-    <Image source={require("../../assets/icon.png")} style={styles.brandIcon} />
+    <Image
+      source={isDark ? require("../../assets/brand/logo-dark.png") : require("../../assets/brand/logo-light.png")}
+      style={styles.brandIcon}
+      resizeMode="contain"
+    />
   );
 }
 
@@ -680,7 +678,7 @@ function createStyles(colors: ThemeColors) {
       gap: 10,
       paddingHorizontal: 10,
     },
-    brandIcon: { width: 26, height: 26, borderRadius: 7 },
+    brandIcon: { width: 22, height: 22 },
     wordmarkText: {
       color: colors.text,
       fontSize: 17,

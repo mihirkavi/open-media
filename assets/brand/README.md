@@ -13,6 +13,7 @@ These are project identity and conceptual editorial images. They do not document
 ## Files
 
 - [Landscape project cover](cover.png): 1672 × 941 PNG.
+- [Logo for light backgrounds](logo-light.png) and [logo for dark backgrounds](logo-dark.png): the app icon's mark on a transparent background, 256 px wide, used by the app's brand mark and the README.
 
 ## Use
 

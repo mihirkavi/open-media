@@ -1,0 +1,126 @@
+/**
+ * What Open Media is, in one place: the landing page, the mission page, the developer page, the
+ * public API's /v1/about and /llms.txt all read from here, so people and agents are told the same
+ * thing. The wording follows the Master Builder Prompt; keep the two aligned.
+ */
+
+export const tagline = 'Post everywhere. Message everyone. One app.';
+
+export const promise = 'One app for your social world.';
+
+export const mission =
+  'Build the open communication layer for humanity, where people can communicate across networks, control how information reaches them, and keep ownership of their identity, relationships and content, whichever app they use.';
+
+export const philosophy = {
+  line: 'Apps are doorways. The person is the constant.',
+  body: 'No app should permanently own your identity, audience, social graph, content, recommendations, message history or governance rights. Open Media is one doorway. Anyone should eventually be able to build another on the same open protocol, and you should be able to walk through whichever one you like.',
+};
+
+export const promises = [
+  {
+    title: 'Everything together',
+    line: 'One place for your social world.',
+    body: 'Posts from several networks in one feed, and every conversation, chat or email, in one inbox organised by person rather than by app. One post goes to every network you choose.',
+  },
+  {
+    title: 'Your feed belongs to you',
+    line: 'No secret algorithm.',
+    body: 'Choose Raw, simply newest first, or Relevant, a small set of signals you can see. Every ranked post explains itself with “Why this?”, including the private data it did not use.',
+  },
+  {
+    title: 'You are not locked in',
+    line: 'Your identity, audience and content move with you.',
+    body: 'Export everything or delete your account at any time. Public posts are open to everyone through a free API. The goal is identity and content that work in any app.',
+  },
+];
+
+export const surfaces = [
+  { name: 'Feed', icon: 'home-outline', body: 'One mixed stream from Open Media, Farcaster, Lens, Hive and DeSo, newest first or transparently ranked.' },
+  { name: 'Clips', icon: 'play-outline', body: 'Short videos, full screen, one at a time. The same posts as Feed, just a different way to watch.' },
+  { name: 'Messages', icon: 'chatbubble-outline', body: 'Open Media chats, email and bridged chat apps side by side, organised by the people you talk to.' },
+] as const;
+
+export const principles = [
+  'Post everywhere. Message everyone. One app.',
+  'Your feed belongs to you.',
+  'Your identity, audience and content move with you.',
+  'Applications are doorways. The human remains the constant.',
+  'Blockchain proves; it does not host the social network.',
+  'Money buys services, not political power.',
+  'Global destruction is exceptional. Filtering is normal.',
+  'Protocol rules determine interoperability. Doorway rules determine presentation.',
+  'Build one implementation today as though competing implementations will exist tomorrow.',
+  'Open Media should be obvious before it is powerful, and powerful when needed.',
+];
+
+export const neverDefaults = [
+  'Ranking your feed on private messages, ID documents, precise location or inferred sensitive traits',
+  'Optimising for addiction or sending manipulative notifications',
+  'Requiring a crypto wallet, tokens or fees to read or post',
+  'Advertising by default',
+  'Selling governance power: one verified human is one vote',
+];
+
+export type RoadmapStatus = 'done' | 'beta' | 'next' | 'planned' | 'later';
+
+export const roadmap: { phase: string; detail: string; status: RoadmapStatus }[] = [
+  { phase: 'The app', detail: 'Feed, Clips and Messages on iPhone, Android and the web, in light and dark.', status: 'done' },
+  { phase: 'Shared content', detail: 'One post type everywhere, four open networks, short video.', status: 'done' },
+  { phase: 'Email and Messages', detail: 'Email inside Messages, conversations organised by person.', status: 'done' },
+  { phase: 'Connectors', detail: 'Cross-posting to open networks, chat bridges, the public and agent APIs.', status: 'beta' },
+  { phase: 'Search and AI help', detail: 'One plain-language search for posts, messages, email and settings.', status: 'done' },
+  { phase: 'Algorithm choice', detail: 'Feed algorithms you can inspect, install and remove, with strict data permissions.', status: 'next' },
+  { phase: 'Moderation choice', detail: 'Filters you set, credible reports and independent moderation providers.', status: 'planned' },
+  { phase: 'Identity', detail: 'Optional proof of personhood without storing ID documents, separate personas, portable identity.', status: 'planned' },
+  { phase: 'Governance', detail: 'One person, one vote, and an open improvement-proposal process.', status: 'planned' },
+  { phase: 'Decentralisation', detail: 'Independent apps and infrastructure, stewarded by an independent foundation.', status: 'later' },
+];
+
+export const roadmapLabels: Record<RoadmapStatus, string> = { done: 'Live', beta: 'Beta', next: 'Next', planned: 'Planned', later: 'Long term' };
+
+export const honestStatus = [
+  'Open Media is an early public beta, built in the open.',
+  'It cannot read or post to Instagram, X, LinkedIn or TikTok feeds; those companies offer no open access and Open Media does not scrape them.',
+  'Chat bridges are opt-in, run on a local setup today, and are not approved by the networks they connect to.',
+  'Messages between Open Media users are protected by strict database rules but are not yet end-to-end encrypted.',
+];
+
+/** Every way a program or AI agent can use Open Media. Paths are relative to the API origin. */
+export const agentInterfaces = {
+  discovery: [
+    { path: '/llms.txt', description: 'Plain-text guide for language models: what Open Media is and how to use every interface.' },
+    { path: '/v1', description: 'API index: every endpoint, group and authentication rule as JSON.' },
+    { path: '/v1/openapi.json', description: 'OpenAPI 3.1 description of the public and account APIs.' },
+    { path: '/.well-known/mcp.json', description: 'MCP server card: the MCP servers, their tools and how to authenticate.' },
+  ],
+  public: [
+    { method: 'GET', path: '/v1/feed', description: 'The mixed feed: Open Media, Farcaster, Lens, Hive and DeSo, newest first, each post with its “Why this?” reasons.' },
+    { method: 'GET', path: '/v1/search?q=', description: 'Plain-language search across public posts on every network, plus matching settings.' },
+    { method: 'GET', path: '/v1/posts', description: 'Open Media public posts, newest first, paginated.' },
+    { method: 'GET', path: '/v1/posts/{id}', description: 'One public post.' },
+    { method: 'GET', path: '/v1/profiles/{handle}', description: 'A public profile.' },
+    { method: 'GET', path: '/v1/profiles/{handle}/posts', description: 'A profile’s public posts.' },
+    { method: 'GET', path: '/v1/networks', description: 'Every network and connector, with exactly which capabilities work today.' },
+    { method: 'GET', path: '/v1/settings?q=', description: 'The searchable settings index, so an agent can tell a person where any control lives.' },
+    { method: 'GET', path: '/v1/about', description: 'Mission, principles, promises, roadmap and honest status.' },
+  ],
+  account: [
+    { method: 'GET', path: '/v1/me', description: 'Your profile.' },
+    { method: 'POST', path: '/v1/me/posts', description: 'Publish a public post.' },
+    { method: 'DELETE', path: '/v1/me/posts/{id}', description: 'Delete one of your posts.' },
+    { method: 'POST', path: '/v1/posts/{id}/report', description: 'Report a post for review.' },
+    { method: 'GET', path: '/v1/me/conversations', description: 'Your Open Media conversations with recent messages.' },
+    { method: 'POST', path: '/v1/me/conversations', description: 'Start a conversation with a handle.' },
+    { method: 'POST', path: '/v1/me/conversations/{id}/messages', description: 'Send a message.' },
+    { method: 'GET', path: '/v1/me/export', description: 'Export a readable copy of your data.' },
+    { method: 'GET', path: '/v1/mail-accounts', description: 'Your connected email accounts (sync, send and remove routes follow the same pattern).' },
+    { method: 'GET', path: '/v1/bridges', description: 'Chat networks: status, sign-in steps, bridged chats and replies.' },
+  ],
+  mcp: [
+    { path: '/open/mcp', auth: 'none', description: 'Public tools: feed, search, posts, profiles, networks, settings and the mission.' },
+    { path: '/me/mcp', auth: 'Open Media access token', description: 'Your account: publish, delete and report posts, read and send messages, export your data.' },
+    { path: '/mcp', auth: 'OAuth 2.1', description: 'Open Media Events: find events, check your calendar and plan your week.' },
+  ],
+};
+
+export const sourceRepository = 'https://github.com/mihirkavi/open-media';

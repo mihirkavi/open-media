@@ -1,4 +1,4 @@
-export type SettingRoute = 'appearance' | 'feed' | 'messages' | 'email' | 'connected-apps' | 'cross-posting' | 'privacy' | 'data';
+export type SettingRoute = 'appearance' | 'feed' | 'messages' | 'email' | 'connected-apps' | 'cross-posting' | 'privacy' | 'data' | 'about';
 
 export interface SettingIndexEntry {
   id: string;
@@ -18,6 +18,9 @@ export const settingIndex: SettingIndexEntry[] = [
   { id: 'cross-posting', title: 'Cross-posting', description: 'Connect Farcaster, Lens, Hive, and DeSo; every post goes to all connected networks unless you turn one off.', route: 'cross-posting', keywords: ['stop posting to farcaster', 'publish everywhere', 'destinations', 'connect farcaster', 'connect lens', 'connect hive', 'connect deso', 'post everywhere'] },
   { id: 'privacy', title: 'Privacy', description: 'Manage privacy and recommendation data boundaries.', route: 'privacy', keywords: ['private', 'recommendation data', 'tracking'] },
   { id: 'export', title: 'Export your data', description: 'Download portable account data.', route: 'data', keywords: ['export my data', 'download', 'portability'] },
+  { id: 'chat-networks', title: 'Chat networks', description: 'Bring WhatsApp, Signal, Instagram, Messenger, Discord and other chat apps into Messages through opt-in bridges.', route: 'connected-apps', keywords: ['whatsapp', 'signal', 'telegram', 'instagram dms', 'messenger', 'discord', 'slack', 'linkedin messages', 'bridges', 'beeper'] },
+  { id: 'mission', title: 'Our mission', description: 'Why Open Media exists, its principles, and where it is going.', route: 'about', keywords: ['about', 'mission', 'principles', 'roadmap', 'vision', 'open source'] },
+  { id: 'developers', title: 'Developers and agents', description: 'Use Open Media from code or an AI assistant: APIs, MCP servers and your access token.', route: 'about', keywords: ['api', 'mcp', 'agent', 'ai assistant', 'claude', 'chatgpt', 'developer', 'token', 'automation', 'llms.txt'] },
 ];
 
 export function searchSettings(query: string): SettingIndexEntry[] {

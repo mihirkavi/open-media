@@ -28,6 +28,7 @@
   <a href="#the-idea">The idea</a> ·
   <a href="#a-tour-of-the-app">Tour</a> ·
   <a href="#what-works-today">What works today</a> ·
+  <a href="#for-developers-and-ai-agents">Agents</a> ·
   <a href="#the-bigger-vision">Vision</a> ·
   <a href="#roadmap">Roadmap</a> ·
   <a href="#faq">FAQ</a> ·
@@ -164,10 +165,27 @@ Open Media is in **public beta**. Everything below is in the code today.
 | **Chat bridges** | WhatsApp, Signal, Google Messages, Google Voice, Instagram, Messenger, LinkedIn, X, Bluesky, Slack and Discord through open-source bridges, with Telegram ready once its app ID is set. Opt-in, with a clear warning and step-by-step sign-in for each network. | 🧪 Beta: local setup only |
 | **Search** | Posts on every network, messages, email and settings in one box, in plain language, with a short AI summary of public results. | ✅ Live |
 | **Privacy** | Export all your data or delete your account from your profile. Messages, email and contacts are never public. | ✅ Live |
-| **Open data** | A free, read-only public API so people, researchers and AI agents can read public Open Media posts. | ✅ Live |
+| **For developers and AI agents** | Everything above has an interface: a public API for the mixed feed, cross-network search, networks, settings and the mission; an account API to post, message and export; MCP servers for AI assistants; and `llms.txt` and OpenAPI for discovery. | ✅ Live |
 | **Events** | Ask ChatGPT, Claude or another AI assistant to find events, check your calendar and plan your week. | 🧪 Beta |
 
 The full list, including every known limitation, is in the [technical overview](docs/TECHNICAL_OVERVIEW.md).
+
+## For developers and AI agents
+
+Everything Open Media does for people, it also offers to programs and AI assistants, through documented interfaces that share the app's own code.
+
+| Interface | Account needed | What you can do |
+| --- | --- | --- |
+| `GET /v1/feed`, `/v1/search`, `/v1/posts`, `/v1/profiles/{handle}`, `/v1/networks`, `/v1/settings`, `/v1/about` | No | Read the mixed feed with “Why this?” reasons, search every open network in plain language, read public posts and profiles, see exactly what each network supports, find any setting, read the mission |
+| `/v1/me`, `/v1/me/posts`, `/v1/me/conversations`, `/v1/me/export` | Your access token | Publish, delete and report posts, read and send messages, export your data |
+| MCP: `/open/mcp` and `/me/mcp` | No / your access token | The same, as tools for Claude, ChatGPT and other assistants |
+| `/llms.txt`, `/v1/openapi.json`, `/.well-known/mcp.json` | No | Discovery for language models and programs |
+
+```json
+{ "mcpServers": { "open-media": { "url": "https://<open-media-api>/open/mcp" } } }
+```
+
+Your access token comes from **Settings → Developers and agents** in the app and expires after about an hour. Every account call acts only as you; the database refuses anything else. See [ADR 0012](docs/adrs/0012-agent-interfaces-and-design-system.md) and the [public API guide](services/mail-sync/PUBLIC_API.md).
 
 ## Why now
 

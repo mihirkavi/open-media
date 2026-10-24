@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'qrcode';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Text, TextInput } from './Text';
 
 import {
   BridgeLoginStep,

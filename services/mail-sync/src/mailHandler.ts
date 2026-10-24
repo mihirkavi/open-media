@@ -3,7 +3,6 @@
  * Cloudflare Worker (worker.ts) and the local Node.js server (localServer.ts)
  * both call handleMailRequest.
  */
-import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { z } from 'zod';
 
 import { Bridges, BridgesEnv } from './bridges.js';
@@ -12,7 +11,9 @@ import { createSignedKeyRequest, FarcasterSignerEnv, farcasterPublishingConfigur
 import { UserFacingError } from './errors.js';
 import { syncImap, testImap } from './imap.js';
 import { resolveMailHost } from './networkSafety.js';
+import { handleAgentRequest, isAgentPath } from './agentApi.js';
 import { handlePublicApiRequest, isPublicApiPath } from './publicApi.js';
+import { authenticate } from './session.js';
 import { runSearchAssist, SearchAssistEnv } from './searchAssist.js';
 import { syncPop3, testPop3 } from './pop3.js';
 import { sendSmtp, SmtpConnection, testSmtp } from './smtp.js';
@@ -59,6 +60,8 @@ const sendSchema = z.object({
 });
 
 export async function handleMailRequest(request: Request, env: MailEnv): Promise<Response> {
+  // Programs and AI agents: discovery, the mixed feed, search, MCP servers and the account API.
+  if (isAgentPath(new URL(request.url).pathname, request.method)) return handleAgentRequest(request, env);
   // Public, unauthenticated read API for posts and profiles (open CORS).
   if (isPublicApiPath(new URL(request.url).pathname)) return handlePublicApiRequest(request, env);
 
@@ -186,16 +189,6 @@ async function allowed(limiter: Limiter, userId: string): Promise<boolean> {
 
 function rateLimited(headers: HeadersInit): Response {
   return json(429, { error: 'Too many requests. Wait a minute and try again.' }, { ...headers, 'retry-after': '60' });
-}
-
-async function authenticate(request: Request, supabaseURL: string): Promise<{ token: string; userId: string }> {
-  const authorization = request.headers.get('authorization');
-  if (!authorization?.startsWith('Bearer ')) throw new Error('A valid Open Media session is required.');
-  const token = authorization.slice(7);
-  const jwks = createRemoteJWKSet(new URL(`${supabaseURL}/auth/v1/.well-known/jwks.json`));
-  const { payload } = await jwtVerify(token, jwks, { issuer: `${supabaseURL}/auth/v1` });
-  if (!payload.sub) throw new Error('A valid Open Media session is required.');
-  return { token, userId: payload.sub };
 }
 
 async function testConnection(input: MailAccountInput) {
