@@ -61,7 +61,7 @@ const sendSchema = z.object({
 
 export async function handleMailRequest(request: Request, env: MailEnv): Promise<Response> {
   // Programs and AI agents: discovery, the mixed feed, search, MCP servers and the account API.
-  if (isAgentPath(new URL(request.url).pathname, request.method)) return handleAgentRequest(request, env);
+  if (isAgentPath(new URL(request.url).pathname, request.method)) return handleAgentRequest(request, env, (inner) => handleMailRequest(inner, env));
   // Public, unauthenticated read API for posts and profiles (open CORS).
   if (isPublicApiPath(new URL(request.url).pathname)) return handlePublicApiRequest(request, env);
 

@@ -224,13 +224,16 @@ async function publicProfile(env: AgentEnv, origin: string, handle: string) {
 // ─── Account capabilities (the person's own access token) ───────────────────
 
 /** Acts as one signed-in person through Supabase's REST API; row-level security enforces it. */
-export class Account {
-  constructor(private readonly env: AgentEnv, private readonly token: string, readonly userId: string, private readonly origin: string) {}
+/** The Worker's own mail, chat-bridge and cross-posting routes, so their checks and rate limits still apply. */
+export type InternalHandler = (request: Request) => Promise<Response>;
 
-  static async fromRequest(request: Request, env: AgentEnv, origin: string): Promise<Account> {
+export class Account {
+  constructor(private readonly env: AgentEnv, private readonly token: string, readonly userId: string, private readonly origin: string, private readonly internal?: InternalHandler) {}
+
+  static async fromRequest(request: Request, env: AgentEnv, origin: string, internal?: InternalHandler): Promise<Account> {
     try {
       const { token, userId } = await authenticate(request, env.SUPABASE_URL.replace(/\/$/, ''));
-      return new Account(env, token, userId, origin);
+      return new Account(env, token, userId, origin, internal);
     } catch {
       throw new AgentError(401, 'unauthorized', 'Send your Open Media access token as “Authorization: Bearer …”. Get one in the app: Settings → Developers and agents.');
     }
@@ -316,6 +319,86 @@ export class Account {
     return this.rpc<Record<string, unknown>>('open_media_export_account_data', {});
   }
 
+  // Email: stored mail is read from the database; mailbox actions go through the mail routes.
+  async email(limit = 50) {
+    const rows = await this.rpc<Record<string, unknown>[]>('open_media_list_mail_messages', { p_limit: Math.min(500, Math.max(1, limit)) });
+    return {
+      data: (rows ?? []).map((row) => ({
+        mailboxId: row.account_id, account: row.account_email, folder: row.mailbox, from: row.sender ?? '', to: Array.isArray(row.recipients) ? row.recipients : [],
+        subject: row.subject ?? '', text: row.body_text ?? '', sentAt: row.sent_at, messageId: row.source_message_id, inReplyTo: row.in_reply_to ?? null,
+        senderVerified: row.sender_verified === true, attachments: Array.isArray(row.attachments) ? row.attachments.length : 0,
+      })),
+      note: 'Imported email is not end-to-end encrypted.',
+    };
+  }
+
+  mailAccounts() { return this.call('GET', '/v1/mail-accounts'); }
+  connectMail(input: unknown) { return this.call('POST', '/v1/mail-accounts', input); }
+  syncMail(id: string) { return this.call('POST', `/v1/mail-accounts/${encodeURIComponent(id)}/sync`, {}); }
+  sendEmail(id: string, mail: unknown) { return this.call('POST', `/v1/mail-accounts/${encodeURIComponent(id)}/send`, mail); }
+  removeMail(id: string) { return this.call('DELETE', `/v1/mail-accounts/${encodeURIComponent(id)}`); }
+
+  // Chat networks through bridges (ADR 0011).
+  chatNetworks() { return this.call('GET', '/v1/bridges'); }
+  bridgedChats() { return this.call('GET', '/v1/bridges/conversations'); }
+  sendBridged(roomId: string, text: unknown) { return this.call('POST', `/v1/bridges/rooms/${encodeURIComponent(roomId)}/messages`, { body: text }); }
+  chatSignInOptions(network: string) { return this.call('GET', `/v1/bridges/${encodeURIComponent(network)}/flows`); }
+  startChatSignIn(network: string, flow: unknown) { return this.call('POST', `/v1/bridges/${encodeURIComponent(network)}/login/start`, { flow }); }
+  continueChatSignIn(network: string, step: unknown) { return this.call('POST', `/v1/bridges/${encodeURIComponent(network)}/login/step`, step); }
+  disconnectChat(network: string, loginId?: unknown) { return this.call('POST', `/v1/bridges/${encodeURIComponent(network)}/logout`, { loginId }); }
+
+  async crossPosting() {
+    const server = await this.call<{ farcaster?: boolean }>('GET', '/v1/cross-posting/status');
+    return {
+      ...server,
+      how: 'Cross-posting is signed on the person’s own device with keys they approved in each network (Farcaster, Lens, Hive, DeSo); Open Media never holds those keys. Posts published through this API go to Open Media only. To publish everywhere, the person posts from the app, where connected networks are on by default.',
+    };
+  }
+
+  // Safety.
+  async block(handle: unknown, blocked: unknown) {
+    const person = await this.personByHandle(handle);
+    await this.rpc('open_media_set_user_blocked', { p_blocked_user_id: person, p_blocked: blocked !== false });
+    return { handle: `@${String(handle).replace(/^@/, '').toLowerCase()}`, blocked: blocked !== false };
+  }
+
+  async reportConversation(conversationId: string, handle: unknown, messageId?: unknown) {
+    if (!uuid.test(conversationId)) throw new AgentError(404, 'not_found', 'Conversation not found.');
+    const person = await this.personByHandle(handle);
+    await this.rpc('open_media_report_conversation', { p_conversation_id: conversationId, p_reported_user_id: person, p_message_id: typeof messageId === 'string' && uuid.test(messageId) ? messageId : null, p_reason: 'unwanted_contact', p_details: '' });
+    return { reported: conversationId };
+  }
+
+  /** Irreversible, so it needs the exact phrase from the person, as the app's own dialog does. */
+  async deleteAccount(confirmation: unknown) {
+    if (confirmation !== 'delete my account') throw new AgentError(400, 'confirmation_required', 'Deleting an account cannot be undone. Ask the person, then send confirmation: "delete my account".');
+    const files = await this.rest<{ name: string; id: string | null }[]>('POST', '/storage/v1/object/list/mail-attachments', { prefix: this.userId, limit: 1000 }).catch(() => []);
+    const paths = files.filter((file) => file.id).map((file) => `${this.userId}/${file.name}`);
+    if (paths.length) await this.rest('DELETE', '/storage/v1/object/mail-attachments', { prefixes: paths }).catch(() => undefined);
+    await this.rpc('open_media_delete_account', {});
+    return { deleted: true, note: 'The account, posts, messages and connected mailboxes are gone. Copies others already read cannot be recalled.' };
+  }
+
+  private async personByHandle(handle: unknown): Promise<string> {
+    const clean = typeof handle === 'string' ? handle.replace(/^@/, '').toLowerCase() : '';
+    if (!handlePattern.test(clean)) throw new AgentError(400, 'bad_request', 'Give an Open Media handle.');
+    const [person] = await this.rest<{ id: string }[]>('GET', `/rest/v1/profiles?handle=eq.${clean}&select=id`);
+    if (!person) throw new AgentError(404, 'not_found', `No one is called @${clean} on Open Media.`);
+    return person.id;
+  }
+
+  private async call<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
+    if (!this.internal) throw new AgentError(501, 'unavailable', 'This route is not available here.');
+    const response = await this.internal(new Request(`${this.origin}${path}`, {
+      method,
+      headers: { authorization: `Bearer ${this.token}`, ...(body !== undefined ? { 'content-type': 'application/json' } : {}) },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    }));
+    const result = await response.json().catch(() => ({})) as { error?: string };
+    if (!response.ok) throw new AgentError(response.status, response.status === 429 ? 'rate_limited' : 'refused', result.error ?? 'Open Media refused that request.');
+    return result as T;
+  }
+
   private rpc<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {
     return this.rest<T>('POST', `/rest/v1/rpc/${name}`, args);
   }
@@ -391,6 +474,32 @@ function registerAccountTools(server: McpServer, account: Account) {
   tool(server, 'start_conversation', { title: 'Start a conversation', description: 'Open a direct conversation with someone by their Open Media handle.', input: { handle: z.string() }, readOnly: false }, (args) => account.startConversation(args.handle));
   tool(server, 'send_message', { title: 'Send a message', description: 'Send a message in one of the person’s conversations. Confirm the exact text with the person first.', input: { conversationId: z.string(), text: z.string().min(1).max(8000) }, readOnly: false }, (args) => account.send(String(args.conversationId), args.text));
   tool(server, 'export_my_data', { title: 'Export my data', description: 'A readable copy of the person’s Open Media data.', input: {}, readOnly: true }, () => account.exportData());
+  tool(server, 'block_person', { title: 'Block or unblock someone', description: 'Block (or unblock) an Open Media person by handle. Blocked people cannot message the person, and their posts are hidden.', input: { handle: z.string(), blocked: z.boolean().optional() }, readOnly: false }, (args) => account.block(args.handle, args.blocked));
+  tool(server, 'report_conversation', { title: 'Report a conversation', description: 'Report unwanted contact in a conversation, naming the other person’s handle.', input: { conversationId: z.string(), handle: z.string(), messageId: z.string().optional() }, readOnly: false }, (args) => account.reportConversation(String(args.conversationId), args.handle, args.messageId));
+  tool(server, 'delete_my_account', { title: 'Delete my account', description: 'Permanently delete the person’s Open Media account and data. Only call this after the person explicitly asks; pass confirmation exactly "delete my account".', input: { confirmation: z.string() }, readOnly: false }, (args) => account.deleteAccount(args.confirmation));
+
+  // Email
+  tool(server, 'list_email', { title: 'Read my email', description: 'The person’s stored email from connected mailboxes (inbound and sent), newest first. Run sync_mailbox first for the latest.', input: { limit: z.number().int().min(1).max(500).optional() }, readOnly: true }, (args) => account.email(Number(args.limit ?? 50)));
+  tool(server, 'list_mailboxes', { title: 'My mailboxes', description: 'Connected email accounts and whether each can send.', input: {}, readOnly: true }, () => account.mailAccounts());
+  tool(server, 'connect_mailbox', { title: 'Connect a mailbox', description: 'Connect an IMAP or POP3 mailbox (with optional SMTP for sending). Use an app password, never the main password. The server tests the connection and stores the password encrypted.', input: {
+    email: z.string(), protocol: z.enum(['imap', 'pop3']), host: z.string(), port: z.number().int(), username: z.string(), password: z.string(),
+    smtp: z.object({ host: z.string(), port: z.number().int(), security: z.enum(['tls', 'starttls']) }).optional(),
+  }, readOnly: false }, (args) => account.connectMail({ ...args, secure: true }));
+  tool(server, 'sync_mailbox', { title: 'Sync a mailbox', description: 'Fetch new mail for one connected mailbox.', input: { mailboxId: z.string() }, readOnly: false }, (args) => account.syncMail(String(args.mailboxId)));
+  tool(server, 'send_email', { title: 'Send an email', description: 'Send an email from one of the person’s mailboxes. Confirm recipients and text with the person first.', input: { mailboxId: z.string(), to: z.array(z.string()).min(1).max(10), subject: z.string().max(998), text: z.string().min(1).max(50000), inReplyTo: z.string().optional() }, readOnly: false }, (args) => account.sendEmail(String(args.mailboxId), { to: args.to, subject: args.subject, text: args.text, ...(args.inReplyTo ? { inReplyTo: args.inReplyTo } : {}) }));
+  tool(server, 'remove_mailbox', { title: 'Remove a mailbox', description: 'Disconnect a mailbox and delete its stored mail from Open Media.', input: { mailboxId: z.string() }, readOnly: false }, (args) => account.removeMail(String(args.mailboxId)));
+
+  // Chat networks (bridges)
+  tool(server, 'list_chat_networks', { title: 'Chat networks', description: 'WhatsApp, Signal, Instagram, Messenger, Discord and other chat apps this server bridges, and which the person has connected.', input: {}, readOnly: true }, () => account.chatNetworks());
+  tool(server, 'list_bridged_chats', { title: 'Bridged chats', description: 'Recent chats from the person’s connected chat apps. These are not end-to-end encrypted inside Open Media.', input: {}, readOnly: true }, () => account.bridgedChats());
+  tool(server, 'send_bridged_message', { title: 'Reply in a bridged chat', description: 'Send a text reply in a bridged chat (WhatsApp, Signal, and so on). Confirm the text with the person first.', input: { chatId: z.string(), text: z.string().min(1).max(8000) }, readOnly: false }, (args) => account.sendBridged(String(args.chatId), args.text));
+  tool(server, 'chat_network_sign_in_options', { title: 'Chat network sign-in options', description: 'How a chat network can be connected (QR code, pairing code, password, cookies).', input: { network: z.string() }, readOnly: true }, (args) => account.chatSignInOptions(String(args.network)));
+  tool(server, 'start_chat_network_sign_in', { title: 'Connect a chat network', description: 'Start connecting a chat network. Tell the person first that the network does not approve bridges and accounts could be limited. Returns the first step (for example a QR code to show the person).', input: { network: z.string(), flow: z.string() }, readOnly: false }, (args) => account.startChatSignIn(String(args.network), args.flow));
+  tool(server, 'continue_chat_network_sign_in', { title: 'Continue connecting a chat network', description: 'Send the values for the current sign-in step, or wait for the next one (QR scanned, code entered).', input: { network: z.string(), loginId: z.string(), stepId: z.string(), type: z.enum(['display_and_wait', 'user_input', 'cookies']), values: z.record(z.string(), z.string()).optional() }, readOnly: false }, (args) => account.continueChatSignIn(String(args.network), { loginId: args.loginId, stepId: args.stepId, type: args.type, values: args.values }));
+  tool(server, 'disconnect_chat_network', { title: 'Disconnect a chat network', description: 'Remove the linked device and Open Media’s copy of those chats. The person’s account on that network is not changed.', input: { network: z.string(), loginId: z.string().optional() }, readOnly: false }, (args) => account.disconnectChat(String(args.network), args.loginId));
+
+  // Cross-posting
+  tool(server, 'cross_posting_status', { title: 'Cross-posting', description: 'Which networks this server can help cross-post to, and how cross-posting works (it is signed on the person’s device, so posts made through this API go to Open Media only).', input: {}, readOnly: true }, () => account.crossPosting());
 }
 
 function openMcp(env: AgentEnv, origin: string) {
@@ -461,7 +570,7 @@ export function serverCard(origin: string) {
     documentation: `${origin}/llms.txt`,
     servers: [
       { name: 'open-media', title: 'Open Media', url: `${origin}/open/mcp`, transport: 'streamable-http', authentication: { type: 'none' }, tools: ['get_feed', 'search', 'get_post', 'get_profile', 'list_networks', 'find_setting', 'about_open_media'] },
-      { name: 'open-media-account', title: 'Open Media (your account)', url: `${origin}/me/mcp`, transport: 'streamable-http', authentication: { type: 'bearer', description: 'The person’s Open Media access token, copied from Settings → Developers and agents. It expires after about an hour.' }, tools: ['get_me', 'publish_post', 'delete_post', 'report_post', 'list_conversations', 'start_conversation', 'send_message', 'export_my_data', 'plus every public tool'] },
+      { name: 'open-media-account', title: 'Open Media (your account)', url: `${origin}/me/mcp`, transport: 'streamable-http', authentication: { type: 'bearer', description: 'The person’s Open Media access token, copied from Settings → Developers and agents. It expires after about an hour.' }, tools: ['get_me', 'publish_post', 'delete_post', 'report_post', 'list_conversations', 'start_conversation', 'send_message', 'export_my_data', 'block_person', 'report_conversation', 'delete_my_account', 'list_email', 'list_mailboxes', 'connect_mailbox', 'sync_mailbox', 'send_email', 'remove_mailbox', 'list_chat_networks', 'list_bridged_chats', 'send_bridged_message', 'chat_network_sign_in_options', 'start_chat_network_sign_in', 'continue_chat_network_sign_in', 'disconnect_chat_network', 'cross_posting_status', 'plus every public tool'] },
       { name: 'open-media-events', title: 'Open Media Events', url: `${origin}/mcp`, transport: 'streamable-http', authentication: { type: 'oauth2', metadata: `${origin}/.well-known/oauth-authorization-server` } },
     ],
   };
@@ -509,7 +618,10 @@ export function fullOpenApi(origin: string) {
       '/v1/networks': { get: { summary: 'Every network and connector, with what works today', responses: { 200: ok('Networks and capabilities') } } },
       '/v1/settings': { get: { summary: 'The searchable settings index', parameters: [{ name: 'q', in: 'query', schema: { type: 'string' } }], responses: { 200: ok('Matching settings') } } },
       '/v1/about': { get: { summary: 'Mission, principles, promises, roadmap and honest status', responses: { 200: ok('About Open Media') } } },
-      '/v1/me': { get: { summary: 'Your profile', security: bearer, responses: { 200: ok('Profile'), 401: error } } },
+      '/v1/me': {
+        get: { summary: 'Your profile', security: bearer, responses: { 200: ok('Profile'), 401: error } },
+        delete: { summary: 'Delete your account (irreversible)', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['confirmation'], properties: { confirmation: { type: 'string', const: 'delete my account' } } } } } }, responses: { 200: ok('Deleted'), 400: error, 401: error } },
+      },
       '/v1/me/posts': { post: { summary: 'Publish a public post', security: bearer, requestBody: textBody('body', maxPostLength), responses: { 201: ok('The new post', { $ref: '#/components/schemas/Post' }), 400: error, 401: error } } },
       '/v1/me/posts/{id}': { delete: { summary: 'Delete one of your posts', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], responses: { 200: ok('Deleted'), 401: error, 403: error } } },
       '/v1/posts/{id}/report': { post: { summary: 'Report a post for review', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['reason'], properties: { reason: { type: 'string', enum: [...reportReasons] }, details: { type: 'string', maxLength: 1000 } } } } } }, responses: { 200: ok('Reported'), 400: error, 401: error } } },
@@ -519,6 +631,29 @@ export function fullOpenApi(origin: string) {
       },
       '/v1/me/conversations/{id}/messages': { post: { summary: 'Send a message', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], requestBody: textBody('body', 8000), responses: { 201: ok('Sent'), 400: error, 401: error, 403: error } } },
       '/v1/me/export': { get: { summary: 'Export a readable copy of your data', security: bearer, responses: { 200: ok('Your data'), 401: error } } },
+      '/v1/me/email': { get: { summary: 'Your stored email, newest first', security: bearer, parameters: [{ name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 500, default: 50 } }], responses: { 200: ok('Email'), 401: error } } },
+      '/v1/me/blocks': { post: { summary: 'Block or unblock someone', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['handle'], properties: { handle: { type: 'string' }, blocked: { type: 'boolean', default: true } } } } } }, responses: { 200: ok('Done'), 404: error, 401: error } } },
+      '/v1/me/conversations/{id}/report': { post: { summary: 'Report unwanted contact', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['handle'], properties: { handle: { type: 'string' }, messageId: { type: 'string', format: 'uuid' } } } } } }, responses: { 200: ok('Reported'), 401: error } } },
+      '/v1/mail-accounts': {
+        get: { summary: 'Your connected mailboxes', security: bearer, responses: { 200: ok('Mailboxes'), 401: error } },
+        post: { summary: 'Connect a mailbox (tested before it is saved; the password is stored encrypted)', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['email', 'protocol', 'host', 'port', 'secure', 'username', 'password'], properties: {
+          email: { type: 'string', format: 'email' }, protocol: { type: 'string', enum: ['imap', 'pop3'] }, host: { type: 'string' }, port: { type: 'integer' }, secure: { type: 'boolean', const: true }, username: { type: 'string' }, password: { type: 'string', description: 'An app password.' },
+          smtp: { type: 'object', properties: { host: { type: 'string' }, port: { type: 'integer' }, security: { type: 'string', enum: ['tls', 'starttls'] } } },
+        } } } } }, responses: { 201: ok('Connected'), 400: error, 401: error, 429: error } },
+      },
+      '/v1/mail-accounts/{id}': { delete: { summary: 'Remove a mailbox and its stored mail', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: ok('Removed'), 404: error } } },
+      '/v1/mail-accounts/{id}/sync': { post: { summary: 'Fetch new mail', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: ok('Synced messages'), 404: error, 429: error } } },
+      '/v1/mail-accounts/{id}/send': { post: { summary: 'Send an email', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['to', 'subject', 'text'], properties: { to: { type: 'array', items: { type: 'string', format: 'email' }, maxItems: 10 }, subject: { type: 'string' }, text: { type: 'string' }, inReplyTo: { type: 'string' } } } } } }, responses: { 201: ok('Sent'), 409: error, 429: error } } },
+      '/v1/bridges': { get: { summary: 'Chat networks this server bridges, and your connections', security: bearer, responses: { 200: ok('Networks') } } },
+      '/v1/bridges/conversations': { get: { summary: 'Your bridged chats', security: bearer, responses: { 200: ok('Chats') } } },
+      '/v1/bridges/rooms/{id}/messages': { post: { summary: 'Reply in a bridged chat', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], requestBody: textBody('body', 8000), responses: { 201: ok('Sent'), 404: error } } },
+      '/v1/bridges/{network}/flows': { get: { summary: 'Sign-in options for a chat network', security: bearer, parameters: [{ name: 'network', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: ok('Options') } } },
+      '/v1/bridges/{network}/login/start': { post: { summary: 'Start connecting a chat network', security: bearer, parameters: [{ name: 'network', in: 'path', required: true, schema: { type: 'string' } }], requestBody: textBody('flow', 64), responses: { 200: ok('The first sign-in step') } } },
+      '/v1/bridges/{network}/login/step': { post: { summary: 'Continue a sign-in step', security: bearer, parameters: [{ name: 'network', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: ok('The next step, or complete') } } },
+      '/v1/bridges/{network}/login/cancel': { post: { summary: 'Cancel a sign-in', security: bearer, parameters: [{ name: 'network', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: ok('Cancelled') } } },
+      '/v1/bridges/{network}/logout': { post: { summary: 'Disconnect a chat network', security: bearer, parameters: [{ name: 'network', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: ok('Disconnected') } } },
+      '/v1/cross-posting/status': { get: { summary: 'Which networks this server helps cross-post to', responses: { 200: ok('Status') } } },
+      '/v1/search/assist': { post: { summary: 'AI summary of public posts you pass in, with citations', responses: { 200: ok('Summary'), 429: error, 503: error } } },
     },
     components: {
       ...base.components,
@@ -540,7 +675,7 @@ export function fullOpenApi(origin: string) {
 
 // ─── REST router ─────────────────────────────────────────────────────────────
 
-export async function handleAgentRequest(request: Request, env: AgentEnv): Promise<Response> {
+export async function handleAgentRequest(request: Request, env: AgentEnv, internal?: InternalHandler): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, '') || '/';
   const origin = url.origin;
@@ -557,7 +692,7 @@ export async function handleAgentRequest(request: Request, env: AgentEnv): Promi
     if (path === '/.well-known/mcp.json' || path === '/.well-known/mcp-server') return json(serverCard(origin), 3600);
     if (path === '/open/mcp') return withCors(await openMcp(env, origin).fetch(request));
     if (path === '/me/mcp') {
-      const account = await Account.fromRequest(request, env, origin);
+      const account = await Account.fromRequest(request, env, origin, internal);
       return withCors(await accountMcp(env, origin, account).fetch(request));
     }
 
@@ -578,8 +713,8 @@ export async function handleAgentRequest(request: Request, env: AgentEnv): Promi
     if (request.method === 'GET' && path === '/v1/about') return json(aboutOpenMedia(origin), 3600);
 
     // Account routes: every one needs the person's own token.
-    const account = await Account.fromRequest(request, env, origin);
-    const body = request.method === 'POST' ? await request.json().catch(() => ({})) as Record<string, unknown> : {};
+    const account = await Account.fromRequest(request, env, origin, internal);
+    const body = request.method === 'POST' || request.method === 'DELETE' ? await request.json().catch(() => ({})) as Record<string, unknown> : {};
     if (request.method === 'GET' && path === '/v1/me') return json(await account.me(), 0);
     if (request.method === 'POST' && path === '/v1/me/posts') return json(await account.publish(body.body ?? body.text), 0, 201);
     const postMatch = path.match(/^\/v1\/me\/posts\/([^/]+)$/);
@@ -591,6 +726,11 @@ export async function handleAgentRequest(request: Request, env: AgentEnv): Promi
     const messageMatch = path.match(/^\/v1\/me\/conversations\/([^/]+)\/messages$/);
     if (request.method === 'POST' && messageMatch) return json(await account.send(decodeURIComponent(messageMatch[1]), body.body ?? body.text), 0, 201);
     if (request.method === 'GET' && path === '/v1/me/export') return json(await account.exportData(), 0);
+    if (request.method === 'GET' && path === '/v1/me/email') return json(await account.email(Number(url.searchParams.get('limit') ?? 50)), 0);
+    if (request.method === 'POST' && path === '/v1/me/blocks') return json(await account.block(body.handle, body.blocked), 0);
+    const conversationReport = path.match(/^\/v1\/me\/conversations\/([^/]+)\/report$/);
+    if (request.method === 'POST' && conversationReport) return json(await account.reportConversation(decodeURIComponent(conversationReport[1]), body.handle, body.messageId), 0);
+    if (request.method === 'DELETE' && path === '/v1/me') return json(await account.deleteAccount(body.confirmation), 0);
     throw new AgentError(404, 'not_found', 'No such endpoint. See /v1 or /llms.txt.');
   } catch (error) {
     if (error instanceof AgentError) return json({ error: { code: error.code, message: error.message } }, 0, error.status);

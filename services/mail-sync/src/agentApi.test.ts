@@ -99,3 +99,12 @@ test('agent routes share the public per-client rate limit', async () => {
   assert.equal(response.status, 429);
   assert.equal(response.headers.get('retry-after'), '60');
 });
+
+test('every documented public and account route is in the OpenAPI document', () => {
+  const document = fullOpenApi(origin) as { paths: Record<string, Record<string, unknown>> };
+  for (const item of [...agentInterfaces.public, ...agentInterfaces.account]) {
+    const path = item.path.replace(/\?.*$/, '');
+    assert.ok(document.paths[path], `${item.method} ${path} missing from OpenAPI`);
+    assert.ok(document.paths[path][item.method.toLowerCase()], `${item.method} ${path} has no ${item.method} operation`);
+  }
+});
