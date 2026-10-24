@@ -1,3 +1,4 @@
+import { chatNetwork, chatNetworks } from './chatNetworks';
 import { BridgedNetwork, Conversation, Message, MessageSource, Person } from './models';
 
 /** Bridged chats (ADR 0011) as people-first conversations. */
@@ -15,26 +16,18 @@ export interface BridgeSnapshot {
   rooms: BridgeRoomSnapshot[];
 }
 
-const sources: Record<string, MessageSource> = {
-  whatsapp: 'whatsapp', telegram: 'telegram', signal: 'signal', gmessages: 'gmessages', instagram: 'instagram',
-  messenger: 'messenger', linkedin: 'linkedin', twitter: 'twitter', bluesky: 'bluesky', slack: 'slack', discord: 'discord',
-};
+const bridged = new Set<MessageSource>(chatNetworks.map((network) => network.id));
 
-const labels: Record<string, string> = {
-  whatsapp: 'WhatsApp', telegram: 'Telegram', signal: 'Signal', gmessages: 'Google Messages', instagram: 'Instagram',
-  messenger: 'Messenger', linkedin: 'LinkedIn', twitter: 'X', bluesky: 'Bluesky', slack: 'Slack', discord: 'Discord',
-};
-
-export function bridgedSourceOf(conversation: Conversation): BridgedNetwork | 'instagram' | 'linkedin' | undefined {
-  const source = conversation.sourceSummary.find((item) => Object.values(sources).includes(item));
-  return source as BridgedNetwork | 'instagram' | 'linkedin' | undefined;
+export function bridgedSourceOf(conversation: Conversation): BridgedNetwork | undefined {
+  return conversation.sourceSummary.find((item) => bridged.has(item)) as BridgedNetwork | undefined;
 }
 
 export function mapBridgeSnapshot(snapshot: BridgeSnapshot): Conversation[] {
   return snapshot.rooms.flatMap((room) => {
-    const source = sources[room.network];
-    if (!source) return [];
-    const label = labels[room.network];
+    const network = chatNetwork(room.network);
+    if (!network) return [];
+    const source: MessageSource = network.id;
+    const label = network.name;
     const participants = room.members.map((member) => person(member, source, label));
     const recipientIds = room.members.map((member) => member.id);
     const messages = [...room.events]

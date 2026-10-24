@@ -28,8 +28,9 @@ Login method and risk as of October 2026. "Risk" is the chance the network restr
 | LinkedIn | mautrix-linkedin | Web login session (cookies) | Works, fragile | High | 3 |
 | X (Twitter) DMs | mautrix-twitter | Web login session (cookies) | Fragile | High | 3 |
 | Slack | mautrix-slack | Workspace login or token | Mature | Workspace policy dependent | 3 |
-| Discord | mautrix-discord (bridgev2 rewrite still in progress) | Login token | Legacy bridge | High (user-account automation is against Discord's terms) | 3 |
-| Google Chat | Community bridgev2 port (pre-alpha) | Google login cookies | Pre-alpha | Medium | Later |
+| Discord | mautrix-discord v0.7.7 (older bridge; bridgev2 rewrite unreleased) | Login token | Works; Open Media adapts its older API | High (user-account automation is against Discord's terms) | 3 |
+| Google Voice | mautrix-gvoice | Google login cookies | Maintained | Medium | 3 |
+| Google Chat | mautrix-googlechat (unmaintained since 2024) | Google login cookies | Unmaintained | Medium | No |
 | iMessage | Needs a Mac (or jailbroken iPhone) running a relay for each user | — | Not practical for Open Media | — | No |
 | Snapchat, TikTok | No maintained bridge | — | — | — | No |
 
@@ -82,3 +83,7 @@ Cookie-based logins with the highest ban risk and the most breakage. Ship each b
 2. The stack is a portable Docker Compose bundle (`services/bridges`) so it runs on this Mac for development and on any small Linux VM in production. Choosing and paying for that VM and a homeserver subdomain is the owner's step; until then bridged networks are available only against a local stack.
 3. The owner tests with their own WhatsApp account, accepting the account risk the connect screen describes.
 4. Bridged networks ship on web, iOS and Android, opt-in per network. If App Store review objects, the iOS build can hide them with a build flag.
+
+## Status, 2026-10-24
+
+Every network in the table that has a working bridge now runs on the local stack and has the same experience WhatsApp has: a Settings entry with its own sign-in, step-by-step guidance and risk level, a connector catalog entry, labelled chats in Messages and replies from there. Telegram is wired the same way but waits for Open Media's Telegram API ID (owner step). Discord runs its v0.7.7 release through a small adapter for its older provisioning API (token sign-in only). Not bridged: iMessage, Snapchat, TikTok and Google Chat. No network has been connected to a real account yet; each was checked up to its first sign-in step.

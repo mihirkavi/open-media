@@ -25,9 +25,16 @@ export interface BridgesEnv {
   BRIDGES_BLUESKY_URL?: string;
   BRIDGES_SLACK_URL?: string;
   BRIDGES_DISCORD_URL?: string;
+  BRIDGES_GVOICE_URL?: string;
 }
 
-type NetworkConfig = { name: string; url: keyof BridgesEnv; ghost: string; bot: string };
+/**
+ * `legacy` marks a bridge that still uses the older provisioning API (Discord's
+ * current release); the others use the shared bridgev2 login API. `protocols`
+ * lists the ids a bridge may put in its rooms' m.bridge event when they differ
+ * from Open Media's (Meta's Messenger build says "facebook").
+ */
+type NetworkConfig = { name: string; url: keyof BridgesEnv; ghost: string; bot: string; legacy?: boolean; protocols?: string[] };
 
 /** Networks Open Media can bridge. Only those with a configured bridge URL are offered. */
 export const bridgeNetworks: Record<string, NetworkConfig> = {
@@ -35,13 +42,14 @@ export const bridgeNetworks: Record<string, NetworkConfig> = {
   telegram: { name: 'Telegram', url: 'BRIDGES_TELEGRAM_URL', ghost: 'telegram_', bot: 'telegrambot' },
   signal: { name: 'Signal', url: 'BRIDGES_SIGNAL_URL', ghost: 'signal_', bot: 'signalbot' },
   gmessages: { name: 'Google Messages', url: 'BRIDGES_GMESSAGES_URL', ghost: 'gmessages_', bot: 'gmessagesbot' },
+  gvoice: { name: 'Google Voice', url: 'BRIDGES_GVOICE_URL', ghost: 'gvoice_', bot: 'gvoicebot' },
   instagram: { name: 'Instagram', url: 'BRIDGES_INSTAGRAM_URL', ghost: 'instagram_', bot: 'instagrambot' },
-  messenger: { name: 'Messenger', url: 'BRIDGES_MESSENGER_URL', ghost: 'messenger_', bot: 'messengerbot' },
+  messenger: { name: 'Messenger', url: 'BRIDGES_MESSENGER_URL', ghost: 'messenger_', bot: 'messengerbot', protocols: ['facebook'] },
   linkedin: { name: 'LinkedIn', url: 'BRIDGES_LINKEDIN_URL', ghost: 'linkedin_', bot: 'linkedinbot' },
   twitter: { name: 'X', url: 'BRIDGES_TWITTER_URL', ghost: 'twitter_', bot: 'twitterbot' },
   bluesky: { name: 'Bluesky', url: 'BRIDGES_BLUESKY_URL', ghost: 'bluesky_', bot: 'blueskybot' },
   slack: { name: 'Slack', url: 'BRIDGES_SLACK_URL', ghost: 'slack_', bot: 'slackbot' },
-  discord: { name: 'Discord', url: 'BRIDGES_DISCORD_URL', ghost: 'discord_', bot: 'discordbot' },
+  discord: { name: 'Discord', url: 'BRIDGES_DISCORD_URL', ghost: 'discord_', bot: 'discordbot', legacy: true, protocols: ['discordgo'] },
 };
 
 export interface BridgeLoginStep {
@@ -105,6 +113,7 @@ export class Bridges {
     const networks = availableNetworks(this.env);
     const results = await Promise.all(networks.map(async (id) => {
       try {
+        if (bridgeNetworks[id].legacy) return { id, name: bridgeNetworks[id].name, available: true, logins: await this.legacyLogins(id) };
         const whoami = await this.provision(id, 'GET', '/v3/whoami') as { logins?: { id: string; name?: string; state?: { state_event?: string } }[] };
         return { id, name: bridgeNetworks[id].name, available: true, logins: (whoami.logins ?? []).map((login) => ({ id: login.id, name: login.name ?? '', state: login.state?.state_event ?? 'UNKNOWN' })) };
       } catch {
@@ -116,6 +125,7 @@ export class Bridges {
 
   async flows(network: string): Promise<{ id: string; name: string; description: string }[]> {
     await this.ensureUser();
+    if (bridgeNetworks[network]?.legacy) return [{ id: 'token', name: 'Sign-in token', description: 'Copy your sign-in token from Discord in a desktop browser.' }];
     const result = await this.provision(network, 'GET', '/v3/login/flows') as { flows?: { id?: string; name?: string; description?: string }[] };
     return (result.flows ?? []).map((flow) => ({ id: String(flow.id ?? ''), name: String(flow.name ?? ''), description: String(flow.description ?? '') })).filter((flow) => idPattern.test(flow.id));
   }
@@ -123,6 +133,7 @@ export class Bridges {
   async startLogin(network: string, flow: unknown): Promise<BridgeLoginStep> {
     if (typeof flow !== 'string' || !idPattern.test(flow)) throw new UserFacingError('Choose how to connect.');
     await this.ensureUser();
+    if (bridgeNetworks[network]?.legacy) return legacyTokenStep(network);
     return toStep(await this.provision(network, 'POST', `/v3/login/start/${encodeURIComponent(flow)}`));
   }
 
@@ -131,17 +142,24 @@ export class Bridges {
     if (typeof loginId !== 'string' || !idPattern.test(loginId) || typeof stepId !== 'string' || !idPattern.test(stepId)) throw new UserFacingError('That connection attempt expired. Start again.');
     if (type !== 'display_and_wait' && type !== 'user_input' && type !== 'cookies') throw new UserFacingError('That connection step isn’t supported.');
     const body = type === 'display_and_wait' ? undefined : stringValues(values);
+    if (bridgeNetworks[network]?.legacy) {
+      // Discord's token sign-in finishes in one request; the bridge answers once it has connected.
+      if (type !== 'cookies' || !body?.token) throw new UserFacingError('Paste your sign-in token first.');
+      await this.provision(network, 'POST', '/v1/login/token', { token: body.token });
+      return { loginId, stepId, type: 'complete' };
+    }
     return toStep(await this.provision(network, 'POST', `/v3/login/step/${encodeURIComponent(loginId)}/${encodeURIComponent(stepId)}/${type}`, body));
   }
 
   async cancelLogin(network: string, loginId: unknown): Promise<void> {
-    if (typeof loginId !== 'string' || !idPattern.test(loginId)) return;
+    if (typeof loginId !== 'string' || !idPattern.test(loginId) || bridgeNetworks[network]?.legacy) return;
     await this.provision(network, 'POST', `/v3/login/cancel/${encodeURIComponent(loginId)}`).catch(() => undefined);
   }
 
   async logout(network: string, loginId: unknown): Promise<void> {
     const id = loginId === undefined ? 'all' : loginId;
     if (typeof id !== 'string' || !idPattern.test(id)) throw new UserFacingError('Account not found.');
+    if (bridgeNetworks[network]?.legacy) { await this.provision(network, 'POST', '/v1/logout'); return; }
     await this.provision(network, 'POST', `/v3/logout/${encodeURIComponent(id)}`);
   }
 
@@ -183,7 +201,8 @@ export class Bridges {
       else members.delete(event.state_key);
     }
     const others = [...members.entries()].filter(([id]) => id !== this.mxid && !this.isBot(id));
-    const network = (bridgeInfo?.content?.protocol as { id?: string } | undefined)?.id ?? others.map(([id]) => this.networkOfUser(id)).find(Boolean);
+    // Open Media names every bridge's users (`whatsapp_…`), so that decides; the room's m.bridge protocol is the fallback.
+    const network = others.map(([id]) => this.networkOfUser(id)).find(Boolean) ?? networkOfProtocol((bridgeInfo?.content?.protocol as { id?: string } | undefined)?.id);
     // Management rooms (only the bridge bot) and non-bridged rooms aren't chats.
     if (!network || !bridgeNetworks[network] || others.length === 0) return null;
     const name = typeof state.findLast((event) => event.type === 'm.room.name')?.content?.name === 'string'
@@ -199,6 +218,13 @@ export class Bridges {
   private networkOfUser(userId: string): string | undefined {
     const local = userId.slice(1).split(':')[0] ?? '';
     return Object.entries(bridgeNetworks).find(([, network]) => local.startsWith(network.ghost) || local === network.bot)?.[0];
+  }
+
+  /** Discord's older bridge reports one login through its ping endpoint. */
+  private async legacyLogins(network: string): Promise<{ id: string; name: string; state: string }[]> {
+    const ping = await this.provision(network, 'GET', '/v1/ping') as { discord?: { id?: string; logged_in?: boolean; connected?: boolean } };
+    if (!ping.discord?.logged_in) return [];
+    return [{ id: ping.discord.id || 'discord', name: '', state: ping.discord.connected ? 'CONNECTED' : 'TRANSIENT_DISCONNECT' }];
   }
 
   private isBot(userId: string): boolean {
@@ -240,6 +266,23 @@ export class Bridges {
 type MatrixEvent = { type: string; state_key?: string; sender?: string; event_id?: string; origin_server_ts?: number; content?: Record<string, unknown> };
 type JoinedRoom = { state?: { events?: MatrixEvent[] }; timeline?: { events?: MatrixEvent[] } };
 type SyncResponse = { rooms?: { join?: Record<string, JoinedRoom>; invite?: Record<string, { invite_state?: { events?: MatrixEvent[] } }> } };
+
+export function networkOfProtocol(protocol: string | undefined): string | undefined {
+  if (!protocol) return undefined;
+  return Object.entries(bridgeNetworks).find(([id, network]) => id === protocol || network.protocols?.includes(protocol))?.[0];
+}
+
+/** Discord's sign-in token is sent as the Authorization header of its web app's requests. */
+function legacyTokenStep(network: string): BridgeLoginStep {
+  return {
+    loginId: `${network}-token`,
+    stepId: 'token',
+    type: 'cookies',
+    url: 'https://discord.com/app',
+    instructions: 'Copy the Authorization request header from Discord’s web app.',
+    fields: [{ id: 'token', name: 'Authorization', description: 'request header', type: 'cookie' }],
+  };
+}
 
 /** Keeps only what the app needs from a bridge login step. */
 export function toStep(raw: unknown): BridgeLoginStep {

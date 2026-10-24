@@ -39,3 +39,14 @@ test('group chats keep their name and unknown networks are skipped', () => {
   assert.equal(chats[0].groupTitle, 'Family');
   assert.deepEqual(chats[0].labels, ['WhatsApp', 'Group']);
 });
+
+test('every bridged network gets its own label, including Google Voice and Messenger', () => {
+  const chats = mapBridgeSnapshot({
+    userId: me,
+    rooms: [
+      { id: '!v:x', network: 'gvoice', name: 'Pat', members: [{ id: '@gvoice_1:x', displayName: 'Pat' }], events: [{ id: '$1', sender: '@gvoice_1:x', body: 'Call me', timestamp: 2 }] },
+      { id: '!f:x', network: 'messenger', name: 'Sam', members: [{ id: '@messenger_1:x', displayName: 'Sam' }], events: [{ id: '$2', sender: '@messenger_1:x', body: 'Hi', timestamp: 1 }] },
+    ],
+  });
+  assert.deepEqual(chats.map((chat) => [chat.labels[0], bridgedSourceOf(chat)]), [['Google Voice', 'gvoice'], ['Messenger', 'messenger']]);
+});

@@ -20,6 +20,7 @@ const sourceDetails: Record<MessageSource, { icon: keyof typeof Ionicons.glyphMa
   telegram: { icon: 'paper-plane-outline', label: 'Telegram' },
   signal: { icon: 'chatbubbles-outline', label: 'Signal' },
   gmessages: { icon: 'chatbox-outline', label: 'Google Messages' },
+  gvoice: { icon: 'call-outline', label: 'Google Voice' },
   messenger: { icon: 'chatbubble-outline', label: 'Messenger' },
   twitter: { icon: 'at-outline', label: 'X' },
   bluesky: { icon: 'cloud-outline', label: 'Bluesky' },

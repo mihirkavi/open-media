@@ -161,7 +161,7 @@ Open Media is in **public beta**. Everything below is in the code today.
 | **Cross-posting** | One post to Farcaster, Lens, Hive and DeSo using keys you approve in each network's own app. No seed phrases. | 🧪 Beta: built, not yet tested on live networks |
 | **Messages** | Real-time chats between Open Media users, blocking and reporting. | ✅ Live |
 | **Email** | Connect Gmail, iCloud, Yahoo, Fastmail or any other IMAP account. Read and reply as conversations. Verified brand logos for trusted senders. | ✅ Live |
-| **Chat bridges** | WhatsApp, Signal, Instagram, Messenger, LinkedIn, X, Bluesky and Slack through open-source bridges. Opt-in, with a clear warning. | 🧪 Beta: local setup only |
+| **Chat bridges** | WhatsApp, Signal, Google Messages, Google Voice, Instagram, Messenger, LinkedIn, X, Bluesky, Slack and Discord through open-source bridges, with Telegram ready once its app ID is set. Opt-in, with a clear warning and step-by-step sign-in for each network. | 🧪 Beta: local setup only |
 | **Search** | Posts on every network, messages, email and settings in one box, in plain language, with a short AI summary of public results. | ✅ Live |
 | **Privacy** | Export all your data or delete your account from your profile. Messages, email and contacts are never public. | ✅ Live |
 | **Open data** | A free, read-only public API so people, researchers and AI agents can read public Open Media posts. | ✅ Live |
@@ -325,7 +325,7 @@ The protocol does not require any single business model. The Open Media app ship
 Open Media is an early beta, built in the open. To be clear about where it stands:
 
 - Cross-posting to open networks is built and follows each network's official tools, but has not yet been tested end to end on live accounts.
-- Chat bridges for WhatsApp and similar apps currently run only on a local setup, and those companies do not approve them, so accounts could be limited.
+- Chat bridges for WhatsApp, Instagram, Discord and the other chat apps currently run only on a local setup, have not yet been connected to real accounts, and are not approved by those companies, so accounts could be limited. iMessage, Snapchat and TikTok cannot be bridged.
 - Videos are stored as uploaded, without streaming optimisation.
 - Messages between Open Media users are protected by strict database rules but are **not yet end-to-end encrypted**.
 - The algorithm marketplace, moderation choice, identity and governance described above are the vision, not features you can use today.

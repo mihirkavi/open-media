@@ -14,19 +14,17 @@ import {
   loadBridgeStatus,
   startBridgeLogin,
 } from '../connectors/bridgesConnector';
+import { chatNetwork, chatNetworks, unreachableChatNetworks } from '../domain/chatNetworks';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 
-/** Networks no bridge can reach; listed so the inbox is honest about what's missing. */
-const unreachable = [
-  { name: 'iMessage', reason: 'Needs a Mac relay for each person; not supported.' },
-  { name: 'Snapchat', reason: 'No working bridge exists.' },
-  { name: 'TikTok', reason: 'No working bridge exists.' },
-];
+type Flow = { network: string; name: string; stage: 'consent' | 'working'; step?: BridgeLoginStep; values: Record<string, string>; done?: boolean; flows?: BridgeLoginFlow[]; method?: string };
 
-const plannedBridges = ['WhatsApp', 'Telegram', 'Signal', 'Google Messages', 'Instagram', 'Messenger', 'LinkedIn', 'X', 'Bluesky', 'Slack', 'Discord'];
-
-type Flow = { network: string; name: string; stage: 'consent' | 'working'; step?: BridgeLoginStep; values: Record<string, string>; done?: boolean; flows?: BridgeLoginFlow[] };
+const riskText = {
+  low: 'rarely acts against unofficial apps, so the risk to your account is low',
+  medium: 'may limit accounts that use unofficial apps',
+  high: 'actively blocks unofficial apps, so it may lock or ban this account',
+};
 
 /**
  * Settings → Chat networks (ADR 0011). WhatsApp and other networks join Messages through Open
@@ -74,7 +72,7 @@ export function BridgedChatsSettings() {
     if (!flow) return;
     const id = ++attempt.current;
     setFlowError('');
-    setFlow({ ...flow, stage: 'working', step: undefined, values: {} });
+    setFlow({ ...flow, stage: 'working', step: undefined, values: {}, method });
     try {
       await follow(flow.network, await startBridgeLogin(flow.network, method), id);
     } catch (error) {
@@ -111,7 +109,7 @@ export function BridgedChatsSettings() {
   };
 
   const offered = (statuses ?? []).filter((status) => status.available);
-  const offeredNames = new Set(offered.map((status) => status.name));
+  const offeredIds = new Set(offered.map((status) => status.id));
   const phone = Platform.OS !== 'web';
 
   return <View>
@@ -143,15 +141,15 @@ export function BridgedChatsSettings() {
           {flow?.network === status.id ? <FlowCard flow={flow} phone={phone} error={flowError} onBegin={begin} onClose={close} onSubmit={submitInput} onValues={(values) => setFlow({ ...flow, values })} /> : null}
         </View>;
       })}
-      {plannedBridges.filter((name) => !offeredNames.has(name)).map((name, index) => (
-        <View key={name} style={[styles.row, (offered.length > 0 || index > 0) && styles.divider]}>
+      {chatNetworks.filter((network) => !offeredIds.has(network.id)).map((network, index) => (
+        <View key={network.id} style={[styles.row, (offered.length > 0 || index > 0) && styles.divider]}>
           <View style={styles.rowTop}>
-            <View style={styles.copy}><Text style={[styles.name, styles.muted]}>{name}</Text><Text style={styles.detail}>A bridge exists; it isn’t running on this server yet.</Text></View>
+            <View style={styles.copy}><Text style={[styles.name, styles.muted]}>{network.name}</Text><Text style={styles.detail}>{network.setup ?? 'A bridge exists; it isn’t running on this server yet.'}</Text></View>
             <Text style={styles.badge}>Planned</Text>
           </View>
         </View>
       ))}
-      {unreachable.map((network) => (
+      {unreachableChatNetworks.map((network) => (
         <View key={network.name} style={[styles.row, styles.divider]}>
           <View style={styles.rowTop}>
             <View style={styles.copy}><Text style={[styles.name, styles.muted]}>{network.name}</Text><Text style={styles.detail}>{network.reason}</Text></View>
@@ -176,6 +174,7 @@ function FlowCard({ flow, phone, error, onBegin, onClose, onSubmit, onValues }: 
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const step = flow.step;
+  const guide = chatNetwork(flow.network);
 
   if (flow.done) return <View accessibilityLiveRegion="polite" style={styles.flow}>
     <Text style={styles.name}>{flow.name} is connected</Text>
@@ -185,14 +184,11 @@ function FlowCard({ flow, phone, error, onBegin, onClose, onSubmit, onValues }: 
 
   if (flow.stage === 'consent') return <View style={styles.flow}>
     <Text style={styles.name}>Before you connect {flow.name}</Text>
-    <Text style={styles.detail}>• {flow.name} doesn’t officially support this. It may limit or ban accounts that use unofficial apps.</Text>
+    <Text style={styles.detail}>• {flow.name} doesn’t officially support this. It {riskText[guide?.risk ?? 'high']}.</Text>
     <Text style={styles.detail}>• Open Media’s bridge server keeps your {flow.name} session and can read the chats it brings into Messages. These chats aren’t end-to-end encrypted inside Open Media.</Text>
-    <Text style={styles.detail}>• You can disconnect any time here{flow.network === 'whatsapp' || flow.network === 'signal' ? ` or in ${flow.name}’s linked devices` : ''}.</Text>
+    <Text style={styles.detail}>• You can disconnect any time here{guide?.linkedDevices ? ` or in ${guide.linkedDevices}` : ''}.</Text>
     <View style={styles.rowWrap}>
-      {flow.network === 'whatsapp' ? <>
-        <Button label={phone ? 'Use a pairing code' : 'Scan a QR code'} primary onPress={() => onBegin(phone ? 'phone' : 'qr')} />
-        <Button label={phone ? 'Scan a QR code instead' : 'Use a pairing code instead'} onPress={() => onBegin(phone ? 'qr' : 'phone')} />
-      </> : flow.flows ? flow.flows.map((option, index) => <Button key={option.id} label={option.name || 'Continue'} primary={index === 0} onPress={() => onBegin(option.id)} />) : <ActivityIndicator color={colors.text} />}
+      {flow.flows ? orderFlows(flow.flows, phone).map((option, index) => <Button key={option.id} label={flowLabel(option, index)} primary={index === 0} onPress={() => onBegin(option.id)} />) : <ActivityIndicator color={colors.text} />}
       <Button label="Cancel" onPress={onClose} />
     </View>
     {error ? <Text accessibilityLiveRegion="assertive" style={styles.error}>{error}</Text> : null}
@@ -202,19 +198,30 @@ function FlowCard({ flow, phone, error, onBegin, onClose, onSubmit, onValues }: 
     {!step ? <ActivityIndicator color={colors.text} /> : null}
     {step?.type === 'display_and_wait' && step.display?.type === 'qr' && step.display.data ? <>
       <Text style={styles.name}>Scan with {flow.name}</Text>
-      <Text style={styles.detail}>{flow.network === 'whatsapp' ? 'On your phone, open WhatsApp → Settings → Linked devices → Link a device, then point the camera at this code.' : step.instructions}</Text>
+      <Text style={styles.detail}>{guide?.qr ?? step.instructions}</Text>
       <QrGrid value={step.display.data} />
       <Text style={styles.hint}>The code refreshes by itself. Waiting for you to scan…</Text>
     </> : null}
     {step?.type === 'display_and_wait' && step.display?.type === 'code' && step.display.data ? <>
       <Text style={styles.name}>Enter this code in {flow.name}</Text>
       <Text selectable accessibilityLabel={`Pairing code ${step.display.data.split('').join(' ')}`} style={styles.code}>{step.display.data}</Text>
-      <Text style={styles.detail}>{flow.network === 'whatsapp' ? 'Open WhatsApp → Settings → Linked devices → Link a device → Link with phone number instead, then type this code.' : step.instructions}</Text>
+      <Text style={styles.detail}>{guide?.code ?? step.instructions}</Text>
       <Text style={styles.hint}>Waiting for you to enter it…</Text>
+    </> : null}
+    {step?.type === 'display_and_wait' && step.display?.type === 'emoji' && step.display.data ? <>
+      <Text style={styles.name}>Confirm on your phone</Text>
+      <Text accessibilityLabel={`Emoji ${step.display.data}`} style={styles.emoji}>{step.display.data}</Text>
+      <Text style={styles.detail}>{guide?.emoji ?? step.instructions}</Text>
+      <Text style={styles.hint}>Waiting for you to confirm…</Text>
+    </> : null}
+    {step?.type === 'display_and_wait' && (step.display?.type === 'nothing' || !step.display?.data) ? <>
+      <Text style={styles.name}>Finish in {flow.name}</Text>
+      <Text style={styles.detail}>{step.instructions || `Approve the sign-in in ${flow.name}, then come back here.`}</Text>
+      <ActivityIndicator color={colors.text} />
     </> : null}
     {step?.type === 'user_input' ? <>
       <Text style={styles.name}>{step.instructions || `Connect ${flow.name}`}</Text>
-      {flow.network === 'bluesky' ? <Text style={styles.hint}>Use an app password (Bluesky → Settings → Privacy and security → App passwords) and allow direct messages, rather than your main password.</Text> : null}
+      {guide?.input ? <Text style={styles.hint}>{guide.input}</Text> : null}
       {(step.fields ?? []).map((field, index) => <View key={field.id}>
         <Text style={styles.detail}>{field.name}{field.description ? ` · ${field.description}` : ''}</Text>
         <TextInput
@@ -238,6 +245,7 @@ function FlowCard({ flow, phone, error, onBegin, onClose, onSubmit, onValues }: 
     {step?.type === 'cookies' ? <>
       <Text style={styles.name}>Copy your {flow.name} sign-in</Text>
       <Text style={styles.detail}>{flow.name} signs in through its website, and Open Media can’t read another site’s sign-in for you. Sign in at the link below in a desktop browser, open its developer tools, and copy each value here:</Text>
+      {guide?.cookies ? <Text style={styles.hint}>{guide.cookies}</Text> : null}
       {(step.fields ?? []).some((field) => field.description?.startsWith('cookie')) ? <Text style={styles.detail}>• Cookies: Application (Storage in Firefox) → Cookies → the site → copy the value.</Text> : null}
       {(step.fields ?? []).some((field) => field.description === 'request header') ? <Text style={styles.detail}>• Request headers: Network → reload the page → click any request to the site → Request Headers → copy the value.</Text> : null}
       {(step.fields ?? []).some((field) => field.description === 'local storage') ? <Text style={styles.detail}>• Local storage: Application → Local Storage → the site → copy the value.</Text> : null}
@@ -260,7 +268,7 @@ function FlowCard({ flow, phone, error, onBegin, onClose, onSubmit, onValues }: 
     {step?.type === 'unsupported' ? <Text style={styles.detail}>{step.instructions}</Text> : null}
     {error ? <Text accessibilityLiveRegion="assertive" style={styles.error}>{error}</Text> : null}
     <View style={styles.rowWrap}>
-      {error && flow.network === 'whatsapp' ? <Button label="Try again" primary onPress={() => onBegin(phone ? 'phone' : 'qr')} /> : null}
+      {error && flow.method ? <Button label="Try again" primary onPress={() => onBegin(flow.method!)} /> : null}
       <Button label="Cancel" onPress={onClose} />
     </View>
   </View>;
@@ -300,6 +308,18 @@ function Button({ label, onPress, primary, danger, disabled }: { label: string; 
   </Pressable>;
 }
 
+/** A phone can't scan its own screen, so QR sign-ins come last there and first on a computer. */
+function orderFlows(flows: BridgeLoginFlow[], phone: boolean): BridgeLoginFlow[] {
+  const qr = (flow: BridgeLoginFlow) => /qr/i.test(flow.id);
+  return [...flows].sort((left, right) => Number(qr(left) === phone) - Number(qr(right) === phone));
+}
+
+function flowLabel(flow: BridgeLoginFlow, index: number): string {
+  if (/qr/i.test(flow.id)) return index === 0 ? 'Scan a QR code' : 'Scan a QR code instead';
+  if (flow.id === 'phone') return index === 0 ? 'Use a pairing code' : 'Use a pairing code instead';
+  return flow.name || 'Continue';
+}
+
 function stateLabel(state: string): string {
   if (state === 'BAD_CREDENTIALS') return 'signed out, connect again';
   if (state === 'CONNECTING' || state === 'TRANSIENT_DISCONNECT') return 'reconnecting';
@@ -323,6 +343,7 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   badge: { color: colors.textTertiary, fontSize: 12, fontWeight: '600' },
   flow: { gap: 10, padding: 14, borderRadius: 14, backgroundColor: colors.chrome },
   code: { color: colors.text, fontSize: 28, fontWeight: '700', letterSpacing: 4, textAlign: 'center', paddingVertical: 6 },
+  emoji: { fontSize: 64, lineHeight: 76, textAlign: 'center', paddingVertical: 6 },
   input: { minHeight: 44, marginTop: 6, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, color: colors.text, backgroundColor: colors.surface, fontSize: 16, paddingVertical: 0, outlineStyle: 'none' } as object,
   button: { minHeight: 36, paddingHorizontal: 14, justifyContent: 'center', borderRadius: 18, borderWidth: 1, borderColor: colors.border },
   buttonText: { color: colors.text, fontSize: 13, fontWeight: '600' },

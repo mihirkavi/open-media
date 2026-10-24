@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { availableNetworks, Bridges, matrixUserFor, messageText, toStep } from './bridges.js';
+import { availableNetworks, Bridges, matrixUserFor, messageText, networkOfProtocol, toStep } from './bridges.js';
 
 const env = {
   BRIDGES_HOMESERVER_URL: 'http://hs.test',
@@ -64,4 +64,60 @@ test('cookie sign-ins list each value the person must copy', () => {
   assert.equal(step.type, 'cookies');
   assert.equal(step.url, 'https://www.instagram.com/');
   assert.deepEqual(step.fields, [{ id: 'sessionid', name: 'sessionid', description: 'cookie on instagram.com', type: 'cookie' }]);
+});
+
+async function withFetch(handler: (url: string, init?: RequestInit) => unknown, run: () => Promise<void>): Promise<string[]> {
+  const calls: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    calls.push(`${init?.method ?? 'GET'} ${String(input)}`);
+    return new Response(JSON.stringify(handler(String(input), init) ?? {}), { status: 200 });
+  }) as typeof fetch;
+  try { await run(); } finally { globalThis.fetch = realFetch; }
+  return calls;
+}
+
+test('Messenger chats are recognised even though its bridge calls itself "facebook"', async () => {
+  const me = '@om_4493a42e416b41d0baeaaed2666f5225:openmedia.test';
+  const sync = { rooms: { join: { '!m:openmedia.test': {
+    state: { events: [
+      { type: 'm.bridge', state_key: 'x', content: { protocol: { id: 'facebook' } } },
+      { type: 'm.room.member', state_key: me, content: { membership: 'join' } },
+      { type: 'm.room.member', state_key: '@messenger_100:openmedia.test', content: { membership: 'join', displayname: 'Sam' } },
+    ] },
+    timeline: { events: [{ type: 'm.room.message', event_id: '$1', sender: '@messenger_100:openmedia.test', origin_server_ts: 1, content: { msgtype: 'm.text', body: 'hey' } }] },
+  } } } };
+  let result: Awaited<ReturnType<Bridges['conversations']>> | undefined;
+  await withFetch((url) => url.includes('/sync') ? sync : {}, async () => { result = await new Bridges({ ...env, BRIDGES_MESSENGER_URL: 'http://fb.test' }, userId).conversations(); });
+  assert.equal(result?.rooms[0]?.network, 'messenger');
+  assert.equal(networkOfProtocol('facebook'), 'messenger');
+  assert.equal(networkOfProtocol('discordgo'), 'discord');
+  assert.equal(networkOfProtocol('carrier-pigeon'), undefined);
+});
+
+test('Discord uses its older sign-in API: token sign-in, status from ping, logout', async () => {
+  const discordEnv = { ...env, BRIDGES_DISCORD_URL: 'http://discord.test' };
+  const bridges = new Bridges(discordEnv, userId);
+  const calls = await withFetch((url) => url.includes('/v1/ping') ? { discord: { id: '42', logged_in: true, connected: true } } : {}, async () => {
+    assert.deepEqual((await bridges.flows('discord')).map((flow) => flow.id), ['token']);
+    const step = await bridges.startLogin('discord', 'token');
+    assert.equal(step.type, 'cookies');
+    assert.deepEqual(step.fields?.map((field) => [field.id, field.description]), [['token', 'request header']]);
+    assert.equal((await bridges.continueLogin('discord', { loginId: step.loginId, stepId: step.stepId, type: 'cookies', values: { token: 'abc' } })).type, 'complete');
+    const status = await bridges.status();
+    assert.deepEqual(status.networks.find((network) => network.id === 'discord')?.logins, [{ id: '42', name: '', state: 'CONNECTED' }]);
+    await bridges.logout('discord', '42');
+  });
+  const discordCalls = calls.filter((call) => call.includes('discord.test'));
+  assert.deepEqual(discordCalls.map((call) => call.split('?')[0]), [
+    'POST http://discord.test/_matrix/provision/v1/login/token',
+    'GET http://discord.test/_matrix/provision/v1/ping',
+    'POST http://discord.test/_matrix/provision/v1/logout',
+  ]);
+  assert.ok(discordCalls.every((call) => call.endsWith('user_id=%40om_4493a42e416b41d0baeaaed2666f5225%3Aopenmedia.test')));
+  await assert.rejects(() => bridges.continueLogin('discord', { loginId: 'discord-token', stepId: 'token', type: 'cookies', values: { token: '' } }), /Paste your sign-in token/);
+});
+
+test('Google Voice is offered when its bridge is configured', () => {
+  assert.deepEqual(availableNetworks({ ...env, BRIDGES_GVOICE_URL: 'http://gv.test' }), ['whatsapp', 'gvoice']);
 });

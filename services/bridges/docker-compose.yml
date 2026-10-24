@@ -37,6 +37,12 @@ services:
     volumes: ["../../.local/bridges/gmessages:/data"]
     ports: ["127.0.0.1:29336:29336"]
 
+  gvoice:
+    <<: *bridge
+    image: dock.mau.dev/mautrix/gvoice:v0.2605.0
+    volumes: ["../../.local/bridges/gvoice:/data"]
+    ports: ["127.0.0.1:29338:29338"]
+
   instagram:
     <<: *bridge
     image: dock.mau.dev/mautrix/meta:ig-v0.2610.0
@@ -72,3 +78,18 @@ services:
     image: dock.mau.dev/mautrix/slack:v0.2610.0
     volumes: ["../../.local/bridges/slack:/data"]
     ports: ["127.0.0.1:29335:29335"]
+
+  # Discord's current release still uses the older bridge layout (scripts/bridges.ts configures it).
+  discord:
+    <<: *bridge
+    image: dock.mau.dev/mautrix/discord:v0.7.7
+    volumes: ["../../.local/bridges/discord:/data"]
+    ports: ["127.0.0.1:29334:29334"]
+
+  # Runs only when Open Media's Telegram app ID is set (`npm run bridges` adds --profile telegram).
+  telegram:
+    <<: *bridge
+    profiles: ["telegram"]
+    image: dock.mau.dev/mautrix/telegram:v0.2610.0
+    volumes: ["../../.local/bridges/telegram:/data"]
+    ports: ["127.0.0.1:29317:29317"]

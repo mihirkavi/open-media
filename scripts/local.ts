@@ -80,7 +80,8 @@ async function main() {
     `EXPO_PUBLIC_OPEN_MEDIA_PUBLIC_API_URL=${apiURL}`,
     // Sign-in codes are filled in automatically when they go to the local test inbox.
     `EXPO_PUBLIC_LOCAL_AUTO_SIGN_IN=${readSmtpEnv().enabled ? '' : '1'}`,
-    `EXPO_PUBLIC_CHAT_BRIDGES=${existsSync(bridgesEnv) ? '1' : ''}`,
+    // The chat networks whose bridges are running, so Settings only offers those.
+    `EXPO_PUBLIC_CHAT_BRIDGES=${runningBridges().join(',')}`,
     '',
   ].join('\n'));
 
@@ -187,3 +188,9 @@ function readSmtpEnv(): { enabled: boolean; host: string } {
 
 function step(message: string) { console.log(`→ ${message}`); }
 function sleep(ms: number) { return new Promise((done) => setTimeout(done, ms)); }
+
+/** Network ids from .local/bridges/worker.env, e.g. BRIDGES_WHATSAPP_URL → whatsapp. */
+function runningBridges(): string[] {
+  if (!existsSync(bridgesEnv)) return [];
+  return [...readFileSync(bridgesEnv, 'utf8').matchAll(/^BRIDGES_([A-Z]+)_URL=/gm)].map((match) => match[1].toLowerCase());
+}

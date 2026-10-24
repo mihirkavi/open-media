@@ -27,11 +27,19 @@ const synapseDir = join(base, 'synapse');
 const serverName = 'openmedia.localhost';
 const synapseImage = 'matrixdotorg/synapse:v1.163.1';
 
-/** Each bridge: its image, port, and network-specific settings. Telegram needs an API ID from my.telegram.org (owner step), so it isn't listed yet. */
-export const bridges = [
+const telegramApp = loadTelegramApp();
+
+/**
+ * Each bridge: its image, port, and network-specific settings. `legacy` marks
+ * Discord's current release, which predates the shared bridgev2 config layout.
+ * Telegram runs only once Open Media's own Telegram app ID is set (owner step).
+ */
+type Bridge = { id: string; image: string; port: number; network: Record<string, unknown>; legacy?: boolean };
+export const bridges: Bridge[] = [
   { id: 'whatsapp', image: 'dock.mau.dev/mautrix/whatsapp:v0.2610.0', port: 29318, network: {} },
   { id: 'signal', image: 'dock.mau.dev/mautrix/signal:v0.2610.0', port: 29328, network: {} },
   { id: 'gmessages', image: 'dock.mau.dev/mautrix/gmessages:v0.2610.0', port: 29336, network: {} },
+  { id: 'gvoice', image: 'dock.mau.dev/mautrix/gvoice:v0.2605.0', port: 29338, network: {} },
   // Instagram has its own build of the Meta bridge since v0.2608.0.
   { id: 'instagram', image: 'dock.mau.dev/mautrix/meta:ig-v0.2610.0', port: 29319, network: {} },
   { id: 'messenger', image: 'dock.mau.dev/mautrix/meta:v0.2610.0', port: 29320, network: {} },
@@ -39,6 +47,8 @@ export const bridges = [
   { id: 'twitter', image: 'dock.mau.dev/mautrix/twitter:v0.2609.0', port: 29327, network: {} },
   { id: 'bluesky', image: 'dock.mau.dev/mautrix/bluesky:v0.2510.0', port: 29340, network: {} },
   { id: 'slack', image: 'dock.mau.dev/mautrix/slack:v0.2610.0', port: 29335, network: {} },
+  { id: 'discord', image: 'dock.mau.dev/mautrix/discord:v0.7.7', port: 29334, network: {}, legacy: true },
+  ...(telegramApp ? [{ id: 'telegram', image: 'dock.mau.dev/mautrix/telegram:v0.2610.0', port: 29317, network: { api_id: telegramApp.id, api_hash: telegramApp.hash } }] : []),
 ];
 
 if (process.argv[2] === 'stop') {
@@ -73,6 +83,18 @@ for (const bridge of bridges) {
   const configFile = join(dir, 'config.yaml');
   if (!existsSync(configFile)) docker(['run', '--rm', '-v', `${dir}:/data`, bridge.image]);
   const config = YAML.parseDocument(readFileSync(configFile, 'utf8'));
+  if (bridge.legacy) configureLegacy(config, bridge);
+  else configureBridgev2(config, bridge);
+  writeFileSync(configFile, String(config));
+  // Call the binary directly: once a registration exists, the image's start script runs the bridge instead.
+  const binary = `/usr/bin/mautrix-${bridge.image.split('/').pop()!.split(':')[0]}`; // the Instagram build keeps the mautrix-meta name
+  docker(['run', '--rm', '-v', `${dir}:/data`, '--entrypoint', binary, bridge.image, '-g', '-c', '/data/config.yaml', '-r', '/data/registration.yaml']);
+  const registration = join(dir, 'registration.yaml');
+  if (!existsSync(registration)) throw new Error(`The ${bridge.id} bridge did not write registration.yaml.`);
+  copyFileSync(registration, join(synapseDir, `${bridge.id}-registration.yaml`));
+}
+
+function configureBridgev2(config: YAML.Document, bridge: Bridge) {
   config.setIn(['homeserver', 'address'], 'http://synapse:8008');
   config.setIn(['homeserver', 'domain'], serverName);
   config.setIn(['appservice', 'address'], `http://${bridge.id}:${bridge.port}`);
@@ -92,17 +114,32 @@ for (const bridge of bridges) {
   config.setIn(['backfill', 'enabled'], true);
   config.setIn(['bridge', 'cleanup_on_logout', 'enabled'], true);
   for (const [key, value] of Object.entries(bridge.network)) config.setIn(['network', key], value);
-  writeFileSync(configFile, String(config));
-  // Call the binary directly: once a registration exists, the image's start script runs the bridge instead.
-  const binary = `/usr/bin/mautrix-${bridge.image.split('/').pop()!.split(':')[0]}`; // the Instagram build keeps the mautrix-meta name
-  docker(['run', '--rm', '-v', `${dir}:/data`, '--entrypoint', binary, bridge.image, '-g', '-c', '/data/config.yaml', '-r', '/data/registration.yaml']);
-  const registration = join(dir, 'registration.yaml');
-  if (!existsSync(registration)) throw new Error(`The ${bridge.id} bridge did not write registration.yaml.`);
-  copyFileSync(registration, join(synapseDir, `${bridge.id}-registration.yaml`));
+}
+
+/** The same settings in the older layout, where most of them live under `bridge`. */
+function configureLegacy(config: YAML.Document, bridge: Bridge) {
+  config.setIn(['homeserver', 'address'], 'http://synapse:8008');
+  config.setIn(['homeserver', 'domain'], serverName);
+  config.setIn(['appservice', 'address'], `http://${bridge.id}:${bridge.port}`);
+  config.setIn(['appservice', 'hostname'], '0.0.0.0');
+  config.setIn(['appservice', 'port'], bridge.port);
+  config.setIn(['appservice', 'id'], bridge.id);
+  config.setIn(['appservice', 'bot', 'username'], `${bridge.id}bot`);
+  config.setIn(['appservice', 'database', 'type'], 'sqlite3-fk-wal');
+  config.setIn(['appservice', 'database', 'uri'], `file:/data/${bridge.id}.db?_txlock=immediate`);
+  config.setIn(['bridge', 'username_template'], `${bridge.id}_{{.}}`);
+  config.setIn(['bridge', 'permissions'], { [serverName]: 'user' });
+  config.setIn(['bridge', 'provisioning', 'shared_secret'], secrets.provisioning);
+  config.setIn(['bridge', 'login_shared_secret_map'], { [serverName]: `as_token:${secrets.asToken}` });
+  config.setIn(['bridge', 'double_puppet_server_map'], {});
+  // Bring in recent direct messages; servers' channels stay out of Messages.
+  config.setIn(['bridge', 'startup_private_channel_create_limit'], 20);
+  for (const kind of ['initial', 'missed']) config.setIn(['bridge', 'backfill', 'forward_limits', kind, 'dm'], 50);
 }
 
 const homeserver = YAML.parseDocument(readFileSync(join(synapseDir, 'homeserver.yaml'), 'utf8'));
 homeserver.set('app_service_config_files', ['/data/openmedia-registration.yaml', ...bridges.map((bridge) => `/data/${bridge.id}-registration.yaml`)]);
+if (!telegramApp) console.log('  Telegram is skipped: set TELEGRAM_API_ID and TELEGRAM_API_HASH (from my.telegram.org) to run it.');
 homeserver.set('enable_registration', false);
 writeFileSync(join(synapseDir, 'homeserver.yaml'), String(homeserver));
 
@@ -117,12 +154,27 @@ writeFileSync(join(base, 'worker.env'), [
 ].join('\n'), { mode: 0o600 });
 
 step('Starting Synapse and the bridges');
-docker(['compose', '-f', compose, 'up', '-d', '--force-recreate']);
+docker(['compose', '-f', compose, ...(telegramApp ? ['--profile', 'telegram'] : []), 'up', '-d', '--force-recreate', '--remove-orphans']);
 console.log(`
 ✓ Bridges are running: homeserver http://127.0.0.1:8008 and ${bridges.map((bridge) => bridge.id).join(', ')}.
   Restart \`npm run local\` so the mail service picks up .local/bridges/worker.env.
   \`npm run bridges:stop\` stops them.
 `);
+
+/** Open Media's Telegram app, from the environment or .local/bridges/telegram.env. */
+function loadTelegramApp(): { id: number; hash: string } | undefined {
+  const file = join(base, 'telegram.env');
+  const values: Record<string, string | undefined> = { TELEGRAM_API_ID: process.env.TELEGRAM_API_ID, TELEGRAM_API_HASH: process.env.TELEGRAM_API_HASH };
+  if (existsSync(file)) {
+    for (const line of readFileSync(file, 'utf8').split('\n')) {
+      const match = line.match(/^(TELEGRAM_API_ID|TELEGRAM_API_HASH)=(.*)$/);
+      if (match && !values[match[1]]) values[match[1]] = match[2].trim();
+    }
+  }
+  const id = Number(values.TELEGRAM_API_ID);
+  const hash = values.TELEGRAM_API_HASH ?? '';
+  return Number.isInteger(id) && id > 0 && /^[a-f0-9]{32}$/.test(hash) ? { id, hash } : undefined;
+}
 
 function loadSecrets(): { asToken: string; hsToken: string; provisioning: string } {
   const file = join(base, 'secrets.json');
