@@ -17,18 +17,25 @@ export interface BridgeNetworkStatus {
 
 export interface BridgeLoginStep {
   loginId: string;
-  type: 'display_and_wait' | 'user_input' | 'complete' | 'unsupported';
+  type: 'display_and_wait' | 'user_input' | 'cookies' | 'complete' | 'unsupported';
   stepId: string;
   instructions?: string;
   display?: { type: 'qr' | 'code' | 'emoji' | 'nothing'; data?: string };
   fields?: { id: string; name: string; description?: string; type: string }[];
+  url?: string;
 }
+
+export interface BridgeLoginFlow { id: string; name: string; description: string }
 
 export async function loadBridgeStatus(): Promise<BridgeNetworkStatus[]> {
   return (await request<{ networks: BridgeNetworkStatus[] }>('/v1/bridges', {}, 'Could not load chat networks.')).networks;
 }
 
-export function startBridgeLogin(network: string, flow: 'qr' | 'phone'): Promise<BridgeLoginStep> {
+export async function loadBridgeFlows(network: string): Promise<BridgeLoginFlow[]> {
+  return (await request<{ flows: BridgeLoginFlow[] }>(`/v1/bridges/${network}/flows`, {}, 'Could not load sign-in options.')).flows;
+}
+
+export function startBridgeLogin(network: string, flow: string): Promise<BridgeLoginStep> {
   return request(`/v1/bridges/${network}/login/start`, { method: 'POST', body: { flow } }, 'Could not start connecting.');
 }
 

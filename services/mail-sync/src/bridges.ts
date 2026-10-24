@@ -36,7 +36,7 @@ export const bridgeNetworks: Record<string, NetworkConfig> = {
   signal: { name: 'Signal', url: 'BRIDGES_SIGNAL_URL', ghost: 'signal_', bot: 'signalbot' },
   gmessages: { name: 'Google Messages', url: 'BRIDGES_GMESSAGES_URL', ghost: 'gmessages_', bot: 'gmessagesbot' },
   instagram: { name: 'Instagram', url: 'BRIDGES_INSTAGRAM_URL', ghost: 'instagram_', bot: 'instagrambot' },
-  messenger: { name: 'Messenger', url: 'BRIDGES_MESSENGER_URL', ghost: 'facebook_', bot: 'facebookbot' },
+  messenger: { name: 'Messenger', url: 'BRIDGES_MESSENGER_URL', ghost: 'messenger_', bot: 'messengerbot' },
   linkedin: { name: 'LinkedIn', url: 'BRIDGES_LINKEDIN_URL', ghost: 'linkedin_', bot: 'linkedinbot' },
   twitter: { name: 'X', url: 'BRIDGES_TWITTER_URL', ghost: 'twitter_', bot: 'twitterbot' },
   bluesky: { name: 'Bluesky', url: 'BRIDGES_BLUESKY_URL', ghost: 'bluesky_', bot: 'blueskybot' },
@@ -46,11 +46,13 @@ export const bridgeNetworks: Record<string, NetworkConfig> = {
 
 export interface BridgeLoginStep {
   loginId: string;
-  type: 'display_and_wait' | 'user_input' | 'complete' | 'unsupported';
+  type: 'display_and_wait' | 'user_input' | 'cookies' | 'complete' | 'unsupported';
   stepId: string;
   instructions?: string;
   display?: { type: 'qr' | 'code' | 'emoji' | 'nothing'; data?: string };
   fields?: { id: string; name: string; description?: string; type: string }[];
+  /** For cookie sign-ins: the site to sign in to, and where each value comes from. */
+  url?: string;
 }
 
 export interface BridgeRoomSnapshot {
@@ -112,6 +114,12 @@ export class Bridges {
     return { networks: results };
   }
 
+  async flows(network: string): Promise<{ id: string; name: string; description: string }[]> {
+    await this.ensureUser();
+    const result = await this.provision(network, 'GET', '/v3/login/flows') as { flows?: { id?: string; name?: string; description?: string }[] };
+    return (result.flows ?? []).map((flow) => ({ id: String(flow.id ?? ''), name: String(flow.name ?? ''), description: String(flow.description ?? '') })).filter((flow) => idPattern.test(flow.id));
+  }
+
   async startLogin(network: string, flow: unknown): Promise<BridgeLoginStep> {
     if (typeof flow !== 'string' || !idPattern.test(flow)) throw new UserFacingError('Choose how to connect.');
     await this.ensureUser();
@@ -121,8 +129,8 @@ export class Bridges {
   async continueLogin(network: string, input: { loginId?: unknown; stepId?: unknown; type?: unknown; values?: unknown }): Promise<BridgeLoginStep> {
     const { loginId, stepId, type, values } = input;
     if (typeof loginId !== 'string' || !idPattern.test(loginId) || typeof stepId !== 'string' || !idPattern.test(stepId)) throw new UserFacingError('That connection attempt expired. Start again.');
-    if (type !== 'display_and_wait' && type !== 'user_input') throw new UserFacingError('That connection step isn’t supported.');
-    const body = type === 'user_input' ? stringValues(values) : undefined;
+    if (type !== 'display_and_wait' && type !== 'user_input' && type !== 'cookies') throw new UserFacingError('That connection step isn’t supported.');
+    const body = type === 'display_and_wait' ? undefined : stringValues(values);
     return toStep(await this.provision(network, 'POST', `/v3/login/step/${encodeURIComponent(loginId)}/${encodeURIComponent(stepId)}/${type}`, body));
   }
 
@@ -235,7 +243,12 @@ type SyncResponse = { rooms?: { join?: Record<string, JoinedRoom>; invite?: Reco
 
 /** Keeps only what the app needs from a bridge login step. */
 export function toStep(raw: unknown): BridgeLoginStep {
-  const step = raw as { login_id?: string; type?: string; step_id?: string; instructions?: string; display_and_wait?: { type?: string; data?: string }; user_input?: { fields?: { id?: string; name?: string; description?: string; type?: string }[] } };
+  const step = raw as {
+    login_id?: string; type?: string; step_id?: string; instructions?: string;
+    display_and_wait?: { type?: string; data?: string };
+    user_input?: { fields?: { id?: string; name?: string; description?: string; type?: string }[] };
+    cookies?: { url?: string; fields?: { id?: string; sources?: { type?: string; name?: string; cookie_domain?: string }[] }[] };
+  };
   const base = { loginId: String(step.login_id ?? ''), stepId: String(step.step_id ?? ''), instructions: step.instructions };
   if (step.type === 'display_and_wait') {
     const kind = step.display_and_wait?.type;
@@ -243,6 +256,19 @@ export function toStep(raw: unknown): BridgeLoginStep {
   }
   if (step.type === 'user_input') {
     return { ...base, type: 'user_input', fields: (step.user_input?.fields ?? []).map((field) => ({ id: String(field.id ?? ''), name: String(field.name ?? ''), description: field.description, type: String(field.type ?? 'text') })) };
+  }
+  if (step.type === 'cookies') {
+    // Open Media can't read another site's cookies, so the person copies each value from their browser.
+    return {
+      ...base,
+      type: 'cookies',
+      url: step.cookies?.url,
+      fields: (step.cookies?.fields ?? []).map((field) => {
+        const source = field.sources?.find((item) => item.type === 'cookie') ?? field.sources?.[0];
+        const where = source?.type === 'cookie' ? `cookie${source.cookie_domain ? ` on ${source.cookie_domain}` : ''}` : source?.type === 'local_storage' ? 'local storage' : source?.type === 'request_header' ? 'request header' : 'value';
+        return { id: String(field.id ?? ''), name: String(source?.name ?? field.id ?? ''), description: where, type: 'cookie' };
+      }),
+    };
   }
   if (step.type === 'complete') return { ...base, type: 'complete' };
   return { ...base, type: 'unsupported', instructions: 'This network needs a sign-in step Open Media doesn’t support yet.' };
@@ -266,7 +292,7 @@ function stringValues(values: unknown): Record<string, string> {
   if (!values || typeof values !== 'object') throw new UserFacingError('Fill in the details first.');
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(values)) {
-    if (!idPattern.test(key) || typeof value !== 'string' || value.length > 256) throw new UserFacingError('Check the details and try again.');
+    if (!idPattern.test(key) || typeof value !== 'string' || value.length > 8192) throw new UserFacingError('Check the details and try again.');
     out[key] = value.trim();
   }
   return out;

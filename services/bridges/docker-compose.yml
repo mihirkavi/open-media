@@ -1,8 +1,14 @@
 # Open Media's bridged messaging stack (ADR 0011): a private Matrix homeserver
 # plus mautrix bridges. `npm run bridges` generates the configuration under
-# .local/bridges (gitignored) and starts this file. Both ports bind to
+# .local/bridges (gitignored) and starts this file. Every port binds to
 # 127.0.0.1 only; production puts them behind HTTPS (see README.md).
+# Keep images and ports in sync with the table in scripts/bridges.ts.
 name: open-media-bridges
+
+x-bridge: &bridge
+  restart: unless-stopped
+  depends_on:
+    - synapse
 
 services:
   synapse:
@@ -14,11 +20,55 @@ services:
       - "127.0.0.1:8008:8008"
 
   whatsapp:
+    <<: *bridge
     image: dock.mau.dev/mautrix/whatsapp:v0.2610.0
-    restart: unless-stopped
-    depends_on:
-      - synapse
-    volumes:
-      - ../../.local/bridges/whatsapp:/data
-    ports:
-      - "127.0.0.1:29318:29318"
+    volumes: ["../../.local/bridges/whatsapp:/data"]
+    ports: ["127.0.0.1:29318:29318"]
+
+  signal:
+    <<: *bridge
+    image: dock.mau.dev/mautrix/signal:v0.2610.0
+    volumes: ["../../.local/bridges/signal:/data"]
+    ports: ["127.0.0.1:29328:29328"]
+
+  gmessages:
+    <<: *bridge
+    image: dock.mau.dev/mautrix/gmessages:v0.2610.0
+    volumes: ["../../.local/bridges/gmessages:/data"]
+    ports: ["127.0.0.1:29336:29336"]
+
+  instagram:
+    <<: *bridge
+    image: dock.mau.dev/mautrix/meta:ig-v0.2610.0
+    volumes: ["../../.local/bridges/instagram:/data"]
+    ports: ["127.0.0.1:29319:29319"]
+
+  messenger:
+    <<: *bridge
+    image: dock.mau.dev/mautrix/meta:v0.2610.0
+    volumes: ["../../.local/bridges/messenger:/data"]
+    ports: ["127.0.0.1:29320:29320"]
+
+  linkedin:
+    <<: *bridge
+    image: dock.mau.dev/mautrix/linkedin:v0.2609.0
+    volumes: ["../../.local/bridges/linkedin:/data"]
+    ports: ["127.0.0.1:29341:29341"]
+
+  twitter:
+    <<: *bridge
+    image: dock.mau.dev/mautrix/twitter:v0.2609.0
+    volumes: ["../../.local/bridges/twitter:/data"]
+    ports: ["127.0.0.1:29327:29327"]
+
+  bluesky:
+    <<: *bridge
+    image: dock.mau.dev/mautrix/bluesky:v0.2510.0
+    volumes: ["../../.local/bridges/bluesky:/data"]
+    ports: ["127.0.0.1:29340:29340"]
+
+  slack:
+    <<: *bridge
+    image: dock.mau.dev/mautrix/slack:v0.2610.0
+    volumes: ["../../.local/bridges/slack:/data"]
+    ports: ["127.0.0.1:29335:29335"]

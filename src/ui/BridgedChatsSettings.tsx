@@ -1,14 +1,16 @@
 import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'qrcode';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import {
   BridgeLoginStep,
   BridgeNetworkStatus,
   cancelBridgeLogin,
   continueBridgeLogin,
+  BridgeLoginFlow,
   disconnectBridge,
+  loadBridgeFlows,
   loadBridgeStatus,
   startBridgeLogin,
 } from '../connectors/bridgesConnector';
@@ -22,9 +24,9 @@ const unreachable = [
   { name: 'TikTok', reason: 'No working bridge exists.' },
 ];
 
-const plannedBridges = ['Telegram', 'Signal', 'Google Messages', 'Instagram', 'Messenger', 'LinkedIn', 'X', 'Bluesky', 'Slack', 'Discord'];
+const plannedBridges = ['WhatsApp', 'Telegram', 'Signal', 'Google Messages', 'Instagram', 'Messenger', 'LinkedIn', 'X', 'Bluesky', 'Slack', 'Discord'];
 
-type Flow = { network: string; name: string; stage: 'consent' | 'working'; step?: BridgeLoginStep; values: Record<string, string>; done?: boolean };
+type Flow = { network: string; name: string; stage: 'consent' | 'working'; step?: BridgeLoginStep; values: Record<string, string>; done?: boolean; flows?: BridgeLoginFlow[] };
 
 /**
  * Settings → Chat networks (ADR 0011). WhatsApp and other networks join Messages through Open
@@ -68,7 +70,7 @@ export function BridgedChatsSettings() {
     }
   };
 
-  const begin = async (method: 'qr' | 'phone') => {
+  const begin = async (method: string) => {
     if (!flow) return;
     const id = ++attempt.current;
     setFlowError('');
@@ -131,7 +133,11 @@ export function BridgedChatsSettings() {
                   <Button label="Disconnect" danger onPress={() => disconnect(status.id, status.logins[0].id)} />
                 </>
                 : <Button label="Disconnect" onPress={() => setConfirmDisconnect(status.id)} />
-              : <Button label="Connect" primary disabled={Boolean(flow)} onPress={() => { setFlowError(''); setFlow({ network: status.id, name: status.name, stage: 'consent', values: {} }); }} />}
+              : <Button label="Connect" primary disabled={Boolean(flow)} onPress={() => {
+                setFlowError('');
+                setFlow({ network: status.id, name: status.name, stage: 'consent', values: {} });
+                loadBridgeFlows(status.id).then((flows) => setFlow((current) => current?.network === status.id ? { ...current, flows } : current)).catch((error) => setFlowError(error instanceof Error ? error.message : 'Could not load sign-in options.'));
+              }} />}
           </View>
           {confirmDisconnect === status.id ? <Text style={styles.hint}>Open Media removes the linked device and its copy of these chats. Your {status.name} account itself is not changed.</Text> : null}
           {flow?.network === status.id ? <FlowCard flow={flow} phone={phone} error={flowError} onBegin={begin} onClose={close} onSubmit={submitInput} onValues={(values) => setFlow({ ...flow, values })} /> : null}
@@ -162,7 +168,7 @@ function FlowCard({ flow, phone, error, onBegin, onClose, onSubmit, onValues }: 
   flow: Flow;
   phone: boolean;
   error: string;
-  onBegin: (method: 'qr' | 'phone') => void;
+  onBegin: (method: string) => void;
   onClose: () => void;
   onSubmit: () => void;
   onValues: (values: Record<string, string>) => void;
@@ -186,9 +192,10 @@ function FlowCard({ flow, phone, error, onBegin, onClose, onSubmit, onValues }: 
       {flow.network === 'whatsapp' ? <>
         <Button label={phone ? 'Use a pairing code' : 'Scan a QR code'} primary onPress={() => onBegin(phone ? 'phone' : 'qr')} />
         <Button label={phone ? 'Scan a QR code instead' : 'Use a pairing code instead'} onPress={() => onBegin(phone ? 'qr' : 'phone')} />
-      </> : <Button label="I understand, continue" primary onPress={() => onBegin('qr')} />}
+      </> : flow.flows ? flow.flows.map((option, index) => <Button key={option.id} label={option.name || 'Continue'} primary={index === 0} onPress={() => onBegin(option.id)} />) : <ActivityIndicator color={colors.text} />}
       <Button label="Cancel" onPress={onClose} />
     </View>
+    {error ? <Text accessibilityLiveRegion="assertive" style={styles.error}>{error}</Text> : null}
   </View>;
 
   return <View accessibilityLiveRegion="polite" style={styles.flow}>
@@ -207,14 +214,16 @@ function FlowCard({ flow, phone, error, onBegin, onClose, onSubmit, onValues }: 
     </> : null}
     {step?.type === 'user_input' ? <>
       <Text style={styles.name}>{step.instructions || `Connect ${flow.name}`}</Text>
-      {(step.fields ?? []).map((field) => <View key={field.id}>
+      {flow.network === 'bluesky' ? <Text style={styles.hint}>Use an app password (Bluesky → Settings → Privacy and security → App passwords) and allow direct messages, rather than your main password.</Text> : null}
+      {(step.fields ?? []).map((field, index) => <View key={field.id}>
         <Text style={styles.detail}>{field.name}{field.description ? ` · ${field.description}` : ''}</Text>
         <TextInput
           accessibilityLabel={field.name}
-          autoFocus
+          autoFocus={index === 0}
           autoCapitalize="none"
           autoCorrect={false}
-          keyboardType={field.type === 'phone_number' ? 'phone-pad' : 'default'}
+          keyboardType={field.type === 'phone_number' ? 'phone-pad' : field.type === 'email' ? 'email-address' : 'default'}
+          secureTextEntry={field.type === 'password'}
           placeholder={field.type === 'phone_number' ? '+1 555 123 4567' : ''}
           placeholderTextColor={colors.textTertiary}
           value={flow.values[field.id] ?? ''}
@@ -226,10 +235,32 @@ function FlowCard({ flow, phone, error, onBegin, onClose, onSubmit, onValues }: 
       </View>)}
       <View style={styles.rowWrap}><Button label="Continue" primary onPress={onSubmit} /></View>
     </> : null}
+    {step?.type === 'cookies' ? <>
+      <Text style={styles.name}>Copy your {flow.name} sign-in</Text>
+      <Text style={styles.detail}>{flow.name} signs in through its website, and Open Media can’t read another site’s sign-in for you. Sign in at the link below in a desktop browser, open its developer tools, and copy each value here:</Text>
+      {(step.fields ?? []).some((field) => field.description?.startsWith('cookie')) ? <Text style={styles.detail}>• Cookies: Application (Storage in Firefox) → Cookies → the site → copy the value.</Text> : null}
+      {(step.fields ?? []).some((field) => field.description === 'request header') ? <Text style={styles.detail}>• Request headers: Network → reload the page → click any request to the site → Request Headers → copy the value.</Text> : null}
+      {(step.fields ?? []).some((field) => field.description === 'local storage') ? <Text style={styles.detail}>• Local storage: Application → Local Storage → the site → copy the value.</Text> : null}
+      {step.url ? <Pressable accessibilityRole="link" onPress={() => { Linking.openURL(step.url!).catch(() => undefined); }}><Text style={styles.link}>{step.url}</Text></Pressable> : null}
+      {(step.fields ?? []).map((field) => <View key={field.id}>
+        <Text style={styles.detail}>{field.name}{field.description ? ` · ${field.description}` : ''}</Text>
+        <TextInput
+          accessibilityLabel={field.name}
+          autoCapitalize="none"
+          autoCorrect={false}
+          secureTextEntry
+          value={flow.values[field.id] ?? ''}
+          onChangeText={(value) => onValues({ ...flow.values, [field.id]: value })}
+          style={styles.input}
+        />
+      </View>)}
+      <View style={styles.rowWrap}><Button label="Connect" primary onPress={onSubmit} /></View>
+      <Text style={styles.hint}>These values let the bridge act as you on {flow.name}. They go only to Open Media’s bridge server, and disconnecting removes them.</Text>
+    </> : null}
     {step?.type === 'unsupported' ? <Text style={styles.detail}>{step.instructions}</Text> : null}
     {error ? <Text accessibilityLiveRegion="assertive" style={styles.error}>{error}</Text> : null}
     <View style={styles.rowWrap}>
-      {error ? <Button label="Try again" primary onPress={() => onBegin(phone ? 'phone' : 'qr')} /> : null}
+      {error && flow.network === 'whatsapp' ? <Button label="Try again" primary onPress={() => onBegin(phone ? 'phone' : 'qr')} /> : null}
       <Button label="Cancel" onPress={onClose} />
     </View>
   </View>;
@@ -298,5 +329,6 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   primary: { backgroundColor: colors.text, borderColor: colors.text },
   primaryText: { color: colors.surface },
   danger: { color: colors.danger },
+  link: { color: colors.text, fontSize: 13, textDecorationLine: 'underline' },
   disabled: { opacity: 0.4 },
 }); }

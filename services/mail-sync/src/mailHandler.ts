@@ -144,6 +144,8 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
         await bridges.send(decodeURIComponent(roomMatch[1]), body);
         return json(201, { sent: true }, headers);
       }
+      const flowsMatch = request.method === 'GET' && url.pathname.match(/^\/v1\/bridges\/([a-z]+)\/flows$/);
+      if (flowsMatch) return json(200, { flows: await bridges.flows(flowsMatch[1]) }, headers);
       const loginMatch = request.method === 'POST' && url.pathname.match(/^\/v1\/bridges\/([a-z]+)\/(login\/start|login\/step|login\/cancel|logout)$/);
       if (loginMatch) {
         const [, network, action] = loginMatch;

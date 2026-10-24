@@ -58,3 +58,10 @@ test('room ids and message bodies are validated before reaching Matrix', async (
   await assert.rejects(() => bridges.send('../admin', 'hi'), /Chat not found/);
   await assert.rejects(() => bridges.send('!room:openmedia.test', '   '), /Write a message/);
 });
+
+test('cookie sign-ins list each value the person must copy', () => {
+  const step = toStep({ login_id: 'l', step_id: 's', type: 'cookies', cookies: { url: 'https://www.instagram.com/', fields: [{ id: 'sessionid', required: true, sources: [{ type: 'cookie', name: 'sessionid', cookie_domain: 'instagram.com' }] }] } });
+  assert.equal(step.type, 'cookies');
+  assert.equal(step.url, 'https://www.instagram.com/');
+  assert.deepEqual(step.fields, [{ id: 'sessionid', name: 'sessionid', description: 'cookie on instagram.com', type: 'cookie' }]);
+});

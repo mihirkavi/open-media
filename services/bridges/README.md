@@ -32,8 +32,20 @@ Settings → Email & connections → Chat networks then offers WhatsApp. Generat
 3. Set the Worker secrets: `BRIDGES_HOMESERVER_URL`, `BRIDGES_SERVER_NAME`, `BRIDGES_AS_TOKEN`, `BRIDGES_PROVISIONING_SECRET` and `BRIDGES_WHATSAPP_URL` (plus `BRIDGES_<NETWORK>_URL` for each further bridge), and build the app with `EXPO_PUBLIC_CHAT_BRIDGES=1`.
 4. Back up the databases; they hold people's linked-device sessions.
 
-## Adding another network
+## Networks
 
-The service already knows Telegram, Signal, Google Messages, Instagram, Messenger, LinkedIn, X, Bluesky, Slack and Discord (`services/mail-sync/src/bridges.ts`). To turn one on, add its mautrix bridge to the Compose file and `scripts/bridges.ts`, register it with Synapse, and set its `BRIDGES_<NETWORK>_URL`. Settings shows it as connectable as soon as the server reports it.
+| Network | Image | Sign-in |
+|---|---|---|
+| WhatsApp | mautrix/whatsapp:v0.2610.0 | QR code or pairing code |
+| Signal | mautrix/signal:v0.2610.0 | QR code (linked device) |
+| Google Messages | mautrix/gmessages:v0.2610.0 | Google account |
+| Instagram | mautrix/meta:ig-v0.2610.0 (Instagram build) | Cookies, or username and password |
+| Messenger | mautrix/meta:v0.2610.0 | Cookies, or username and password |
+| LinkedIn | mautrix/linkedin:v0.2609.0 | Cookies and request headers |
+| X | mautrix/twitter:v0.2609.0 | Cookies, or username and password |
+| Bluesky | mautrix/bluesky:v0.2510.0 | App password |
+| Slack | mautrix/slack:v0.2610.0 | Email, token and cookie, or Slack app |
+
+Not running: Telegram (needs an API ID and hash from my.telegram.org, an owner step), Discord (its bridge hasn't moved to the bridgev2 login API yet). To add a network, add it to the table in `scripts/bridges.ts` and to the Compose file, and set its `BRIDGES_<NETWORK>_URL`. Settings shows it as connectable as soon as the server reports it.
 
 The bridges are AGPL-3.0. Running them unmodified is fine; a modified bridge must offer its source to its users.
