@@ -33,6 +33,7 @@ import {
   unsubscribeFromOpenMediaMessages,
 } from "../data/openMediaService";
 import { deletePost, reportPost } from "../data/postService";
+import { bridgedSourceOf, loadBridgedConversations, sendBridgedMessage } from "../connectors/bridgesConnector";
 import { normalizeStoredEmail, replySubject } from "../domain/emailNormalization";
 import { Conversation, Message } from "../domain/models";
 import { FeedMode } from "../domain/posts";
@@ -136,6 +137,10 @@ export function OpenMediaApp({
   const [nativeConversations, setNativeConversations] = useState<
     Conversation[]
   >([]);
+  // WhatsApp and other bridged chats (ADR 0011); empty until a network is connected.
+  const [bridgedConversations, setBridgedConversations] = useState<
+    Conversation[]
+  >([]);
   const [messagesLoading, setMessagesLoading] = useState(true);
   const [messagesError, setMessagesError] = useState("");
   const [blockedUserIds, setBlockedUserIds] = useState<string[]>([]);
@@ -143,10 +148,10 @@ export function OpenMediaApp({
   // One people-first inbox: Open Media chats and email, newest first.
   const conversations = useMemo(
     () =>
-      [...nativeConversations, ...mailConversations].sort(
+      [...nativeConversations, ...bridgedConversations, ...mailConversations].sort(
         (a, b) => Date.parse(b.lastMessageAt) - Date.parse(a.lastMessageAt),
       ),
-    [nativeConversations, mailConversations],
+    [nativeConversations, bridgedConversations, mailConversations],
   );
   const refreshMail = useCallback(async () => {
     if (messageMode !== "open_media") return;
@@ -231,6 +236,20 @@ export function OpenMediaApp({
       unsubscribeFromOpenMediaMessages(channel);
     };
   }, [messageMode, refreshMessages]);
+  const refreshBridged = useCallback(async () => {
+    if (messageMode !== "open_media" || !currentUserId) return;
+    try {
+      setBridgedConversations(await loadBridgedConversations());
+    } catch {
+      // No bridges on this server, or none connected: nothing to show.
+      setBridgedConversations([]);
+    }
+  }, [currentUserId, messageMode]);
+  useEffect(() => {
+    refreshBridged();
+    const timer = setInterval(refreshBridged, 5000);
+    return () => clearInterval(timer);
+  }, [refreshBridged]);
   const sendMessage = useCallback(
     async (conversationId: string, body: string, replyTo?: Message) => {
       const email = mailConversations.find(
@@ -248,12 +267,20 @@ export function OpenMediaApp({
         await refreshMail();
         return;
       }
+      const bridged = bridgedConversations.find(
+        (conversation) => conversation.id === conversationId,
+      );
+      if (bridged && bridgedSourceOf(bridged)) {
+        await sendBridgedMessage(conversationId, body);
+        await refreshBridged();
+        return;
+      }
       if (messageMode === "matrix")
         await sendMatrixMessage(conversationId, body);
       else await sendOpenMediaMessage(conversationId, currentUserId, body, replyTo?.id);
       await refreshMessages();
     },
-    [currentUserId, mailConversations, messageMode, refreshMail, refreshMessages],
+    [bridgedConversations, currentUserId, mailConversations, messageMode, refreshBridged, refreshMail, refreshMessages],
   );
   const searchProfiles = useCallback(
     (query: string) =>

@@ -121,7 +121,8 @@ export async function attachmentURL(storagePath: string): Promise<string> {
   return data.signedUrl;
 }
 
-async function request<T = unknown>(path: string, init: { method?: string; body?: unknown }, fallbackError: string): Promise<T> {
+/** Authenticated call to the Open Media service (mail, bridged chats). */
+export async function request<T = unknown>(path: string, init: { method?: string; body?: unknown }, fallbackError: string): Promise<T> {
   const token = await getAPIAccessToken();
   let response: Response;
   try {

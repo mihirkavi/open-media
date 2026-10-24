@@ -20,6 +20,7 @@ const localDir = join(root, '.local');
 const appURL = 'http://localhost:8081';
 const apiURL = 'http://127.0.0.1:8787';
 const inboxURL = 'http://127.0.0.1:54324';
+const bridgesEnv = join(root, '.local', 'bridges', 'worker.env');
 
 const nodeBin = findNode22();
 const childEnv = { ...process.env, PATH: `${dirname(nodeBin)}:${process.env.PATH ?? ''}`, FORCE_COLOR: '1' };
@@ -65,6 +66,8 @@ async function main() {
     'MAIL_ALLOW_LOCAL_SERVERS=true',
     // Local-only: lets the app read sign-in codes from the local test inbox.
     `LOCAL_INBOX_URL=${readSmtpEnv().enabled ? '' : inboxURL}`,
+    // Bridged messaging (WhatsApp and others), when `npm run bridges` has been run.
+    existsSync(bridgesEnv) ? readFileSync(bridgesEnv, 'utf8') : '',
     '',
   ].join('\n'), { mode: 0o600 });
 
@@ -77,6 +80,7 @@ async function main() {
     `EXPO_PUBLIC_OPEN_MEDIA_PUBLIC_API_URL=${apiURL}`,
     // Sign-in codes are filled in automatically when they go to the local test inbox.
     `EXPO_PUBLIC_LOCAL_AUTO_SIGN_IN=${readSmtpEnv().enabled ? '' : '1'}`,
+    `EXPO_PUBLIC_CHAT_BRIDGES=${existsSync(bridgesEnv) ? '1' : ''}`,
     '',
   ].join('\n'));
 

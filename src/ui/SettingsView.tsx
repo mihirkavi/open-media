@@ -9,6 +9,7 @@ import { ContactCleanupSuggestion } from '../domain/contactCleaning';
 import { defaultSmtpPort, MailProviderPreset, SmtpSecurity } from '../domain/mailPresets';
 import { radii, ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
+import { BridgedChatsSettings } from './BridgedChatsSettings';
 
 interface SettingsViewProps { onClose: () => void; onMailSynced: () => void; }
 
@@ -25,13 +26,6 @@ const emptyMailForm: MailForm = {
   email: '', protocol: 'imap', host: '', port: 993, secure: true, username: '', password: '',
   sendEnabled: true, smtpHost: '', smtpPort: 587, smtpSecurity: 'starttls', serversEdited: false,
 };
-
-const socialNetworks: Array<{ icon: keyof typeof Ionicons.glyphMap; name: string; reason: string }> = [
-  { icon: 'logo-whatsapp', name: 'WhatsApp', reason: 'Official API covers business numbers only' },
-  { icon: 'logo-facebook', name: 'Messenger', reason: 'Official API covers Facebook Pages only' },
-  { icon: 'logo-instagram', name: 'Instagram', reason: 'Official API covers professional accounts only' },
-  { icon: 'logo-linkedin', name: 'LinkedIn', reason: 'Messaging is limited to approved partners' },
-];
 
 function withEmail(form: MailForm, email: string): MailForm {
   return { ...form, email, username: form.username && form.username !== form.email ? form.username : email };
@@ -310,17 +304,8 @@ export function SettingsView({ onClose, onMailSynced }: SettingsViewProps) {
         {contactsError ? <Text style={styles.error}>{contactsError}</Text> : null}
       </> : null}
 
-      <Text style={styles.sectionTitle}>Social messaging</Text>
-      <Text style={styles.sectionCopy}>These join Messages only through official APIs. Today none of them let apps read personal chats, so they stay off instead of relying on scraping.</Text>
-      <View style={styles.card}>
-        {socialNetworks.map((network, index) => (
-          <View key={network.name} style={[styles.row, index > 0 && styles.rowDivider]}>
-            <View style={styles.rowIcon}><Ionicons name={network.icon} size={18} color={colors.textTertiary} /></View>
-            <View style={styles.rowCopy}><Text style={[styles.rowTitle, styles.muted]}>{network.name}</Text><Text style={styles.rowDetail}>{network.reason}</Text></View>
-            <Text style={styles.badge}>Not available</Text>
-          </View>
-        ))}
-      </View>
+      <Text style={styles.sectionTitle}>Chat networks</Text>
+      <BridgedChatsSettings />
 
     </ScrollView>
   );

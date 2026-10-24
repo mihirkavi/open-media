@@ -16,6 +16,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 
+import { bridgedSourceOf } from "../connectors/bridgesConnector";
 import { attachmentURL } from "../connectors/mailApiConnector";
 import { formatEmailBody } from "../domain/emailBody";
 import { formatListTime, layoutThread } from "../domain/threadLayout";
@@ -23,7 +24,7 @@ import { Conversation, Message, MessageAttachment, PeopleFilter, Person } from "
 import { conversationTitle, filterConversations } from "../domain/selectors";
 import { ThemeColors } from "../theme";
 import { useOpenMediaTheme } from "../themeContext";
-import { SourceMarker } from "./SourceMarker";
+import { SourceMarker, sourceLabel } from "./SourceMarker";
 import type { MessageMode } from "./OpenMediaApp";
 
 interface Props {
@@ -322,8 +323,12 @@ function MessageThread({
     !blocked &&
     (conversation.sourceSummary.includes("open_media") ||
       conversation.sourceSummary.includes("matrix") ||
+      Boolean(bridgedSourceOf(conversation)) ||
       Boolean(conversation.email?.canSend));
   const throughMatrix = conversation.sourceSummary.includes("matrix");
+  // WhatsApp and other bridged networks (ADR 0011).
+  const bridged = bridgedSourceOf(conversation);
+  const bridgedName = bridged ? sourceLabel(bridged) : "";
   const otherPerson = conversation.participants[0];
   const reportableMessage = [...conversation.messages]
     .reverse()
@@ -384,6 +389,8 @@ function MessageThread({
           <Text numberOfLines={1} style={styles.threadMeta}>
             {blocked
               ? "Blocked · messaging paused"
+              : bridged
+              ? `${bridgedName} · through Open Media’s chat bridge`
               : throughMatrix
               ? "Matrix · local development sandbox"
               : conversation.email
@@ -486,7 +493,7 @@ function MessageThread({
             <Text style={styles.emptyTitle}>Say hello</Text>
             <Text style={styles.statusText}>
               Messages you send here are delivered through{" "}
-              {throughMatrix ? "Matrix" : "Open Media"}.
+              {bridged ? bridgedName : throughMatrix ? "Matrix" : "Open Media"}.
             </Text>
           </View>
         )}
@@ -524,7 +531,9 @@ function MessageThread({
               placeholder={
                 conversation.email
                   ? `Reply by email from ${conversation.email.accountEmail}`
-                  : throughMatrix
+                  : bridged
+                    ? `Message on ${bridgedName}`
+                    : throughMatrix
                     ? "Message through Matrix"
                     : "Message"
               }

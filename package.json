@@ -42,12 +42,15 @@
     "nodemailer": "^10.1.1",
     "supabase": "2.114.0",
     "tsx": "^4.23.6",
-    "typescript": "~6.0.3"
+    "typescript": "~6.0.3",
+    "yaml": "2.9.0"
   },
   "scripts": {
     "local": "node --import tsx scripts/local.ts",
     "local:stop": "npx supabase stop",
     "local:email": "node --import tsx scripts/local-email.ts",
+    "bridges": "node --import tsx scripts/bridges.ts",
+    "bridges:stop": "node --import tsx scripts/bridges.ts stop",
     "app:install": "node --import tsx scripts/install-mac-app.ts",
     "app:uninstall": "node --import tsx scripts/install-mac-app.ts --uninstall",
     "start": "expo start",

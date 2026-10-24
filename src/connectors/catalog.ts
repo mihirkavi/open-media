@@ -2,6 +2,8 @@ import { networkConnectors } from './networkFeeds';
 import { ConnectorDescriptor } from './types';
 
 const developmentBuild = typeof __DEV__ !== 'undefined' ? __DEV__ : process.env.NODE_ENV !== 'production';
+// Builds pointed at a server that runs chat bridges (set by `npm run local` when `npm run bridges` is running).
+const bridgesBuild = process.env.EXPO_PUBLIC_CHAT_BRIDGES === '1';
 const matrixConfigured = developmentBuild && Boolean(process.env.EXPO_PUBLIC_MATRIX_BRIDGE_URL);
 
 export const connectorCatalog: ConnectorDescriptor[] = [
@@ -47,13 +49,22 @@ export const connectorCatalog: ConnectorDescriptor[] = [
       { operation: 'send-email', available: false, reason: 'Requires separately granted Mail.Send permission.' },
     ],
   },
+  // Chat bridges (ADR 0011): availability depends on which bridges the server runs; Settings → Chat networks shows it live.
   {
-    id: 'instagram', displayName: 'Instagram', kind: 'social', authentication: 'oauth2-pkce', status: 'unavailable',
-    capabilities: [{ operation: 'read-messages', available: false, reason: 'The official API is limited to professional accounts with approved messaging permission; this connector is not implemented yet.' }, { operation: 'send-message', available: false, reason: 'The recipient must first message the professional account, so this is not a universal consumer DM bridge.' }],
+    id: 'whatsapp', displayName: 'WhatsApp', kind: 'social', authentication: 'protocol-key', status: bridgesBuild ? 'available' : 'planned',
+    capabilities: [
+      { operation: 'read-messages', available: bridgesBuild, reason: bridgesBuild ? undefined : 'Works once Open Media’s server runs the WhatsApp chat bridge (local development today).' },
+      { operation: 'send-message', available: bridgesBuild, reason: bridgesBuild ? undefined : 'Works once Open Media’s server runs the WhatsApp chat bridge.' },
+      { operation: 'attachments', available: false, reason: 'Photos and files show as placeholders; sending them is not implemented yet.' },
+    ],
   },
   {
-    id: 'linkedin', displayName: 'LinkedIn', kind: 'social', authentication: 'oauth2-pkce', status: 'unavailable',
-    capabilities: [{ operation: 'read-messages', available: false, reason: 'LinkedIn does not provide general member-message access to ordinary third-party apps.' }, { operation: 'send-message', available: false, reason: 'Official messaging access requires restricted partner approval.' }],
+    id: 'instagram', displayName: 'Instagram', kind: 'social', authentication: 'protocol-key', status: 'planned',
+    capabilities: [{ operation: 'read-messages', available: false, reason: 'A chat bridge exists (mautrix-meta); it is not running on Open Media’s server yet.' }, { operation: 'send-message', available: false, reason: 'Comes with the Instagram chat bridge.' }],
+  },
+  {
+    id: 'linkedin', displayName: 'LinkedIn', kind: 'social', authentication: 'protocol-key', status: 'planned',
+    capabilities: [{ operation: 'read-messages', available: false, reason: 'A chat bridge exists (mautrix-linkedin); it is not running on Open Media’s server yet.' }, { operation: 'send-message', available: false, reason: 'Comes with the LinkedIn chat bridge.' }],
   },
   {
     id: 'snapchat', displayName: 'Snapchat', kind: 'social', authentication: 'oauth2-pkce', status: 'unavailable',

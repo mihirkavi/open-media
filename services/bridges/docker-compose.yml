@@ -1,0 +1,24 @@
+# Open Media's bridged messaging stack (ADR 0011): a private Matrix homeserver
+# plus mautrix bridges. `npm run bridges` generates the configuration under
+# .local/bridges (gitignored) and starts this file. Both ports bind to
+# 127.0.0.1 only; production puts them behind HTTPS (see README.md).
+name: open-media-bridges
+
+services:
+  synapse:
+    image: matrixdotorg/synapse:v1.163.1
+    restart: unless-stopped
+    volumes:
+      - ../../.local/bridges/synapse:/data
+    ports:
+      - "127.0.0.1:8008:8008"
+
+  whatsapp:
+    image: dock.mau.dev/mautrix/whatsapp:v0.2610.0
+    restart: unless-stopped
+    depends_on:
+      - synapse
+    volumes:
+      - ../../.local/bridges/whatsapp:/data
+    ports:
+      - "127.0.0.1:29318:29318"

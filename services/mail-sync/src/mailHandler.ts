@@ -6,6 +6,7 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { z } from 'zod';
 
+import { Bridges, BridgesEnv } from './bridges.js';
 import { decryptSecret, encryptSecret } from './crypto.js';
 import { createSignedKeyRequest, FarcasterSignerEnv, farcasterPublishingConfigured, forwardSignedMessage, parseEd25519PublicKey } from './farcasterSigner.js';
 import { UserFacingError } from './errors.js';
@@ -21,7 +22,7 @@ import { describeValidationError } from './validation.js';
 
 export interface Limiter { limit(options: { key: string }): Promise<{ success: boolean }> }
 
-export interface MailEnv extends FarcasterSignerEnv, SearchAssistEnv {
+export interface MailEnv extends FarcasterSignerEnv, SearchAssistEnv, BridgesEnv {
   SUPABASE_URL: string;
   SUPABASE_PUBLISHABLE_KEY: string;
   MAIL_CREDENTIALS_KEY: string;
@@ -129,6 +130,34 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
     if (request.method === 'POST' && url.pathname === '/v1/cross-posting/farcaster/messages') {
       if (!await allowed(env.MAIL_SEND_RATE_LIMITER, session.userId)) return rateLimited(headers);
       return json(201, await forwardSignedMessage(await request.arrayBuffer()), headers);
+    }
+
+    // Bridged chats (ADR 0011): every call acts only as this person's own Matrix user.
+    if (url.pathname.startsWith('/v1/bridges')) {
+      const bridges = new Bridges(env, session.userId);
+      if (request.method === 'GET' && url.pathname === '/v1/bridges') return json(200, await bridges.status(), headers);
+      if (request.method === 'GET' && url.pathname === '/v1/bridges/conversations') return json(200, await bridges.conversations(), headers);
+      const roomMatch = request.method === 'POST' && url.pathname.match(/^\/v1\/bridges\/rooms\/([^/]+)\/messages$/);
+      if (roomMatch) {
+        if (!await allowed(env.MAIL_SEND_RATE_LIMITER, session.userId)) return rateLimited(headers);
+        const { body } = (await readJSON(request)) as { body?: unknown };
+        await bridges.send(decodeURIComponent(roomMatch[1]), body);
+        return json(201, { sent: true }, headers);
+      }
+      const loginMatch = request.method === 'POST' && url.pathname.match(/^\/v1\/bridges\/([a-z]+)\/(login\/start|login\/step|login\/cancel|logout)$/);
+      if (loginMatch) {
+        const [, network, action] = loginMatch;
+        const input = (await readJSON(request)) as Record<string, unknown>;
+        if (action === 'login/start') {
+          if (!await allowed(env.MAIL_CONNECT_RATE_LIMITER, session.userId)) return rateLimited(headers);
+          return json(200, await bridges.startLogin(network, input.flow), headers);
+        }
+        if (action === 'login/step') return json(200, await bridges.continueLogin(network, input), headers);
+        if (action === 'login/cancel') { await bridges.cancelLogin(network, input.loginId); return json(200, {}, headers); }
+        await bridges.logout(network, input.loginId);
+        return json(200, {}, headers);
+      }
+      return json(404, { error: 'Not found.' }, headers);
     }
 
     const deleteMatch = request.method === 'DELETE' && url.pathname.match(/^\/v1\/mail-accounts\/([^/]+)$/);

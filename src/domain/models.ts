@@ -1,4 +1,7 @@
-export type MessageSource = 'open_media' | 'matrix' | 'gmail' | 'icloud' | 'imap' | 'instagram' | 'linkedin' | 'snapchat' | 'sms';
+export type MessageSource = 'open_media' | 'matrix' | 'gmail' | 'icloud' | 'imap' | 'instagram' | 'linkedin' | 'snapchat' | 'sms' | BridgedNetwork;
+
+/** Networks reached through Open Media's chat bridges (ADR 0011). */
+export type BridgedNetwork = 'whatsapp' | 'telegram' | 'signal' | 'gmessages' | 'messenger' | 'twitter' | 'bluesky' | 'slack' | 'discord';
 export type MessageChannel = 'native' | 'email' | 'social' | 'sms';
 export type IdentityKind = 'email' | 'handle' | 'phone';
 

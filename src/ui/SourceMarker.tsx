@@ -16,6 +16,15 @@ const sourceDetails: Record<MessageSource, { icon: keyof typeof Ionicons.glyphMa
   linkedin: { icon: 'briefcase-outline', label: 'LinkedIn' },
   snapchat: { icon: 'flash-outline', label: 'Snapchat' },
   sms: { icon: 'chatbubble-outline', label: 'SMS' },
+  whatsapp: { icon: 'logo-whatsapp', label: 'WhatsApp' },
+  telegram: { icon: 'paper-plane-outline', label: 'Telegram' },
+  signal: { icon: 'chatbubbles-outline', label: 'Signal' },
+  gmessages: { icon: 'chatbox-outline', label: 'Google Messages' },
+  messenger: { icon: 'chatbubble-outline', label: 'Messenger' },
+  twitter: { icon: 'at-outline', label: 'X' },
+  bluesky: { icon: 'cloud-outline', label: 'Bluesky' },
+  slack: { icon: 'logo-slack', label: 'Slack' },
+  discord: { icon: 'logo-discord', label: 'Discord' },
 };
 
 export function sourceLabel(source: MessageSource): string {
