@@ -1,6 +1,6 @@
 begin;
 
-select plan(21);
+select plan(23);
 
 insert into auth.users (id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at)
 values
@@ -43,8 +43,9 @@ select set_config('request.jwt.claim.sub', 'b2000000-0000-0000-0000-00000000000b
 select is(public.open_media_public_profile('nightowl')->>'displayName', 'nightowl', 'a tier 4 handle-only person is shown by handle');
 select is((public.open_media_public_profile('nightowl')->>'verified')::boolean, true, 'and has the blue tick');
 select ok(public.open_media_public_profile('nightowl')::text not like '%Hidden Name%', 'their declared name never appears');
-select is((select count(*)::int from public.profiles where id = 'c3000000-0000-0000-0000-00000000000c'), 0, 'their profile row cannot be read directly');
+select is((select count(*)::int from public.profiles where id = 'c3000000-0000-0000-0000-00000000000c'), 0, 'a handle-only profile row cannot be read directly');
 select is((select count(*)::int from public.identity_verifications), 0, 'nobody else can read a verification');
+select is((select count(*)::int from public.profiles where id = 'a1000000-0000-0000-0000-00000000000a'), 1, 'a public profile row stays readable for older app versions');
 
 -- Tier 5: the owner chooses to show the legal name; the server fills it in.
 reset role;
@@ -69,6 +70,7 @@ select ok(public.open_media_public_profile('priv')::text not like '%secret bio%'
 
 set local role authenticated;
 select set_config('request.jwt.claim.sub', 'b2000000-0000-0000-0000-00000000000b', true);
+select is((select count(*)::int from public.profiles where id = 'a1000000-0000-0000-0000-00000000000a'), 0, 'a private profile row is not readable by strangers');
 select is(public.open_media_follow('priv')->>'status', 'pending', 'following a private account sends a request');
 select is(public.open_media_public_post('d4000000-0000-0000-0000-00000000000d'), null, 'a pending request does not reveal posts');
 select throws_ok($$ insert into public.follows (follower_id, followee_id, status) values (auth.uid(), 'a1000000-0000-0000-0000-00000000000a', 'accepted') $$, '42501', null, 'nobody can accept their own request');
