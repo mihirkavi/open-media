@@ -18,18 +18,7 @@
     "mcp"
   ],
   "skills": "./skills/",
-  "mcpServers": {
-    "open-media": {
-      "url": "https://convo-mail-sync.convo-mail-sync.workers.dev/open/mcp"
-    },
-    "open-media-docs": {
-      "url": "https://convo-mail-sync.convo-mail-sync.workers.dev/docs/mcp"
-    },
-    "open-media-account": {
-      "url": "https://convo-mail-sync.convo-mail-sync.workers.dev/me/mcp",
-      "bearer_token_env_var": "OPEN_MEDIA_TOKEN"
-    }
-  },
+  "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Open Media",
     "shortDescription": "One open feed and inbox across social networks",

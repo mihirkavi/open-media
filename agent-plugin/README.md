@@ -33,12 +33,12 @@ The public and docs servers need nothing. For `open-media-account`, the person c
 
 ## Files
 
-- `plugin.json` and `mcp.json`: the portable Agent Plugins manifest (agent-plugins.org).
 - `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`: the Claude Code and Codex manifests. (Those two folders hold only their manifest, as both tools require.)
-- `.mcp.json`: the MCP servers for Claude Code and Codex.
+- `.mcp.json`: the MCP servers, read by both. The account server carries the token two ways: `headers` with `${OPEN_MEDIA_TOKEN}` for Claude Code, and `bearer_token_env_var` for Codex.
+- There is deliberately no portable root `plugin.json`: when one is present, Codex ignores the servers in `.codex-plugin/plugin.json`.
 - `skills/`: generated from `src/domain/agentSkills.ts` with `npm run agent-plugin:sync`; the Worker serves the same files at `/.well-known/agent-skills/`.
 - `assets/`: the logo.
 
 ## Notes for agents editing this folder
 
-Edit skills in `src/domain/agentSkills.ts`, never the generated `SKILL.md` files, then run `npm run agent-plugin:sync`. Keep the version the same in all three manifests. Privacy: https://convo-mail-sync.convo-mail-sync.workers.dev/privacy.
+Edit skills in `src/domain/agentSkills.ts`, never the generated `SKILL.md` files, then run `npm run agent-plugin:sync`. Keep the version the same in both manifests. Privacy: https://convo-mail-sync.convo-mail-sync.workers.dev/privacy.
