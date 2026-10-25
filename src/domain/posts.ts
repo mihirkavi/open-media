@@ -12,6 +12,16 @@ export interface PostAuthor {
   avatarUrl?: string;
   /** Open Media identity verified by the identity provider. Never set from another network's badge. */
   verified?: boolean;
+  /** The author accepts tips on Open Media (ADR 0013, phase 6). */
+  tipsEnabled?: boolean;
+}
+
+/** A paid post's price, and its paid part once the viewer unlocked it (ADR 0013, phase 6). */
+export interface PostPaid {
+  priceMinor: number;
+  currency: string;
+  unlocked: boolean;
+  body?: string;
 }
 
 export interface PostMedia {
@@ -52,6 +62,8 @@ export interface SocialPost {
   listing?: PostListing;
   /** A real-world event read from public event listings; registration happens on the official page. */
   event?: PostEvent;
+  /** The body is a free preview; the rest is paid for once. */
+  paid?: PostPaid;
 }
 
 export interface FeedExplanation {

@@ -1,11 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Switch, View } from 'react-native';
 
 import { getSupabaseClient } from '../auth/supabase';
 import { apiConfigured } from '../connectors/mailApiConnector';
 import { browserWalletsSupported, connectBrowserWallet, signWalletLink } from '../connectors/wallets/browserWallet';
-import { linkWallet, loadMyPayments, loadPaymentSetup, PaymentSetup, refreshPayouts, removeWallet, startPayouts } from '../data/paymentsService';
+import { linkWallet, loadMyPayments, loadPaymentSetup, PaymentSetup, refreshPayouts, removeWallet, setTipsEnabled, startPayouts } from '../data/paymentsService';
 import { formatMoney, Payment, paymentChains, paymentStatusLabels } from '../domain/payments';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
@@ -99,6 +99,15 @@ export function PaymentsSettings() {
               {busy === 'wallet' ? <ActivityIndicator color={colors.text} /> : <Text style={styles.smallText}>Link a browser wallet</Text>}
             </Pressable>
             : <Text style={styles.hint}>Link wallets in the Open Media web app for now.</Text> : null}
+        </View>
+
+        <View style={[styles.row, styles.divider]}>
+          <Ionicons name="heart-outline" size={20} color={colors.text} />
+          <View style={styles.grow}>
+            <Text style={styles.rowTitle}>Accept tips</Text>
+            <Text style={styles.hint}>{cardReady || setup.wallets.length ? 'People can tip you from any of your posts, by card or USDC.' : 'Set up card payments or link a wallet first, so tips can reach you.'}</Text>
+          </View>
+          <Switch accessibilityLabel="Accept tips" value={setup.tipsEnabled} disabled={Boolean(busy) || (!cardReady && !setup.wallets.length && !setup.tipsEnabled)} onValueChange={(enabled) => run('tips', () => setTipsEnabled(enabled))} trackColor={{ false: colors.border, true: colors.text }} thumbColor={colors.surface} />
         </View>
 
         <View style={[styles.block, styles.divider]}>

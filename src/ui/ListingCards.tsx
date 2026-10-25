@@ -2,7 +2,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Switch, View } from 'react-native';
 
-import { eventPriceText, eventWhen, listingCurrencies, ListingInput, listingLine, ListingRating, PostEvent, PostListing, providerName } from '../domain/listings';
+import { eventPriceText, eventWhen, formatPrice, listingCurrencies, ListingInput, listingLine, ListingRating, PostEvent, PostListing, providerName } from '../domain/listings';
+import { PostPaid } from '../domain/posts';
 import { safeHttpsUrl } from '../domain/networkPosts';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
@@ -96,6 +97,42 @@ export function ListingFields({ value, onChange, onRemove, disabled }: { value: 
   </View>;
 }
 
+export interface PaidPostInput { price: string; text: string }
+
+/** The composer's paid-post fields: the price and the part only buyers can read. */
+export function PaidPostFields({ value, onChange, onRemove, disabled }: { value: PaidPostInput; onChange: (value: PaidPostInput) => void; onRemove: () => void; disabled?: boolean }) {
+  const { colors } = useOpenMediaTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  return <View style={styles.fields}>
+    <View style={styles.row}>
+      <View style={styles.kind}><Ionicons name="lock-closed-outline" size={13} color={colors.textSecondary} /><Text style={styles.kindText}>Paid post</Text></View>
+      <Pressable accessibilityRole="button" accessibilityLabel="Make this post free" disabled={disabled} onPress={onRemove} style={styles.remove}><Ionicons name="close" size={18} color={colors.textSecondary} /></Pressable>
+    </View>
+    <TextInput accessibilityLabel="Paid part" multiline value={value.text} onChangeText={(text) => onChange({ ...value, text })} maxLength={10000} placeholder="What people get when they pay" placeholderTextColor={colors.textTertiary} style={[styles.input, styles.paidText]} editable={!disabled} />
+    <TextInput accessibilityLabel="Price in US dollars" value={value.price} onChangeText={(price) => onChange({ ...value, price })} keyboardType="decimal-pad" placeholder="Price in USD (at least 0.50)" placeholderTextColor={colors.textTertiary} style={styles.input} editable={!disabled} />
+    <Text style={styles.small}>Your post text above is the free preview everyone sees. The paid part is shown only to you and people who paid, and is never sent to other networks.</Text>
+  </View>;
+}
+
+/** The paid part of a post: locked with its price, or shown once unlocked. */
+export function PaidPostBlock({ paid, onUnlock }: { paid: PostPaid; onUnlock?: () => void }) {
+  const { colors } = useOpenMediaTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const price = formatPrice(paid.priceMinor, paid.currency);
+  if (paid.unlocked && paid.body) return <View style={styles.card}>
+    <View style={styles.kind}><Ionicons name="lock-open-outline" size={13} color={colors.textSecondary} /><Text style={styles.kindText}>Paid post</Text></View>
+    <Text selectable style={styles.paidBody}>{paid.body}</Text>
+  </View>;
+  return <View accessibilityLabel={`Paid post, ${price} to unlock`} style={styles.card}>
+    <View style={styles.cardTop}>
+      <View style={styles.kind}><Ionicons name="lock-closed-outline" size={13} color={colors.textSecondary} /><Text style={styles.kindText}>Paid post</Text></View>
+      <Text style={styles.when}>{price}</Text>
+    </View>
+    <Text style={styles.line}>The rest of this post is for people who pay once.</Text>
+    {onUnlock ? <Pressable accessibilityRole="button" accessibilityHint="Shows the price and fees before you pay" onPress={onUnlock} style={styles.primary}><Text style={styles.primaryText}>{`Unlock for ${price}`}</Text></Pressable> : <Text style={styles.small}>Sign in to unlock it.</Text>}
+  </View>;
+}
+
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     card: { marginTop: 13, padding: 14, gap: 6, borderRadius: 16, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceAlt },
@@ -125,5 +162,7 @@ function createStyles(colors: ThemeColors) {
     remove: { marginLeft: 'auto', width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: 16 },
     input: { minHeight: 42, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, color: colors.text, fontSize: 15, outlineStyle: 'none' } as object,
     toggle: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    paidText: { minHeight: 90, paddingTop: 10, textAlignVertical: 'top' },
+    paidBody: { color: colors.text, fontSize: 15, lineHeight: 22 },
   });
 }

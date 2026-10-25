@@ -1,5 +1,5 @@
 import { request } from '../connectors/mailApiConnector';
-import { OnchainTransfer, Payment, PaymentChain, PaymentRail } from '../domain/payments';
+import { OnchainTransfer, Payment, PaymentChain, PaymentContextType, PaymentRail } from '../domain/payments';
 
 /**
  * Payments through the Open Media service (ADR 0013, phase 5). The service creates Stripe
@@ -9,6 +9,7 @@ export interface PaymentSetup {
   card: { chargesEnabled: boolean; payoutsEnabled: boolean; detailsSubmitted: boolean; livemode: boolean } | null;
   wallets: { id: string; chain: PaymentChain; address: string; verifiedAt: string }[];
   fees: Record<string, number>;
+  tipsEnabled: boolean;
   available: { card: boolean; cardTestMode: boolean; chains: PaymentChain[]; live: boolean; note: string };
 }
 
@@ -44,8 +45,23 @@ export async function loadMyPayments(): Promise<Payment[]> {
   return Array.isArray(result) ? result : [];
 }
 
-export function payForListing(postId: string, rail: PaymentRail, chain: PaymentChain | null, idempotencyKey: string): Promise<{ payment: PaymentWithTransfer; checkoutUrl?: string }> {
-  return request('/v1/me/payments', { method: 'POST', body: { contextType: 'listing', contextId: postId, rail, ...(chain ? { chain } : {}), idempotencyKey } }, 'The payment could not start.');
+export interface PostPaymentOptions { card: boolean; chains: PaymentChain[]; tipsEnabled: boolean; paid: { priceMinor: number; currency: string; unlocked: boolean } | null; fees: Record<string, number>; testMode: boolean }
+
+export function loadPostPaymentOptions(postId: string): Promise<PostPaymentOptions> {
+  return request<PostPaymentOptions>(`/v1/me/posts/${encodeURIComponent(postId)}/payment-options`, {}, 'Payment options are unavailable right now.');
+}
+
+/** Starts paying for a listing, a tip (the one amount the payer chooses) or a paid post. */
+export function payFor(contextType: PaymentContextType, postId: string, rail: PaymentRail, chain: PaymentChain | null, idempotencyKey: string, amountMinor?: number): Promise<{ payment: PaymentWithTransfer; checkoutUrl?: string }> {
+  return request('/v1/me/payments', { method: 'POST', body: { contextType, contextId: postId, rail, ...(chain ? { chain } : {}), idempotencyKey, ...(contextType === 'tip' ? { amountMinor } : {}) } }, 'The payment could not start.');
+}
+
+export function setTipsEnabled(enabled: boolean): Promise<{ tipsEnabled: boolean }> {
+  return request('/v1/me/payments/tips', { method: 'PUT', body: { enabled } }, 'Could not change tips.');
+}
+
+export function loadPaidContent(postId: string): Promise<{ priceMinor: number; currency: string; unlocked: boolean; body: string | null }> {
+  return request(`/v1/me/posts/${encodeURIComponent(postId)}/paid`, {}, 'Could not load the post.');
 }
 
 export function submitTransaction(paymentId: string, txHash: string): Promise<{ payment: PaymentWithTransfer; detail?: string }> {

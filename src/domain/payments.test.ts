@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { erc20TransferData, formatMoney, listingCharge, onchainTransfer, parseWalletLinkMessage, paymentBreakdown, walletLinkMessage } from './payments';
+import { erc20TransferData, formatMoney, previewCharge, onchainTransfer, parseWalletLinkMessage, paymentBreakdown, walletLinkMessage } from './payments';
 
 const user = '0b6f2a9e-1c51-4d6c-9c4b-5f2d3c1a7e10';
 const wallet = '0xAbCdEf0000000000000000000000000000000001';
@@ -43,9 +43,9 @@ test('the confirmation sheet names the recipient, the amount and every fee', () 
 });
 
 test('the preview charges what the database will: cents by card, USDC base units on-chain', () => {
-  assert.deepEqual(listingCharge(2500, 'USD', 'card', null, 0), { amountMinor: 2500, currency: 'USD', rail: 'card', provider: 'stripe', platformFeeMinor: 0, providerFeeEstimateMinor: 103 });
-  assert.equal(listingCharge(2500, 'USD', 'onchain', 'base-sepolia', 500).amountMinor, 25_000_000);
-  assert.equal(listingCharge(2500, 'USD', 'onchain', 'base-sepolia', 500).platformFeeMinor, 0, 'no Open Media fee wallet to wallet');
-  assert.equal(listingCharge(2500, 'EUR', 'card', null, 500).providerFeeEstimateMinor, null);
-  assert.equal(listingCharge(2500, 'EUR', 'card', null, 500).platformFeeMinor, 125);
+  assert.deepEqual(previewCharge(2500, 'USD', 'card', null, 0), { amountMinor: 2500, currency: 'USD', rail: 'card', provider: 'stripe', platformFeeMinor: 0, providerFeeEstimateMinor: 103 });
+  assert.equal(previewCharge(2500, 'USD', 'onchain', 'base-sepolia', 500).amountMinor, 25_000_000);
+  assert.equal(previewCharge(2500, 'USD', 'onchain', 'base-sepolia', 500).platformFeeMinor, 0, 'no Open Media fee wallet to wallet');
+  assert.equal(previewCharge(2500, 'EUR', 'card', null, 500).providerFeeEstimateMinor, null);
+  assert.equal(previewCharge(2500, 'EUR', 'card', null, 500).platformFeeMinor, 125);
 });

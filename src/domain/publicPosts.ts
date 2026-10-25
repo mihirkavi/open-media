@@ -1,4 +1,4 @@
-import { SocialPost } from './posts';
+import { PostPaid, SocialPost } from './posts';
 import { isStoredPostVideo, postVideoPublicUrl, StoredPostVideo } from './postVideo';
 import { isListing, PostListing } from './listings';
 
@@ -7,11 +7,18 @@ export interface PublicPostRecord {
   id: string;
   body: string;
   createdAt: string;
-  author: { id: string; handle: string; displayName: string; avatarUrl: string | null; verified?: boolean };
+  author: { id: string; handle: string; displayName: string; avatarUrl: string | null; verified?: boolean; tipsEnabled?: boolean };
   /** One short video, when the post has one (ADR 0009). */
   video?: StoredPostVideo | null;
   /** A product or service the author offers (ADR 0013). */
   listing?: PostListing | null;
+  /** A paid part: its price, and the text itself only for people who unlocked it. */
+  paid?: { priceMinor: number; currency: string; unlocked: boolean; body?: string | null } | null;
+}
+
+function paidFrom(record: PublicPostRecord['paid']): PostPaid | undefined {
+  if (!record || !Number.isInteger(record.priceMinor) || typeof record.currency !== 'string') return undefined;
+  return { priceMinor: record.priceMinor, currency: record.currency, unlocked: record.unlocked === true, ...(record.unlocked === true && typeof record.body === 'string' ? { body: record.body } : {}) };
 }
 
 export interface PublicProfileRecord {
@@ -40,6 +47,7 @@ export function socialPostFromPublic(record: PublicPostRecord, supabaseUrl?: str
       handle: `@${record.author.handle}`,
       initials: initialsFor(record.author.displayName),
       ...(record.author.verified === true ? { verified: true } : {}),
+      ...(record.author.tipsEnabled === true ? { tipsEnabled: true } : {}),
     },
     body: record.body,
     kind: video ? 'video' : 'text',
@@ -57,6 +65,7 @@ export function socialPostFromPublic(record: PublicPostRecord, supabaseUrl?: str
       }],
     } : {}),
     ...(isListing(record.listing) ? { listing: record.listing } : {}),
+    ...(paidFrom(record.paid) ? { paid: paidFrom(record.paid) } : {}),
     topics: record.listing ? [record.listing.kind === 'product' ? 'products' : 'services'] : [],
     provenance: { connectorId: 'open-media', externalId: record.id },
     relevance: { followsAuthor: false, selectedInterestMatches: [] },

@@ -209,6 +209,17 @@ Built:
 
 Not yet (phase 5): the acceptance runs need the owner's keys: a Stripe test-mode card payment end to end needs `STRIPE_SECRET_KEY` (test) and the payments webhook secret, and a Base Sepolia USDC payment needs a funded test wallet. Phones can pay by card but not with USDC yet (WalletConnect needs Open Media's own project id). Refunds are recorded from Stripe but started in Stripe's dashboard. Deleting an account deletes its payment records for both sides.
 
+### Phase 6 status (2026-10-25)
+
+Built:
+
+- **Tips** (`supabase/migrations/20261027130000_creator_payments.sql`): creators turn tips on in Profile → Payments (`profiles.tips_enabled`, changed only through `open_media_set_tips_enabled`). "Tip @handle" appears in a post's ⋯ menu; the payer picks $2, $5, $10 or $20 (the database accepts 1 to 500 US dollars), by card or USDC, through the same confirmation sheet and payment intents as listings.
+- **Paid posts**: the composer's lock button adds a paid part and a price (at least 0.50). The post text is the free preview everyone sees; `paid_posts` holds the paid part, which `app_private.paid_json` returns only to the author and to people with a confirmed payment for that post. A refund locks it again, a post can't be bought twice, and the paid part never reaches the public API, agents' public tools or other networks.
+- **Agents and apps**: `PUT /v1/me/payments/tips`, `POST /v1/me/paid-posts`, `GET /v1/me/posts/{id}/payment-options`, `GET /v1/me/posts/{id}/paid`, and `POST /v1/me/payments` with `contextType` `tip` or `paid_post`.
+- **Tests**: 17 pgTAP checks (guests and non-payers never get the paid part, starting a payment unlocks nothing, confirmation unlocks, refund relocks, no double purchase, tip limits, no tipping yourself, tips only when turned on).
+
+Not yet (phase 6): the acceptance run (a test-mode tip reaching a creator's Stripe account with fees shown) needs the owner's Stripe test keys, like phase 5. Paid posts are text only; there are no subscriptions or memberships.
+
 ---
 
 ## 5. Owner decisions (2026-10-24)

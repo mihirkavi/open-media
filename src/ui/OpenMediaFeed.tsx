@@ -1,16 +1,17 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Image, Linking, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { EventCard, ListingCard, ListingFields } from './ListingCards';
-import { PaymentSheet } from './PaymentSheet';
+import { EventCard, ListingCard, ListingFields, PaidPostBlock, PaidPostFields, PaidPostInput } from './ListingCards';
+import { PaymentSheet, PaymentTarget } from './PaymentSheet';
 import { PersonLink, targetForPost, usePeople } from './people';
 import { Text, TextInput } from './Text';
 
 import { createClientId } from '../data/openMediaService';
 import { crossPost } from '../data/crossPostService';
 import { interleaveEvents, loadUpcomingEvents } from '../data/eventsService';
-import { PostReportReason, publishListing, publishPost, rateListing } from '../data/postService';
-import { formatPrice, ListingInput, validateListing } from '../domain/listings';
+import { PostReportReason, publishListing, publishPaidPost, publishPost, rateListing } from '../data/postService';
+import { loadPaidContent } from '../data/paymentsService';
+import { formatPrice, ListingInput, parsePrice, validateListing } from '../domain/listings';
 import { crossPostVideo, discardPreparedVideo, draftCrossPostVideo, prepareVideo, PreparedVideo, uploadPostVideo, UploadedVideo, VideoError } from '../data/videoUpload';
 import { CrossPostOutcome, CrossPostVideo, destinationSummary, outcomeSummary, prepareCrossPost } from '../domain/crossPosting';
 import { NetworkId, networks, safeHttpsUrl, sourceName } from '../domain/networkPosts';
@@ -122,6 +123,7 @@ function Composer({ viewer, open, onOpenChange, onPublished }: { viewer: FeedVie
   const [progress, setProgress] = useState(0);
   // Set when this post offers a product or service (ADR 0013).
   const [offer, setOffer] = useState<ListingInput>();
+  const [paidPart, setPaidPart] = useState<PaidPostInput>();
   const upload = useRef<AbortController>(undefined);
   useEffect(() => { if (open) setTimeout(() => input.current?.focus(), 0); }, [open]);
   useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(''), 6000); return () => clearTimeout(timer); }, [notice]);
@@ -149,6 +151,9 @@ function Composer({ viewer, open, onOpenChange, onPublished }: { viewer: FeedVie
     const text = body; const postId = clientId.current; const chosen = destinations; const attached = video;
     const checked = offer ? validateListing(offer) : undefined;
     if (checked && 'error' in checked) { setError(checked.error); return; }
+    const paidPrice = paidPart ? parsePrice(paidPart.price, 'USD') : null;
+    if (paidPart && (!text.trim() || !paidPart.text.trim())) { setError('A paid post needs a free preview above and a paid part.'); return; }
+    if (paidPart && (typeof paidPrice !== 'number' || paidPrice < 50)) { setError('Set a price of at least 0.50 US dollars.'); return; }
     try {
       let uploaded: UploadedVideo | undefined;
       if (attached) {
@@ -157,11 +162,13 @@ function Composer({ viewer, open, onOpenChange, onPublished }: { viewer: FeedVie
         uploaded = await uploadPostVideo(attached, postId, setProgress, upload.current.signal);
       }
       setStage('publishing');
-      const post = checked ? await publishListing(text, postId, checked.listing) : await publishPost(text, postId, uploaded?.stored);
+      const post = checked ? await publishListing(text, postId, checked.listing)
+        : paidPart ? await publishPaidPost(text, postId, paidPart.text, paidPrice as number, 'USD')
+        : await publishPost(text, postId, uploaded?.stored);
       // Other networks get the listing as plain text: what it is, the price, and the caption.
       const shared = checked ? [`${checked.listing.title} · ${formatPrice(checked.listing.priceMinor, checked.listing.currency)}`, text.trim()].filter(Boolean).join('\n\n') : text;
       const sent = attached && uploaded ? crossPostVideo(attached, uploaded, post.media?.[0]?.altText ?? 'Video') : undefined;
-      setBody(''); setOffer(undefined); clientId.current = createClientId(); setOverride(undefined); setShowDestinations(false); onPublished(post);
+      setBody(''); setOffer(undefined); setPaidPart(undefined); clientId.current = createClientId(); setOverride(undefined); setShowDestinations(false); onPublished(post);
       setStage('crossPosting');
       finish(chosen.length ? await crossPost(shared, chosen, postId, sent) : [], shared, postId, sent);
       setVideo(undefined);
@@ -196,6 +203,7 @@ function Composer({ viewer, open, onOpenChange, onPublished }: { viewer: FeedVie
   return <View style={[styles.composer, styles.composerOpen]}>
     <View style={styles.composerTop}><Avatar initials={viewer.initials} /><TextInput ref={input} accessibilityLabel="Post text" multiline maxLength={maxPostLength + 200} value={body} onChangeText={setBody} placeholder={video ? 'Say something about your video (optional)' : offer ? 'Describe it (optional)' : 'What’s on your mind?'} placeholderTextColor={colors.textTertiary} style={styles.composerInput} /></View>
     {offer ? <ListingFields value={offer} onChange={setOffer} onRemove={() => setOffer(undefined)} disabled={busy} /> : null}
+    {paidPart ? <PaidPostFields value={paidPart} onChange={setPaidPart} onRemove={() => setPaidPart(undefined)} disabled={busy} /> : null}
     {video ? <View style={styles.attachment}>
       <FeedVideo uri={video.previewUri} streaming="progressive" posterUrl={undefined} aspectRatio={video.width / video.height} altText="Your video" />
       <View style={styles.attachmentRow}>
@@ -231,8 +239,9 @@ function Composer({ viewer, open, onOpenChange, onPublished }: { viewer: FeedVie
       })}
     </View> : null}
     <View style={styles.composerFooter}>
-      {!video && !offer ? <Pressable accessibilityRole="button" accessibilityLabel="Offer a product or service" disabled={busy} onPress={() => setOffer({ kind: 'product', title: '', currency: 'USD' })} style={styles.attachButton}><Ionicons name="pricetag-outline" size={20} color={colors.textSecondary} /></Pressable> : null}
-      {!video && !offer ? <>
+      {!video && !offer && !paidPart ? <Pressable accessibilityRole="button" accessibilityLabel="Offer a product or service" disabled={busy} onPress={() => setOffer({ kind: 'product', title: '', currency: 'USD' })} style={styles.attachButton}><Ionicons name="pricetag-outline" size={20} color={colors.textSecondary} /></Pressable> : null}
+      {!video && !offer && !paidPart ? <Pressable accessibilityRole="button" accessibilityLabel="Make a paid post" disabled={busy} onPress={() => setPaidPart({ price: '', text: '' })} style={styles.attachButton}><Ionicons name="lock-closed-outline" size={20} color={colors.textSecondary} /></Pressable> : null}
+      {!video && !offer && !paidPart ? <>
         <Pressable accessibilityRole="button" accessibilityLabel="Add a video" disabled={busy} onPress={() => attach('library')} style={styles.attachButton}><Ionicons name="film-outline" size={20} color={colors.textSecondary} /></Pressable>
         {canRecordVideo ? <Pressable accessibilityRole="button" accessibilityLabel="Record a video" disabled={busy} onPress={() => attach('camera')} style={styles.attachButton}><Ionicons name="videocam-outline" size={20} color={colors.textSecondary} /></Pressable> : null}
       </> : null}
@@ -272,16 +281,19 @@ export function PostCard({ post, mode, viewer, onDelete, onReport }: { post: Soc
   // External posts can be long; Open Media posts are short enough to show whole.
   const long = !native && !post.title && (post.body.length > 420 || post.body.split('\n').length > 8);
   const [showAll, setShowAll] = useState(false);
-  const [buying, setBuying] = useState(false);
+  const [payTarget, setPayTarget] = useState<PaymentTarget>();
+  const [paid, setPaid] = useState(post.paid);
+  const reloadPaid = () => { loadPaidContent(post.id).then((content) => setPaid({ priceMinor: content.priceMinor, currency: content.currency, unlocked: content.unlocked, ...(content.body ? { body: content.body } : {}) })).catch(() => undefined); };
   const people = usePeople();
   return <View style={styles.post}>
     <View style={styles.postHeader}><PersonLink target={targetForPost(post)} label={`Open ${post.author.displayName}’s profile`} style={styles.authorLink}><View style={styles.authorLinkInner}><Avatar initials={post.author.initials} imageUrl={post.author.avatarUrl} /><View style={styles.author}><View style={styles.nameLine}><Text numberOfLines={1} style={[styles.authorName, styles.nameShrink]}>{post.author.displayName}</Text>{post.author.verified ? <VerifiedTick size={14} /> : null}</View><Text numberOfLines={1} style={styles.meta}>{post.event ? `Upcoming event · from ${post.author.handle}` : `${post.author.handle} · ${formatRelativeTime(post.createdAt)} · ${sourceName(post.provenance.connectorId)}`}</Text></View></View></PersonLink>{canAct ? <Pressable accessibilityRole="button" accessibilityLabel="Post options" accessibilityState={{ expanded: menuOpen }} onPress={() => setMenuOpen((value) => !value)} style={styles.menuButton}><Ionicons name={menuOpen ? 'close' : 'ellipsis-horizontal'} size={18} color={colors.textSecondary} /></Pressable> : null}</View>
-    {menuOpen ? <PostMenu own={own} onDelete={() => onDelete!(post.id)} onReport={(reason) => onReport!(post.id, reason)} /> : null}
+    {menuOpen ? <PostMenu own={own} onDelete={() => onDelete!(post.id)} onReport={(reason) => onReport!(post.id, reason)} onTip={native && !own && viewer && post.author.tipsEnabled ? () => { setMenuOpen(false); setPayTarget({ kind: 'tip', postId: post.id }); } : undefined} tipTo={post.author.handle} /> : null}
     {post.title ? <Text selectable style={styles.postTitle}>{post.title}</Text> : null}
     {post.body && post.body !== post.listing?.title ? <Text selectable numberOfLines={long && !showAll ? 8 : undefined} style={[styles.body, post.title ? styles.bodyAfterTitle : null]}>{post.body}</Text> : null}
-    {post.listing ? <ListingCard listing={post.listing} onMessage={native && !own && people?.message ? () => people.message!(post.author.handle.replace(/^@/, '')) : undefined} onRate={native && !own && viewer ? (stars) => rateListing(post.id, stars) : undefined} onBuy={native && !own && viewer ? () => setBuying(true) : undefined} /> : null}
+    {post.listing ? <ListingCard listing={post.listing} onMessage={native && !own && people?.message ? () => people.message!(post.author.handle.replace(/^@/, '')) : undefined} onRate={native && !own && viewer ? (stars) => rateListing(post.id, stars) : undefined} onBuy={native && !own && viewer && post.listing ? () => setPayTarget({ kind: 'listing', postId: post.id, listing: post.listing! }) : undefined} /> : null}
     {post.event ? <EventCard event={post.event} /> : null}
-    {buying && post.listing ? <PaymentSheet postId={post.id} listing={post.listing} seller={post.author.handle.replace(/^@/, '')} onClose={() => setBuying(false)} /> : null}
+    {paid ? <PaidPostBlock paid={paid} onUnlock={native && !own && viewer && !paid.unlocked ? () => setPayTarget({ kind: 'paid_post', postId: post.id, paid }) : undefined} /> : null}
+    {payTarget ? <PaymentSheet target={payTarget} recipient={post.author.handle.replace(/^@/, '')} onClose={() => setPayTarget(undefined)} onPaid={payTarget.kind === 'paid_post' ? reloadPaid : undefined} /> : null}
     {long ? <Pressable accessibilityRole="button" accessibilityState={{ expanded: showAll }} onPress={() => setShowAll((value) => !value)} style={styles.showMore}><Text style={styles.whyText}>{showAll ? 'Show less' : 'Show more'}</Text></Pressable> : null}
     {image?.kind === 'image' && image.url ? <PostImage url={image.url} altText={image.altText} /> : image?.kind === 'video' && image.url ? <FeedVideo uri={image.url} streaming={image.streaming} posterUrl={image.posterUrl} aspectRatio={image.aspectRatio} altText={image.altText} /> : image ? <View accessibilityLabel={image.altText} style={[styles.media, post.kind === 'video' && styles.video]}><Ionicons name={post.kind === 'video' ? 'play' : 'image-outline'} size={30} color="#FFFFFF" /><Text style={styles.alt}>{image.altText}</Text></View> : null}
     <View style={styles.actions}>{post.engagement ? <><Action icon="chatbubble-outline" count={post.engagement.replies} /><Action icon="repeat-outline" count={post.engagement.reposts} /><Action icon="heart-outline" count={post.engagement.likes} /></> : null}{original ? <Pressable accessibilityRole="link" accessibilityLabel={`Open this post on ${sourceName(post.provenance.connectorId)}`} onPress={() => { Linking.openURL(original).catch(() => undefined); }} style={styles.original}><Text style={styles.whyText}>Open on {sourceName(post.provenance.connectorId)}</Text><Ionicons name="open-outline" size={12} color={colors.textSecondary} /></Pressable> : null}<Pressable accessibilityRole="button" accessibilityState={{ expanded }} onPress={() => setExpanded((value) => !value)} style={[styles.why, original ? styles.whyAfterLink : null]}><Text style={styles.whyText}>Why this?</Text></Pressable></View>
@@ -289,11 +301,12 @@ export function PostCard({ post, mode, viewer, onDelete, onReport }: { post: Soc
   </View>;
 }
 
-function PostMenu({ own, onDelete, onReport }: { own: boolean; onDelete: () => Promise<void>; onReport: (reason: PostReportReason) => Promise<void> }) {
+function PostMenu({ own, onDelete, onReport, onTip, tipTo }: { own: boolean; onDelete: () => Promise<void>; onReport: (reason: PostReportReason) => Promise<void>; onTip?: () => void; tipTo?: string }) {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
   const [busy, setBusy] = useState(false); const [notice, setNotice] = useState(''); const [confirming, setConfirming] = useState(false);
   const run = async (action: () => Promise<void>, done: string) => { setBusy(true); setNotice(''); try { await action(); setNotice(done); } catch (reason) { setNotice(reason instanceof Error ? reason.message : 'That didn’t work. Try again.'); } finally { setBusy(false); } };
   return <View style={styles.menu}>
+    {onTip && !busy && !notice ? <Pressable accessibilityRole="button" onPress={onTip} style={styles.menuItem}><Ionicons name="heart-outline" size={16} color={colors.text} /><Text style={styles.menuLabel}>{`Tip ${tipTo ?? 'the creator'}`}</Text></Pressable> : null}
     {busy ? <ActivityIndicator color={colors.text} /> : notice ? <Text accessibilityLiveRegion="polite" style={styles.menuNotice}>{notice}</Text> : own
       ? confirming
         ? <><Text style={styles.menuLabel}>Delete this post permanently? It disappears for everyone, including the public API.</Text><View style={styles.menuRow}><Pressable accessibilityRole="button" onPress={() => run(onDelete, 'Post deleted.')} style={[styles.menuChip, styles.menuChipDanger]}><Text style={styles.menuDanger}>Delete</Text></Pressable><Pressable accessibilityRole="button" onPress={() => setConfirming(false)} style={styles.menuChip}><Text style={styles.menuText}>Cancel</Text></Pressable></View></>

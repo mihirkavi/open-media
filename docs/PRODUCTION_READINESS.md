@@ -20,9 +20,10 @@ This checklist defines “production ready” for the current onboarding private
 ## Phase 5: payments (built 2026-10-25, not deployed)
 
 - [x] `20261027120000_payments.sql`: 22 pgTAP checks and a clean lint locally; Worker and domain tests; on-chain checks verified against a real Base Sepolia USDC transfer; web flow checked locally (wallet linking, confirmation sheet, a test transaction left unconfirmed).
-- [ ] Owner: approve the migration and Worker deploy.
+- [x] Phase 6 (`20261027130000_creator_payments.sql`): tips and paid posts, 17 more pgTAP checks; web flow checked locally (tips switch, paid post composer, locked and unlocked views, tip and unlock sheets; the public API never returns the paid part).
+- [ ] Owner: approve the migrations and Worker deploy.
 - [ ] Owner: Stripe test mode. Enable Connect (Express), then set `STRIPE_SECRET_KEY` (an `sk_test_` key), `STRIPE_PAYMENTS_WEBHOOK_SECRET` (endpoint `/v1/payments/stripe/webhook` with `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`, `checkout.session.expired`, `charge.refunded`), optionally `STRIPE_CONNECT_WEBHOOK_SECRET` (a Connect endpoint with `account.updated`), and `PAYMENTS_RETURN_URL`.
-- [ ] Acceptance: one test-mode card payment and one Base Sepolia USDC payment confirmed end to end (needs a funded test wallet).
+- [ ] Acceptance: one test-mode card payment, one test-mode tip and one Base Sepolia USDC payment confirmed end to end (needs a funded test wallet).
 - [ ] Live money: only after the owner approves live Stripe keys and Base mainnet, set `PAYMENTS_LIVE=1`.
 
 ## Production deploy of 2026-10-25 (Phases 3 and 4)

@@ -4,53 +4,83 @@ import { ActivityIndicator, Modal, Pressable, StyleSheet, View } from 'react-nat
 
 import { getSupabaseClient } from '../auth/supabase';
 import { browserWalletsSupported, connectBrowserWallet, sendUsdcTransfer, signWalletLink } from '../connectors/wallets/browserWallet';
-import { checkPayment, linkWallet, loadPaymentOptions, loadPaymentSetup, payForListing, PaymentOptions, PaymentWithTransfer, submitTransaction } from '../data/paymentsService';
+import { checkPayment, linkWallet, loadPaymentOptions, loadPaymentSetup, loadPostPaymentOptions, payFor, PaymentWithTransfer, submitTransaction } from '../data/paymentsService';
 import { createClientId } from '../data/openMediaService';
 import { PostListing } from '../domain/listings';
-import { formatMoney, listingCharge, PaymentChain, paymentBreakdown, paymentChains, PaymentRail, paymentStatusLabels } from '../domain/payments';
+import { formatMoney, PaymentChain, paymentBreakdown, paymentChains, PaymentRail, paymentStatusLabels, previewCharge } from '../domain/payments';
+import { PostPaid } from '../domain/posts';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { openExternal } from './PaymentsSettings';
 import { Text } from './Text';
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const tipChoices = [200, 500, 1000, 2000];
+
+export type PaymentTarget =
+  | { kind: 'listing'; postId: string; listing: PostListing }
+  | { kind: 'tip'; postId: string }
+  | { kind: 'paid_post'; postId: string; paid: PostPaid };
+
+interface Options { card: boolean; chains: PaymentChain[]; available: boolean; unavailableReason: string; priceMinor: number | null; currency: string; feeBps: number; testMode: boolean }
+
+async function optionsFor(target: PaymentTarget, recipient: string): Promise<Options> {
+  if (target.kind === 'listing') {
+    const options = await loadPaymentOptions(target.postId);
+    return { card: options.card, chains: options.chains, available: options.available, unavailableReason: 'This listing is sold out.', priceMinor: options.priceMinor, currency: options.currency, feeBps: options.platformFeeBps, testMode: options.testMode };
+  }
+  const options = await loadPostPaymentOptions(target.postId);
+  if (target.kind === 'tip') {
+    return { card: options.card, chains: options.chains, available: options.tipsEnabled, unavailableReason: `@${recipient} doesn’t take tips.`, priceMinor: null, currency: 'USD', feeBps: options.fees.tip ?? 0, testMode: options.testMode };
+  }
+  return { card: options.card, chains: options.chains, available: Boolean(options.paid && !options.paid.unlocked), unavailableReason: 'You already unlocked this post.', priceMinor: options.paid?.priceMinor ?? null, currency: options.paid?.currency ?? 'USD', feeBps: options.fees.paid_post ?? 0, testMode: options.testMode };
+}
 
 /**
  * The one place Open Media adds a step on purpose: before any money moves, the person sees who is
  * paid, how much, every fee and how they pay. Card details are typed only on Stripe's page; USDC is
  * approved only in the person's own wallet.
  */
-export function PaymentSheet({ postId, listing, seller, onClose }: { postId: string; listing: PostListing; seller: string; onClose: () => void }) {
+export function PaymentSheet({ target, recipient, onClose, onPaid }: { target: PaymentTarget; recipient: string; onClose: () => void; onPaid?: () => void }) {
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const [options, setOptions] = useState<PaymentOptions>();
+  const [options, setOptions] = useState<Options>();
   const [rail, setRail] = useState<PaymentRail>();
+  const [tip, setTip] = useState(500);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
   const [payment, setPayment] = useState<PaymentWithTransfer>();
-  // One key per way of paying, so a retry never starts a second payment.
-  const keys = useRef<Partial<Record<PaymentRail, string>>>({});
-  const keyFor = (value: PaymentRail) => (keys.current[value] ??= createClientId());
+  // One key per way of paying (and tip amount), so a retry never starts a second payment.
+  const keys = useRef<Record<string, string>>({});
+  const keyFor = (value: PaymentRail) => (keys.current[`${value}:${target.kind === 'tip' ? tip : ''}`] ??= createClientId());
 
   useEffect(() => {
-    loadPaymentOptions(postId).then((next) => {
+    optionsFor(target, recipient).then((next) => {
       setOptions(next);
-      const usdc = next.chains.length > 0 && browserWalletsSupported();
+      const usdc = next.chains.length > 0 && browserWalletsSupported() && next.currency === 'USD';
       setRail(next.card ? 'card' : usdc ? 'onchain' : undefined);
     }).catch((reason) => setError(reason instanceof Error ? reason.message : 'Payment options are unavailable right now.'));
-  }, [postId]);
+    // A target is identified by its kind and post; parents may pass a new object each render.
+  }, [target.kind, target.postId, recipient]);
 
   const chain: PaymentChain | null = options?.chains.includes('base') ? 'base' : (options?.chains[0] ?? null);
   const usdcPossible = Boolean(options?.chains.length && options.currency === 'USD');
-  const preview = options?.priceMinor && rail ? listingCharge(options.priceMinor, options.currency, rail, chain, options.platformFeeBps) : undefined;
+  const price = target.kind === 'tip' ? tip : options?.priceMinor;
+  const preview = price && rail && options ? previewCharge(price, options.currency, rail, chain, options.feeBps) : undefined;
+
+  const finished = (next: PaymentWithTransfer, detail?: string) => {
+    setPayment(next);
+    if (next.status === 'confirmed') { setStatus(target.kind === 'paid_post' ? 'Paid. The post is unlocked.' : `Paid. @${recipient} can see it now.`); onPaid?.(); }
+    else setStatus(detail ?? paymentStatusLabels[next.status]);
+  };
 
   const payByCard = async () => {
-    const { payment: started, checkoutUrl } = await payForListing(postId, 'card', null, keyFor('card'));
+    const { payment: started, checkoutUrl } = await payFor(target.kind, target.postId, 'card', null, keyFor('card'), target.kind === 'tip' ? tip : undefined);
     setPayment(started);
     if (!checkoutUrl) throw new Error('Stripe did not return a payment page.');
     await openExternal(checkoutUrl);
-    setStatus('Finish paying on Stripe’s page. It shows as Paid here once Stripe confirms it.');
+    setStatus('Finish paying on Stripe’s page, then check here. It shows as Paid once Stripe confirms it.');
   };
 
   const payWithWallet = async () => {
@@ -66,7 +96,7 @@ export function PaymentSheet({ postId, listing, seller, onClose }: { postId: str
       const signed = await signWalletLink(wallet, userId, chain);
       await linkWallet(signed.message, signed.signature);
     }
-    const { payment: started } = await payForListing(postId, 'onchain', chain, keyFor('onchain'));
+    const { payment: started } = await payFor(target.kind, target.postId, 'onchain', chain, keyFor('onchain'), target.kind === 'tip' ? tip : undefined);
     setPayment(started);
     if (!started.transfer) throw new Error('This payment is already on its way.');
     setStatus('Approve the USDC transfer in your wallet.');
@@ -79,43 +109,53 @@ export function PaymentSheet({ postId, listing, seller, onClose }: { postId: str
       await wait(4000);
       result = await checkPayment(started.id);
     }
-    setPayment(result.payment);
-    setStatus(result.payment.status === 'confirmed' ? 'Paid. The seller can see it now.' : result.detail ?? paymentStatusLabels[result.payment.status]);
+    finished(result.payment, result.detail);
   };
 
-  const confirm = async () => {
+  const run = async (action: () => Promise<void>) => {
     setBusy(true); setError('');
-    try { await (rail === 'card' ? payByCard() : payWithWallet()); }
+    try { await action(); }
     catch (reason) { setError(reason instanceof Error ? reason.message : 'The payment didn’t go through.'); }
     finally { setBusy(false); }
   };
+  const confirm = () => run(rail === 'card' ? payByCard : payWithWallet);
+  const recheck = () => run(async () => { if (payment) { const result = await checkPayment(payment.id); finished(result.payment, result.detail); } });
 
   const done = payment?.status === 'confirmed';
+  const heading = done ? 'Paid' : target.kind === 'listing' ? `Buy ${target.listing.title}` : target.kind === 'tip' ? `Tip @${recipient}` : 'Unlock this post';
   return <Modal visible transparent animationType="fade" onRequestClose={() => !busy && onClose()}>
     <View style={styles.backdrop}>
       <View accessibilityViewIsModal style={styles.sheet}>
         <View style={styles.header}>
-          <Text style={styles.heading}>{done ? 'Paid' : `Buy ${listing.title}`}</Text>
+          <Text style={styles.heading}>{heading}</Text>
           <Pressable accessibilityRole="button" accessibilityLabel="Close" disabled={busy} onPress={onClose} hitSlop={8}><Ionicons name="close" size={22} color={colors.text} /></Pressable>
         </View>
         {!options && !error ? <ActivityIndicator style={styles.loading} color={colors.text} /> : null}
-        {options && !options.available ? <Text style={styles.hint}>This listing is sold out.</Text> : null}
-        {options?.available && !rail ? <Text style={styles.hint}>{usdcPossible && !browserWalletsSupported() ? `@${seller} takes USDC. Open Open Media on the web with a browser wallet to pay.` : `@${seller} doesn’t take payments in Open Media yet. Message them instead.`}</Text> : null}
+        {options && !options.available && !done ? <Text style={styles.hint}>{options.unavailableReason}</Text> : null}
+        {options?.available && !rail ? <Text style={styles.hint}>{usdcPossible && !browserWalletsSupported() ? `@${recipient} takes USDC. Open Open Media on the web with a browser wallet to pay.` : `@${recipient} doesn’t take payments in Open Media yet.`}</Text> : null}
         {options?.available && rail && preview ? <>
           {options.testMode ? <View style={styles.test}><Ionicons name="flask-outline" size={15} color={colors.text} /><Text style={styles.testText}>Test mode: use a Stripe test card or test USDC. No real money moves.</Text></View> : null}
+          {target.kind === 'tip' ? <View style={styles.choices}>
+            {tipChoices.map((amount) => <Pressable key={amount} accessibilityRole="radio" accessibilityState={{ checked: tip === amount }} disabled={busy || Boolean(payment)} onPress={() => setTip(amount)} style={[styles.choice, tip === amount && styles.choiceOn]}>
+              <Text style={[styles.choiceText, tip === amount && styles.choiceTextOn]}>{formatMoney(amount, 'USD').replace('.00', '')}</Text>
+            </Pressable>)}
+          </View> : null}
           {(options.card ? 1 : 0) + (usdcPossible && browserWalletsSupported() ? 1 : 0) > 1 ? <View style={styles.choices}>
             {([['card', 'Card'], ['onchain', 'USDC']] as const).map(([value, label]) => <Pressable key={value} accessibilityRole="radio" accessibilityState={{ checked: rail === value }} disabled={busy || Boolean(payment)} onPress={() => setRail(value)} style={[styles.choice, rail === value && styles.choiceOn]}>
               <Text style={[styles.choiceText, rail === value && styles.choiceTextOn]}>{label}</Text>
             </Pressable>)}
           </View> : null}
           <View style={styles.lines}>
-            {paymentBreakdown({ ...preview, recipient: seller }).map((line) => <View key={line.label} style={styles.line}>
+            {paymentBreakdown({ ...preview, recipient }).map((line) => <View key={line.label} style={styles.line}>
               <Text style={styles.lineLabel}>{line.label}</Text><Text style={styles.lineValue}>{line.value}</Text>
             </View>)}
           </View>
-          {rail === 'onchain' && chain ? <Text style={styles.hint}>USDC goes from your wallet straight to @{seller} on {paymentChains[chain].name}. Payments on a blockchain can’t be reversed.</Text> : null}
-          {!done ? <Pressable accessibilityRole="button" disabled={busy} onPress={confirm} style={[styles.primary, busy && styles.disabled]}>
-            {busy ? <ActivityIndicator color={colors.surface} /> : <Text style={styles.primaryText}>{`Pay ${formatMoney(preview.amountMinor, preview.currency)}`}</Text>}
+          {rail === 'onchain' && chain ? <Text style={styles.hint}>USDC goes from your wallet straight to @{recipient} on {paymentChains[chain].name}. Payments on a blockchain can’t be reversed.</Text> : null}
+          {!done && !payment ? <Pressable accessibilityRole="button" disabled={busy} onPress={confirm} style={[styles.primary, busy && styles.disabled]}>
+            {busy ? <ActivityIndicator color={colors.surface} /> : <Text style={styles.primaryText}>{`${target.kind === 'tip' ? 'Tip' : 'Pay'} ${formatMoney(preview.amountMinor, preview.currency)}`}</Text>}
+          </Pressable> : null}
+          {payment && !done && payment.rail === 'card' ? <Pressable accessibilityRole="button" disabled={busy} onPress={recheck} style={styles.secondary}>
+            {busy ? <ActivityIndicator color={colors.text} /> : <Text style={styles.secondaryText}>I’ve paid. Check again</Text>}
           </Pressable> : null}
         </> : null}
         {status ? <Text accessibilityLiveRegion="polite" style={styles.status}>{status}</Text> : null}
@@ -135,7 +175,7 @@ function createStyles(colors: ThemeColors) {
     hint: { color: colors.textSecondary, fontSize: 13, lineHeight: 18 },
     test: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderRadius: 12, backgroundColor: colors.chrome },
     testText: { flex: 1, color: colors.text, fontSize: 12, lineHeight: 17 },
-    choices: { flexDirection: 'row', gap: 6 },
+    choices: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
     choice: { minHeight: 34, paddingHorizontal: 16, justifyContent: 'center', borderRadius: 17, backgroundColor: colors.chrome },
     choiceOn: { backgroundColor: colors.text },
     choiceText: { color: colors.text, fontSize: 13, fontWeight: '600' },
@@ -146,6 +186,8 @@ function createStyles(colors: ThemeColors) {
     lineValue: { flexShrink: 1, color: colors.text, fontSize: 13, fontWeight: '600', textAlign: 'right' },
     primary: { minHeight: 46, alignItems: 'center', justifyContent: 'center', borderRadius: 23, backgroundColor: colors.text },
     primaryText: { color: colors.surface, fontSize: 15, fontWeight: '700' },
+    secondary: { minHeight: 42, alignItems: 'center', justifyContent: 'center', borderRadius: 21, borderWidth: 1, borderColor: colors.border },
+    secondaryText: { color: colors.text, fontSize: 14, fontWeight: '600' },
     disabled: { opacity: 0.6 },
     status: { color: colors.text, fontSize: 13, lineHeight: 18 },
     error: { color: colors.danger, fontSize: 13, lineHeight: 18 },

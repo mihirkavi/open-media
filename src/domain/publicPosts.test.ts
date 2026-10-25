@@ -65,3 +65,12 @@ test('maps an attached video to a canonical video post that Clips can show', () 
   // Without a storage URL (or with an invalid record) the post is shown as text.
   assert.equal(socialPostFromPublic({ ...record, video: { path: '../x' } as never }, 'http://127.0.0.1:54321').kind, 'text');
 });
+
+test('a paid part reaches the post only when it is unlocked', () => {
+  const locked = socialPostFromPublic({ ...record, author: { ...record.author, tipsEnabled: true }, paid: { priceMinor: 500, currency: 'USD', unlocked: false, body: 'should never show' } });
+  assert.deepEqual(locked.paid, { priceMinor: 500, currency: 'USD', unlocked: false });
+  assert.equal(locked.author.tipsEnabled, true);
+  const open = socialPostFromPublic({ ...record, paid: { priceMinor: 500, currency: 'USD', unlocked: true, body: 'The secret.' } });
+  assert.equal(open.paid?.body, 'The secret.');
+  assert.equal(socialPostFromPublic(record).paid, undefined);
+});

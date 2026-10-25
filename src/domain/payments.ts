@@ -83,8 +83,8 @@ export function cardFeeEstimateMinor(amountMinor: number, currency: string): num
   return currency === 'USD' ? Math.ceil(amountMinor * 0.029) + 30 : null;
 }
 
-/** The price of a listing as it would be charged on each rail, before any payment exists. */
-export function listingCharge(priceMinor: number, currency: string, rail: PaymentRail, chain: PaymentChain | null, platformFeeBps: number) {
+/** What would be charged on each rail for a price in cents, before any payment exists. */
+export function previewCharge(priceMinor: number, currency: string, rail: PaymentRail, chain: PaymentChain | null, platformFeeBps: number) {
   if (rail === 'onchain') return { amountMinor: priceMinor * 10 ** (usdcDecimals - 2), currency: 'USDC', rail, provider: chain ?? 'base-sepolia', platformFeeMinor: 0, providerFeeEstimateMinor: null };
   return { amountMinor: priceMinor, currency, rail, provider: 'stripe' as const, platformFeeMinor: Math.floor((priceMinor * platformFeeBps) / 10000), providerFeeEstimateMinor: cardFeeEstimateMinor(priceMinor, currency) };
 }

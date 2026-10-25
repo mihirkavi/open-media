@@ -66,6 +66,16 @@ export async function publishListing(body: string, clientId: string, listing: Po
   return fromRecord(data);
 }
 
+/** Publishes a public preview with a paid part that only buyers can read (ADR 0013, phase 6). */
+export async function publishPaidPost(preview: string, clientId: string, paidText: string, priceMinor: number, currency: string): Promise<SocialPost> {
+  const text = preview.trim();
+  if (text.length > maxPostLength) throw new Error(`Posts can be up to ${maxPostLength} characters.`);
+  const { data, error } = await requireClient().rpc('open_media_create_paid_post', { p_client_id: clientId, p_preview: text, p_paid_body: paidText.trim(), p_price_minor: priceMinor, p_currency: currency });
+  if (error) throw error;
+  if (!isPublicPostRecord(data)) throw new Error('Open Media returned an unexpected post.');
+  return fromRecord(data);
+}
+
 /** Rates a listing 1–5 stars. The server allows it only for verified people who show their legal name. */
 export async function rateListing(postId: string, stars: number | null): Promise<ListingRating> {
   const { data, error } = stars === null

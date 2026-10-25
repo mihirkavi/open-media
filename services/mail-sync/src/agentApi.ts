@@ -537,19 +537,53 @@ export class Account {
     const contextType = String(body.contextType ?? 'listing');
     const contextId = String(body.contextId ?? body.postId ?? '');
     const rail = String(body.rail ?? '');
-    if (contextType !== 'listing') throw new AgentError(400, 'bad_request', 'contextType must be listing.');
-    if (!uuid.test(contextId)) throw new AgentError(400, 'bad_request', 'contextId must be the listing’s post id.');
+    if (!['listing', 'tip', 'paid_post'].includes(contextType)) throw new AgentError(400, 'bad_request', 'contextType must be listing, tip or paid_post.');
+    if (!uuid.test(contextId)) throw new AgentError(400, 'bad_request', 'contextId must be the post id.');
+    const amountMinor = contextType === 'tip' ? body.amountMinor : null;
+    if (contextType === 'tip' && !(Number.isInteger(amountMinor) && (amountMinor as number) >= 100 && (amountMinor as number) <= 50_000)) throw new AgentError(400, 'bad_request', 'amountMinor must be a tip from 100 to 50000 cents (1 to 500 US dollars).');
     if (rail !== 'card' && rail !== 'onchain') throw new AgentError(400, 'bad_request', 'rail must be card or onchain.');
     const chain = rail === 'onchain' ? String(body.chain ?? 'base-sepolia') : null;
     if (rail === 'card' && !cardPaymentsConfigured(this.env)) throw new AgentError(503, 'not_configured', 'Card payments are not available on this server yet.');
     if (chain && (!isPaymentChain(chain) || !availableChains(this.env).includes(chain))) throw new AgentError(503, 'not_configured', `USDC payments on ${chain} are not available on this server.`);
     const key = typeof body.idempotencyKey === 'string' && uuid.test(body.idempotencyKey) ? body.idempotencyKey : crypto.randomUUID();
-    const created = await this.rpc<Payment>('open_media_create_payment_intent', { p_idempotency_key: key, p_context_type: contextType, p_context_id: contextId, p_rail: rail, p_chain: chain });
+    const created = await this.rpc<Payment>('open_media_create_payment_intent', { p_idempotency_key: key, p_context_type: contextType, p_context_id: contextId, p_rail: rail, p_chain: chain, p_amount_minor: amountMinor });
     if (rail === 'card') {
       const { checkoutUrl } = await paymentsCall(() => startCardCheckout(this.env, created.id, this.userId));
       return { payment: await this.payment(created.id), checkoutUrl, note: 'Open checkoutUrl to pay by card on Stripe’s page. The payment is confirmed only after Stripe reports it paid.' };
     }
     return { payment: await this.payment(created.id), note: 'Approve this USDC transfer in your own wallet, then send its transaction hash. It is confirmed only after Open Media reads it on the network.' };
+  }
+
+  // Tips and paid posts (ADR 0013, phase 6).
+  async setTips(enabled: unknown) {
+    if (typeof enabled !== 'boolean') throw new AgentError(400, 'bad_request', 'Send enabled: true or false.');
+    return { tipsEnabled: await this.rpc<boolean>('open_media_set_tips_enabled', { p_enabled: enabled }) };
+  }
+
+  async postPaymentOptions(postId: string) {
+    if (!uuid.test(postId)) throw new AgentError(404, 'not_found', 'Post not found.');
+    const options = await this.rpc<{ card: boolean; chains: string[]; tipsEnabled: boolean; paid: unknown; fees: Record<string, number> } | null>('open_media_post_payment_options', { p_post_id: postId });
+    if (!options) throw new AgentError(404, 'not_found', 'Post not found.');
+    const chains = availableChains(this.env);
+    return { ...options, card: options.card && cardPaymentsConfigured(this.env), chains: options.chains.filter((chain) => chains.includes(chain as never)), testMode: !paymentsAvailability(this.env).live };
+  }
+
+  async publishPaidPost(body: Record<string, unknown>) {
+    const preview = typeof body.preview === 'string' ? body.preview.trim() : '';
+    const paid = typeof body.paidText === 'string' ? body.paidText.trim() : '';
+    if (!preview || preview.length > maxPostLength) throw new AgentError(400, 'bad_request', `Write a public preview of up to ${maxPostLength} characters.`);
+    if (!paid || paid.length > 10_000) throw new AgentError(400, 'bad_request', 'paidText needs 1 to 10,000 characters.');
+    if (!Number.isInteger(body.priceMinor) || (body.priceMinor as number) < 50) throw new AgentError(400, 'bad_request', 'priceMinor must be a whole number of cents, at least 50.');
+    const currency = typeof body.currency === 'string' && /^[A-Z]{3}$/.test(body.currency) ? body.currency : 'USD';
+    const post = await this.rpc<UpstreamPost & { paid?: unknown }>('open_media_create_paid_post', { p_client_id: crypto.randomUUID(), p_preview: preview, p_paid_body: paid, p_price_minor: body.priceMinor, p_currency: currency });
+    return { ...formatPost(post, this.origin, this.env.SUPABASE_URL), paid: post.paid };
+  }
+
+  async paidContent(postId: string) {
+    if (!uuid.test(postId)) throw new AgentError(404, 'not_found', 'Post not found.');
+    const content = await this.rpc<{ priceMinor: number; currency: string; unlocked: boolean; body: string | null } | null>('open_media_paid_post_content', { p_post_id: postId });
+    if (!content) throw new AgentError(404, 'not_found', 'This post has no paid part.');
+    return content;
   }
 
   async submitTransaction(id: string, txHash: unknown) {
@@ -1091,6 +1125,12 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     if (request.method === 'POST' && transactionMatch) return json(await account.submitTransaction(decodeURIComponent(transactionMatch[1]), body.txHash), 0);
     const checkMatch = path.match(/^\/v1\/me\/payments\/([^/]+)\/check$/);
     if (request.method === 'POST' && checkMatch) return json(await account.checkPayment(decodeURIComponent(checkMatch[1])), 0);
+    if (request.method === 'PUT' && path === '/v1/me/payments/tips') return json(await account.setTips(body.enabled), 0);
+    if (request.method === 'POST' && path === '/v1/me/paid-posts') return json(await account.publishPaidPost(body), 0, 201);
+    const postOptionsMatch = path.match(/^\/v1\/me\/posts\/([^/]+)\/payment-options$/);
+    if (request.method === 'GET' && postOptionsMatch) return json(await account.postPaymentOptions(decodeURIComponent(postOptionsMatch[1])), 0);
+    const paidMatch = path.match(/^\/v1\/me\/posts\/([^/]+)\/paid$/);
+    if (request.method === 'GET' && paidMatch) return json(await account.paidContent(decodeURIComponent(paidMatch[1])), 0);
     if (request.method === 'POST' && path === '/v1/me/wallets') return json(await account.linkWallet(body) as object, 0, 201);
     const walletMatch = path.match(/^\/v1\/me\/wallets\/([^/]+)$/);
     if (request.method === 'DELETE' && walletMatch) return json(await account.removeWallet(decodeURIComponent(walletMatch[1])), 0);
