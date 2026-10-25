@@ -4,7 +4,7 @@ import 'react-native-url-polyfill/auto';
 import { AppState, Platform } from 'react-native';
 import { createClient, processLock, SupabaseClient, SupportedStorage } from '@supabase/supabase-js';
 
-import { createAuthRedirectURL, parseAuthCallbackURL } from '../domain/authCallback';
+import { createAuthRedirectURL, parseAuthCallbackURL, signInEmailsIncludeCode } from '../domain/authCallback';
 
 let client: SupabaseClient | undefined;
 let nativeStorage: ChunkedSecureStorage | undefined;
@@ -71,6 +71,11 @@ export async function signOut(): Promise<void> {
 export function localAutoSignInAvailable(): boolean {
   const api = process.env.EXPO_PUBLIC_OPEN_MEDIA_API_URL ?? '';
   return process.env.EXPO_PUBLIC_LOCAL_AUTO_SIGN_IN === '1' && /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(api.replace(/\/$/, ''));
+}
+
+/** Whether this build's sign-in emails include a one-time code; see signInEmailsIncludeCode. */
+export function signInEmailHasCode(): boolean {
+  return signInEmailsIncludeCode(process.env.EXPO_PUBLIC_SUPABASE_URL, process.env.EXPO_PUBLIC_SIGN_IN_EMAIL_CODES);
 }
 
 export async function waitForLocalSignInCode(email: string, since: Date, timeoutMs = 30_000): Promise<string | undefined> {

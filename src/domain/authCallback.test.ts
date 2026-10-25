@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createAuthRedirectURL, parseAuthCallbackURL } from './authCallback';
+import { createAuthRedirectURL, parseAuthCallbackURL, signInEmailsIncludeCode } from './authCallback';
 
 test('creates platform-specific auth callback URLs', () => {
   assert.equal(createAuthRedirectURL('web', 'http://localhost:8081'), 'http://localhost:8081/auth');
@@ -24,4 +24,12 @@ test('surfaces provider callback errors without exchanging a code', () => {
     parseAuthCallbackURL('openmedia://auth#error=access_denied&error_description=Link%20expired'),
     { error: 'Link expired' },
   );
+});
+
+test('sign-in emails include a code on a local stack or when the build opts in', () => {
+  assert.equal(signInEmailsIncludeCode('http://127.0.0.1:54321', undefined), true);
+  assert.equal(signInEmailsIncludeCode('http://localhost:54321/', ''), true);
+  assert.equal(signInEmailsIncludeCode('https://sgqrkbsmroytevkgogoy.supabase.co', undefined), false);
+  assert.equal(signInEmailsIncludeCode('https://sgqrkbsmroytevkgogoy.supabase.co', '1'), true);
+  assert.equal(signInEmailsIncludeCode(undefined, undefined), false);
 });

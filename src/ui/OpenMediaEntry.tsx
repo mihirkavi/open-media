@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Image, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from './Text';
 
-import { completeSignInURL, getSupabaseClient, localAutoSignInAvailable, sendSignInLink, signOut, verifySignInCode, waitForLocalSignInCode } from '../auth/supabase';
+import { completeSignInURL, getSupabaseClient, localAutoSignInAvailable, sendSignInLink, signInEmailHasCode, signOut, verifySignInCode, waitForLocalSignInCode } from '../auth/supabase';
 import { getCurrentProfile, OpenMediaProfile, saveCurrentProfile } from '../data/openMediaService';
 import { FeedMode } from '../domain/posts';
 import { ThemeColors } from '../theme';
@@ -154,6 +154,8 @@ function SignInScreen({ error, onError, onBack, onMatrixDemo }: { error: string;
   const [email, setEmail] = useState(''); const [code, setCode] = useState(''); const [busy, setBusy] = useState(false); const [sent, setSent] = useState(false);
   const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
   const validCode = /^\d{6,10}$/.test(code.replace(/\s+/g, ''));
+  const hasCode = signInEmailHasCode();
+  const here = Platform.OS === 'web' ? 'in this browser' : 'on this device';
   const run = async (action: () => Promise<void>) => {
     setBusy(true); onError('');
     try { await action(); }
@@ -182,13 +184,13 @@ function SignInScreen({ error, onError, onBack, onMatrixDemo }: { error: string;
     {sent && autoSigningIn
       ? <View style={styles.success} accessibilityLiveRegion="polite"><View style={styles.autoRow}><ActivityIndicator color={colors.text} /><Text style={styles.successTitle}>Signing you in…</Text></View><Text style={styles.successCopy}>Open Media is running on this Mac, so it fills in your sign-in code for you.</Text></View>
       : sent
-      ? <><View style={styles.success} accessibilityLiveRegion="polite"><Text style={styles.successTitle}>Check your email</Text><Text style={styles.successCopy}>We sent a sign-in link and code to {email.trim()}. Open the link {Platform.OS === 'web' ? 'in this browser' : 'on this device'}, or type the code below. The code works on any device.</Text></View>
-        <Text style={styles.label}>Code from the email</Text><TextInput accessibilityLabel="Sign-in code" autoComplete="one-time-code" textContentType="oneTimeCode" keyboardType="number-pad" inputMode="numeric" maxLength={12} returnKeyType="go" onSubmitEditing={validCode && !busy ? submitCode : undefined} value={code} onChangeText={(value) => setCode(value.replace(/[^\d\s]/g, ''))} placeholder="123456" placeholderTextColor={colors.textTertiary} style={[styles.input, styles.codeInput]} />
-        <Pressable accessibilityRole="button" disabled={busy || !validCode} onPress={submitCode} style={[styles.primary, (busy || !validCode) && styles.disabled]}>{busy ? <ActivityIndicator color={colors.surface} /> : <Text style={styles.primaryText}>Sign in with code</Text>}</Pressable>
-        <View style={styles.inlineActions}><Pressable accessibilityRole="button" disabled={busy} onPress={sendLink}><Text style={styles.textButton}>Send a new code</Text></Pressable><Pressable accessibilityRole="button" disabled={busy} onPress={() => { setSent(false); setCode(''); onError(''); }}><Text style={styles.textButton}>Use a different email</Text></Pressable></View></>
+      ? <><View style={styles.success} accessibilityLiveRegion="polite"><Text style={styles.successTitle}>Check your email</Text><Text style={styles.successCopy}>{hasCode ? `We sent a sign-in link and code to ${email.trim()}. Open the link ${here}, or type the code below. The code works on any device.` : `We sent a sign-in link to ${email.trim()}. Open it ${here} to sign in.`}</Text></View>
+        {hasCode ? <><Text style={styles.label}>Code from the email</Text><TextInput accessibilityLabel="Sign-in code" autoComplete="one-time-code" textContentType="oneTimeCode" keyboardType="number-pad" inputMode="numeric" maxLength={12} returnKeyType="go" onSubmitEditing={validCode && !busy ? submitCode : undefined} value={code} onChangeText={(value) => setCode(value.replace(/[^\d\s]/g, ''))} placeholder="123456" placeholderTextColor={colors.textTertiary} style={[styles.input, styles.codeInput]} />
+        <Pressable accessibilityRole="button" disabled={busy || !validCode} onPress={submitCode} style={[styles.primary, (busy || !validCode) && styles.disabled]}>{busy ? <ActivityIndicator color={colors.surface} /> : <Text style={styles.primaryText}>Sign in with code</Text>}</Pressable></> : null}
+        <View style={styles.inlineActions}><Pressable accessibilityRole="button" disabled={busy} onPress={sendLink}><Text style={styles.textButton}>{hasCode ? 'Send a new code' : 'Send a new link'}</Text></Pressable><Pressable accessibilityRole="button" disabled={busy} onPress={() => { setSent(false); setCode(''); onError(''); }}><Text style={styles.textButton}>Use a different email</Text></Pressable></View></>
       : <><Text style={styles.label}>Email</Text><TextInput accessibilityLabel="Email" autoCapitalize="none" autoComplete="email" keyboardType="email-address" returnKeyType="send" onSubmitEditing={validEmail && !busy ? sendLink : undefined} value={email} onChangeText={setEmail} placeholder="you@example.com" placeholderTextColor={colors.textTertiary} style={styles.input} />
         <Pressable accessibilityRole="button" disabled={busy || !validEmail} onPress={sendLink} style={[styles.primary, (busy || !validEmail) && styles.disabled]}>{busy ? <ActivityIndicator color={colors.surface} /> : <Text style={styles.primaryText}>Continue with email</Text>}</Pressable>
-        <Pressable accessibilityRole="button" disabled={!validEmail} onPress={() => { onError(''); setSent(true); }}><Text style={[styles.textButton, !validEmail && styles.disabled]}>I already have a code</Text></Pressable></>}
+        {hasCode ? <Pressable accessibilityRole="button" disabled={!validEmail} onPress={() => { onError(''); setSent(true); }}><Text style={[styles.textButton, !validEmail && styles.disabled]}>I already have a code</Text></Pressable> : null}</>}
     {error ? <Text accessibilityLiveRegion="assertive" style={styles.error}>{error}</Text> : null}
     {onMatrixDemo ? <><View style={styles.divider}><View style={styles.dividerLine} /><Text style={styles.dividerText}>OR</Text><View style={styles.dividerLine} /></View><Pressable accessibilityRole="button" onPress={onMatrixDemo} style={styles.secondary}><Text style={styles.secondaryText}>Try the local Matrix sandbox</Text></Pressable></> : null}
     <Pressable accessibilityRole="button" onPress={() => { onError(''); onBack(); }} style={styles.secondary}><Text style={styles.secondaryText}>Keep browsing without an account</Text></Pressable><Text style={styles.privacy}>Posts and profiles on Open Media are public. Messages stay private. No social passwords are stored in the app, and connections appear only when an official API or open protocol supports them.</Text></View></EntryShell>;

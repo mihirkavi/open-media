@@ -36,3 +36,13 @@ export function parseAuthCallbackURL(value: string): AuthCallback | undefined {
   const code = parameters.get('code');
   return code ? { code } : undefined;
 }
+
+/**
+ * Whether sign-in emails carry a one-time code as well as a link. The repo's templates include
+ * the code, so a local stack always does. Production uses Supabase's built-in sender (link only)
+ * until custom SMTP and the templates are set up; then the build sets the codes flag to '1'.
+ */
+export function signInEmailsIncludeCode(supabaseURL: string | undefined, codesFlag: string | undefined): boolean {
+  if (codesFlag === '1') return true;
+  return /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test((supabaseURL ?? '').replace(/\/$/, ''));
+}
