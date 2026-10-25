@@ -12,6 +12,7 @@ const env: PaymentsEnv = { SUPABASE_URL: 'http://db.test', SUPABASE_SECRET_KEY: 
 const user = '6f1c2a0e-6b1d-4c39-9d7e-2f4b8a1c0d11';
 const intentId = '9a1c2a0e-6b1d-4c39-9d7e-2f4b8a1c0d22';
 const sign = (body: string, at = Math.floor(Date.now() / 1000)) => `t=${at},v1=${createHmac('sha256', secret).update(`${at}.${body}`).digest('hex')}`;
+// Hardhat's published development accounts #1 and #2: public test keys that hold nothing on any network.
 const payerKey = privateKeyToAccount('0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d');
 const strangerKey = privateKeyToAccount('0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a');
 const seller = '0xabcdef0000000000000000000000000000000001';
