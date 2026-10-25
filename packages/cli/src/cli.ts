@@ -1,0 +1,171 @@
+#!/usr/bin/env node
+/**
+ * open-media: the Open Media command line, for people and agents.
+ *
+ * Human-readable by default; --json prints the API's JSON for scripts and agents. Reads need no
+ * key. Account commands read OPEN_MEDIA_TOKEN. Publishing needs --yes, so nothing is posted by
+ * accident. Exit codes: 0 done, 1 the API refused or failed, 2 the command was wrong.
+ */
+import { defaultBaseUrl, Network, OpenMedia, OpenMediaError, Post } from '../../sdk/src/index';
+
+const version = '0.1.0';
+const networks: Network[] = ['open-media', 'farcaster', 'lens', 'hive', 'deso'];
+
+const help = `open-media ${version}: Open Media from the command line
+
+Usage: open-media <command> [options]
+
+Read (no account needed)
+  feed [--sources farcaster,lens] [--mode raw|relevant] [--clips]   The mixed feed
+  search <words…>                                                  Search every network
+  events [--query <words>] [--days <1-14>]                          Bay Area events
+  profile <handle>                                                 An Open Media profile
+  timeline <network> <handle>                                      One person's posts
+
+Your account (set OPEN_MEDIA_TOKEN; copy it in the app: Settings, Developers and agents)
+  me                                                               Your profile
+  post <text…> --yes                                               Publish a public post
+  payments                                                         Your payments
+
+Set up agents
+  mcp-config [claude|codex]                                        MCP config for your agent
+
+Options
+  --json             Print JSON (for scripts and agents)
+  --base-url <url>   API origin (default ${defaultBaseUrl}, or OPEN_MEDIA_BASE_URL)
+  -h, --help         Show this help
+  -v, --version      Show the version`;
+
+class UsageError extends Error {}
+
+function parse(argv: string[]) {
+  const flags: Record<string, string | boolean> = {};
+  const positional: string[] = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === '-h') flags.help = true;
+    else if (arg === '-v') flags.version = true;
+    else if (arg.startsWith('--')) {
+      const [key, inline] = arg.slice(2).split('=', 2);
+      const takesValue = ['sources', 'mode', 'query', 'days', 'base-url'].includes(key);
+      flags[key] = inline ?? (takesValue ? argv[++index] ?? '' : true);
+    } else positional.push(arg);
+  }
+  return { flags, positional };
+}
+
+function printPosts(posts: Post[]) {
+  if (!posts.length) { console.log('No posts.'); return; }
+  for (const post of posts) {
+    console.log(`${post.author.name} (${post.author.handle}) · ${post.network} · ${post.createdAt}`);
+    if (post.title) console.log(post.title);
+    console.log(post.text.length > 400 ? `${post.text.slice(0, 400)}…` : post.text);
+    if (post.url) console.log(post.url);
+    if (post.why.used.length) console.log(`Why this: ${post.why.used.join('; ')}`);
+    console.log('');
+  }
+}
+
+function mcpConfig(target: string | undefined, baseUrl: string) {
+  if (target === 'codex') {
+    return `# ~/.codex/config.toml\n[mcp_servers.open-media]\nurl = "${baseUrl}/open/mcp"\n\n[mcp_servers.open-media-account]\nurl = "${baseUrl}/me/mcp"\nbearer_token_env_var = "OPEN_MEDIA_TOKEN"\n\n# Or install the plugin: codex plugin marketplace add mihirkavi/open-media`;
+  }
+  return JSON.stringify({
+    mcpServers: {
+      'open-media': { type: 'http', url: `${baseUrl}/open/mcp` },
+      'open-media-account': { type: 'http', url: `${baseUrl}/me/mcp`, headers: { Authorization: 'Bearer ${OPEN_MEDIA_TOKEN}' } },
+    },
+  }, null, 2) + '\n\n// Or install the plugin: /plugin install open-media --marketplace mihirkavi/open-media';
+}
+
+export async function run(argv: string[], env: Record<string, string | undefined> = process.env): Promise<number> {
+  const { flags, positional } = parse(argv);
+  const [command, ...rest] = positional;
+  if (flags.version) { console.log(version); return 0; }
+  if (flags.help || !command) { console.log(help); return command || flags.help ? 0 : 2; }
+  const baseUrl = String(flags['base-url'] || env.OPEN_MEDIA_BASE_URL || defaultBaseUrl).replace(/\/+$/, '');
+  const client = new OpenMedia({ baseUrl, token: env.OPEN_MEDIA_TOKEN, userAgent: `open-media-cli/${version}` });
+  const out = (value: unknown, human: () => void) => { if (flags.json) console.log(JSON.stringify(value, null, 2)); else human(); };
+  const needToken = () => { if (!env.OPEN_MEDIA_TOKEN) throw new UsageError('Set OPEN_MEDIA_TOKEN to your access token (in the app: Settings, Developers and agents).'); };
+
+  try {
+    switch (command) {
+      case 'feed': {
+        const sources = flags.sources ? String(flags.sources).split(',').map((item) => item.trim()) as Network[] : undefined;
+        if (sources?.some((item) => !networks.includes(item))) throw new UsageError(`--sources takes: ${networks.join(', ')}`);
+        if (flags.mode && flags.mode !== 'raw' && flags.mode !== 'relevant') throw new UsageError('--mode is raw or relevant');
+        const page = await client.feed({ sources, mode: flags.mode as 'raw' | 'relevant' | undefined, kind: flags.clips ? 'clips' : 'feed' });
+        out(page, () => { printPosts(page.data); if (page.unavailable.length) console.log(`Not loading right now: ${page.unavailable.join(', ')}`); });
+        return 0;
+      }
+      case 'search': {
+        if (!rest.length) throw new UsageError('search needs some words, e.g. open-media search ethereum on lens');
+        const result = await client.search(rest.join(' ')) as { posts?: Post[]; data?: Post[] };
+        out(result, () => printPosts(result.posts ?? result.data ?? []));
+        return 0;
+      }
+      case 'events': {
+        const days = flags.days ? Number(flags.days) : undefined;
+        if (days !== undefined && !(Number.isInteger(days) && days >= 1 && days <= 14)) throw new UsageError('--days is a whole number from 1 to 14');
+        const result = await client.events({ query: flags.query ? String(flags.query) : undefined, days }) as { area: string; data: { title: string; startsAt: string; place?: string; registrationUrl?: string }[] };
+        out(result, () => {
+          console.log(`Upcoming in ${result.area}:\n`);
+          for (const event of result.data) console.log(`${event.startsAt}  ${event.title}${event.place ? ` · ${event.place}` : ''}\n  ${event.registrationUrl ?? ''}\n`);
+        });
+        return 0;
+      }
+      case 'profile': {
+        if (!rest[0]) throw new UsageError('profile needs a handle');
+        const result = await client.profile(rest[0]);
+        out(result, () => console.log(JSON.stringify(result, null, 2)));
+        return 0;
+      }
+      case 'timeline': {
+        if (!networks.includes(rest[0] as Network) || !rest[1]) throw new UsageError(`timeline <network> <handle>; network is one of ${networks.join(', ')}`);
+        const result = await client.timeline(rest[0] as Network, rest[1]) as { posts?: Post[]; data?: Post[] };
+        out(result, () => printPosts(result.posts ?? result.data ?? []));
+        return 0;
+      }
+      case 'me': {
+        needToken();
+        const result = await client.me();
+        out(result, () => console.log(JSON.stringify(result, null, 2)));
+        return 0;
+      }
+      case 'post': {
+        needToken();
+        const text = rest.join(' ').trim();
+        if (!text) throw new UsageError('post needs the text to publish');
+        if (!flags.yes) throw new UsageError(`This publishes a public post as you:\n\n  ${text}\n\nRun again with --yes to publish.`);
+        const result = await client.publish(text);
+        out(result, () => console.log(`Published: ${(result as { url?: string }).url ?? 'done'}`));
+        return 0;
+      }
+      case 'payments': {
+        needToken();
+        const result = await client.payments();
+        out(result, () => console.log(JSON.stringify(result, null, 2)));
+        return 0;
+      }
+      case 'mcp-config': {
+        console.log(mcpConfig(rest[0], baseUrl));
+        return 0;
+      }
+      default:
+        throw new UsageError(`Unknown command “${command}”. Run open-media --help.`);
+    }
+  } catch (error) {
+    if (error instanceof UsageError) { console.error(error.message); return 2; }
+    if (error instanceof OpenMediaError) {
+      if (flags.json) console.error(JSON.stringify({ error: { status: error.status, code: error.code, message: error.message } }));
+      else console.error(`Open Media refused (${error.status} ${error.code}): ${error.message}`);
+      return 1;
+    }
+    console.error(error instanceof Error ? error.message : String(error));
+    return 1;
+  }
+}
+
+if (process.argv[1] && /open-media|cli\.(js|ts)$/.test(process.argv[1])) {
+  run(process.argv.slice(2)).then((code) => { process.exitCode = code; });
+}

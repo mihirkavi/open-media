@@ -1,0 +1,19 @@
+{
+  "name": "open-media-cli",
+  "version": "0.1.0",
+  "description": "Open Media from the command line: one feed and search across Open Media, Farcaster, Lens, Hive and DeSo, Bay Area events, your account, and MCP setup for agents.",
+  "license": "MIT",
+  "type": "module",
+  "bin": { "open-media": "dist/cli.js" },
+  "files": ["dist", "README.md"],
+  "engines": { "node": ">=18" },
+  "homepage": "https://convo-mail-sync.convo-mail-sync.workers.dev/developers",
+  "repository": { "type": "git", "url": "git+https://github.com/mihirkavi/open-media.git", "directory": "packages/cli" },
+  "bugs": { "url": "https://github.com/mihirkavi/open-media/issues" },
+  "keywords": ["open-media", "cli", "social", "farcaster", "lens", "hive", "deso", "mcp", "agents"],
+  "scripts": {
+    "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --target=node18 --outfile=dist/cli.js",
+    "test": "node --import tsx --test src/*.test.ts",
+    "prepublishOnly": "npm run build"
+  }
+}

@@ -144,13 +144,21 @@ ${publicRoutes(origin)}
 
 ${account(origin)}
 
+## Plain-language questions (NLWeb)
+
+\`POST ${origin}/ask\` follows NLWeb v0.55: send \`{"query": {"text": "…"}}\` and get schema.org items (\`TechArticle\` from these docs, \`SocialMediaPosting\` from every open network) under \`results\`, with \`_meta.response_type\` \`answer\` or \`failure\` (\`INVALID_QUERY\`, \`NO_RESULTS\`). Add \`"prefer": {"streaming": true}\` and \`Accept: text/event-stream\` for \`start\`, \`result\` and \`complete\` events. The [schema map](${origin}/schemamap.xml) lists each page's type, and [\`/feeds/posts.jsonl\`](${origin}/feeds/posts.jsonl) carries the newest public Open Media posts as JSON Lines.
+
+## Agent registration
+
+Agents may register at \`POST ${origin}/agent/identity\` (\`{"type": "anonymous"}\`) and exchange the returned assertion at \`POST ${origin}/oauth/token\` with \`grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer\`. The hour-long token has the \`public:read\` scope and its own rate-limit bucket; it never opens anyone's account. See [authentication](${origin}/auth.md).
+
 ## Errors
 
 Errors are JSON: \`{"error": {"code": "bad_request", "message": "…"}}\`. Codes include \`bad_request\` (400), \`unauthorized\` (401, with a \`WWW-Authenticate\` header naming the protected-resource metadata), \`refused\` (403 or 409), \`not_found\` (404), \`rate_limited\` (429, with \`Retry-After\`), \`not_configured\` (503) and \`upstream_unavailable\` (502).
 
 ## Rate limits
 
-Public and agent routes allow about 120 requests per minute per client IP. Responses carry \`RateLimit-Policy\`; a 429 carries \`Retry-After\` in seconds.
+Public and agent routes allow about 120 requests per minute per client IP, or per registered agent when it sends its agent token. Responses carry \`RateLimit-Policy\`; a 429 carries \`Retry-After\` in seconds.
 
 ## Idempotency
 
@@ -182,6 +190,20 @@ Build on Open Media without an account for public data, or act for a person with
 2. Connect an MCP client to \`${origin}/open/mcp\` (Streamable HTTP).
 3. To act for a person, they copy a short-lived access token from the app (Settings, then Developers and agents) and you send it as \`Authorization: Bearer <token>\`.
 4. Install the Open Media plugin for Claude Code or Codex from the [repository](${sourceRepository}/tree/main/agent-plugin).
+5. For your agent's own rate limit, register it: \`POST ${origin}/agent/identity\` with \`{"type": "anonymous"}\`, then trade the assertion at \`/oauth/token\` ([how](${origin}/auth.md)).
+
+## SDKs and command line
+
+The repository includes a TypeScript SDK (\`packages/sdk\`, \`open-media-sdk\`), a command line (\`packages/cli\`, \`open-media\`) and a Python client (\`packages/python\`, \`open-media\`). They are not on npm or PyPI yet; build them from the [repository](${sourceRepository}/tree/main/packages). Each retries 429s after \`Retry-After\` and sends an \`Idempotency-Key\` on every write.
+
+\`\`\`ts
+import { OpenMedia } from 'open-media-sdk';
+const feed = await new OpenMedia().feed({ sources: ['farcaster', 'lens'] });
+\`\`\`
+
+\`\`\`bash
+open-media search ethereum on lens --json
+\`\`\`
 
 ## Access tokens
 
@@ -335,33 +357,47 @@ See the [developer portal](${origin}/developers) to get started.
     description: 'How agents obtain credentials for Open Media: no credential for public data, the person’s bearer token for the account API, and OAuth 2.1 for Open Media Events.',
     body: (origin) => `# Agent authentication on Open Media
 
-How an agent gets access to Open Media, and exactly which credentials exist. This file lives at \`/auth.md\`, the discovery path from the WorkOS auth.md spec. Open Media documents what it implements here, and says plainly what it does not.
+How an agent gets access to Open Media, and exactly which credentials exist. This file lives at \`/auth.md\`, the discovery path from the WorkOS auth.md spec. Open Media implements its anonymous registration; this file says plainly what it does not implement.
 
 ## Discover
 
-- Public data needs no credential: \`${origin}/open/mcp\`, \`GET /v1/feed\`, \`GET /v1/search\`, \`GET /v1/posts\`, \`GET /v1/profiles/{handle}\`, \`GET /v1/events/upcoming\` and every discovery file.
+- Public data needs no credential at all: \`${origin}/open/mcp\`, \`GET /v1/feed\`, \`GET /v1/search\`, \`GET /v1/posts\`, \`GET /v1/profiles/{handle}\`, \`GET /v1/events/upcoming\` and every discovery file.
 - Protected-resource metadata (RFC 9728): [${origin}/.well-known/oauth-protected-resource](${origin}/.well-known/oauth-protected-resource).
-- Authorization-server metadata (RFC 8414): [${origin}/.well-known/oauth-authorization-server](${origin}/.well-known/oauth-authorization-server).
-- A request without a valid credential to a protected route returns 401 with \`WWW-Authenticate: Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"\`.
+- Authorization-server metadata (RFC 8414), including the \`agent_auth\` block with \`identity_endpoint\` and \`identity_types_supported\`: [${origin}/.well-known/oauth-authorization-server](${origin}/.well-known/oauth-authorization-server).
+- A protected route called without a valid credential returns 401 with \`WWW-Authenticate: Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"\`.
 
 ## Pick a method
 
 - **No credential:** everything public. Start here.
-- **The person's access token (bearer):** the account API (\`/v1/me/...\`) and the account MCP server (\`/me/mcp\`). The token acts only as that person; the database refuses everything else.
-- **OAuth 2.1 with PKCE (S256):** Open Media Events at \`${origin}/mcp\`, scopes \`events:read\` and \`events:write\`.
+- **Anonymous agent registration** (\`agent_auth\`, type \`anonymous\`): an agent gets its own identity and an access token with the \`public:read\` scope, so its requests are counted in its own rate-limit bucket instead of sharing one with its IP address. It never grants access to anyone's account.
+- **The person's access token (bearer):** the account API (\`/v1/me/...\`) and the account MCP server (\`/me/mcp\`). The person copies it from the app (Settings, then Developers and agents); it acts only as them.
+- **OAuth 2.1 with PKCE (S256):** Open Media Events at \`${origin}/mcp\`, scopes \`events:read\` and \`events:write\`, with client ID metadata documents or Dynamic Client Registration at \`${origin}/oauth/register\`.
 
 ## Register
 
-- OAuth clients register with Dynamic Client Registration at \`${origin}/oauth/register\`, or use a client ID metadata document (CIMD), which the authorization server supports.
-- There is no agentic self-registration: no \`agent_auth.identity_endpoint\` and no \`anonymous\`, \`service_auth\` or \`identity_assertion\` (ID-JAG) registration type.
+\`\`\`
+POST ${origin}/agent/identity
+Content-Type: application/json
+
+{"type": "anonymous", "name": "my-agent"}
+\`\`\`
+
+The response holds \`registration_id\`, \`identity_assertion\` (valid for 30 days), \`assertion_expires\`, \`pre_claim_scopes\` (\`public:read\`) and \`post_claim_scopes\` (empty). Only the \`anonymous\` type is supported: \`service_auth\` and \`identity_assertion\` (ID-JAG) registration return \`unsupported_identity_type\`.
 
 ## Claim
 
-There is no claim ceremony and no \`agent_auth.claim_endpoint\`. For the account API, the person signs in to the app themselves and copies a token from Settings, then Developers and agents.
+There is no claim ceremony and no \`claim_endpoint\`: an anonymous agent identity is never linked to a person. To act for a person, use their own access token instead.
 
 ## Exchange
 
-For Open Media Events, exchange the authorization code at \`${origin}/oauth/token\` with your PKCE verifier; refresh tokens are issued and exchanged at the same endpoint.
+\`\`\`
+POST ${origin}/oauth/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=<identity_assertion>
+\`\`\`
+
+The response is \`{"access_token": "…", "token_type": "Bearer", "expires_in": 3600, "scope": "public:read"}\`. Exchange the same assertion again when the access token expires. OAuth clients for Open Media Events exchange authorization codes and refresh tokens at the same endpoint.
 
 ## Use the access_token
 
@@ -369,17 +405,18 @@ For Open Media Events, exchange the authorization code at \`${origin}/oauth/toke
 Authorization: Bearer <access_token>
 \`\`\`
 
-Send it on every request to \`/v1/me/...\`, \`/me/mcp\` or \`/mcp\`. Account tokens expire after about an hour; ask the person for a fresh one.
+Agent tokens work on every public route and the public MCP server. Account routes need the person's own token and answer 401 to an agent token.
 
 ## Errors
 
-- \`401 unauthorized\` with \`WWW-Authenticate\`: missing, expired or invalid token.
-- \`403 refused\`: the token is valid but the person may not do this.
+- \`400 invalid_grant\`: the identity assertion is invalid or expired. Register again.
+- \`400 unsupported_identity_type\`: only \`{"type": "anonymous"}\` is accepted.
+- \`401 unauthorized\` with \`WWW-Authenticate\`: missing, expired or invalid token on a protected route.
 - \`429 rate_limited\` with \`Retry-After\`: back off for the stated seconds.
 
 ## Revocation
 
-Account tokens end when they expire or when the person signs out of the app. OAuth tokens for Open Media Events can be revoked at \`${origin}/oauth/token\` (advertised as the revocation endpoint). There is no \`agent_auth.events_endpoint\`.
+Agent identity assertions expire after 30 days and access tokens after an hour; there is no \`events_endpoint\` for revocation events. Account tokens end when they expire or the person signs out. OAuth tokens for Open Media Events are revoked at \`${origin}/oauth/token\`, the advertised revocation endpoint.
 `,
   },
 ];
@@ -638,6 +675,7 @@ export function robotsTxt(origin: string): string {
     '',
     ...['OAI-SearchBot', 'ChatGPT-User', 'Claude-SearchBot', 'Claude-User', 'PerplexityBot', 'Perplexity-User', 'GPTBot', 'ClaudeBot', 'Google-Extended', 'Applebot-Extended'].flatMap((bot) => [`User-agent: ${bot}`, 'Allow: /', 'Disallow: /v1/me', 'Disallow: /me/mcp', '']),
     `Sitemap: ${origin}/sitemap.xml`,
+    `schemamap: ${origin}/schemamap.xml`,
     `Agentmap: ${origin}/.well-known/ard.json`,
     '',
   ].join('\n');
@@ -677,6 +715,10 @@ Open Media is a free, open-source social app (iPhone, Android, web) with one fee
 - The person's account, bearer token: ${origin}/me/mcp ([server card](${origin}/me/mcp/server-card))
 - Documentation: ${origin}/docs/mcp ([server card](${origin}/docs/mcp/server-card))
 
+## Ask in plain language
+
+- NLWeb: POST ${origin}/ask with {"query": {"text": "…"}}; [schema map](${origin}/schemamap.xml); public posts as JSON Lines: ${origin}/feeds/posts.jsonl
+
 ## Section indexes
 
 - [API and MCP reference](${origin}/docs/llms.txt)
@@ -689,6 +731,7 @@ Open Media is a free, open-source social app (iPhone, Android, web) with one fee
 ## Plugin and source
 
 - Claude Code and Codex plugin: ${sourceRepository}/tree/main/agent-plugin
+- TypeScript SDK, CLI and Python client (build from source; not yet on npm or PyPI): ${sourceRepository}/tree/main/packages
 - Source code (MIT), including AGENTS.md for coding agents: ${sourceRepository}
 
 ## Rules
@@ -721,6 +764,22 @@ function notFoundMarkdown(origin: string, path: string): string {
   return `# Not found\n\nThere is nothing at \`${path}\` on Open Media. Start at [llms.txt](${origin}/llms.txt), the [API documentation](${origin}/docs.md) or the [sitemap](${origin}/sitemap.xml).\n`;
 }
 
+/** Documentation pages that mention any of the query's words, with the matching lines. */
+export function searchDocs(origin: string, query: string) {
+  const words = query.toLowerCase().split(/\s+/).filter((word) => word.length > 2);
+  return pages.map((page) => ({ page, lines: pageMarkdown(page, origin).split('\n').filter((line) => words.some((word) => line.toLowerCase().includes(word))) }))
+    .filter((item) => item.lines.length)
+    .sort((left, right) => right.lines.length - left.lines.length)
+    .map(({ page, lines }) => ({ path: page.path, title: page.title, description: page.description, url: `${origin}${page.path}`, matches: lines.slice(0, 8) }));
+}
+
+/** NLWeb schema map: which schema.org types each page and feed carries. */
+export function schemaMapXml(origin: string): string {
+  const types: Record<string, string> = { '/': 'SoftwareApplication', '/agents': 'TechArticle', '/docs': 'TechArticle', '/developers': 'TechArticle', '/sandbox': 'TechArticle', '/auth': 'TechArticle', '/pricing': 'WebPage', '/about': 'AboutPage', '/contact': 'ContactPage', '/privacy': 'WebPage' };
+  const entries = [...pages.map((page) => [`${origin}${page.path}`, types[page.path] ?? 'WebPage']), [`${origin}/feeds/posts.jsonl`, 'SocialMediaPosting']];
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<schemamap xmlns="http://www.nlweb.ai/schemas/schemamap/0.1">\n${entries.map(([loc, type]) => `  <url>\n    <loc>${loc}</loc>\n    <schema>https://schema.org/${type}</schema>\n    <lastmod>${siteUpdated}</lastmod>\n  </url>`).join('\n')}\n</schemamap>\n`;
+}
+
 // ─── Docs MCP server ─────────────────────────────────────────────────────────
 
 function docsMcp(origin: string) {
@@ -733,9 +792,7 @@ function docsMcp(origin: string) {
       inputSchema: z.object({ query: z.string().min(2).max(200).describe('Words to look for') }),
       annotations: { readOnlyHint: true, openWorldHint: false },
     }, (async ({ query }: { query: string }) => {
-      const words = query.toLowerCase().split(/\s+/).filter(Boolean);
-      const results = all().map((page) => ({ ...page, lines: page.markdown.split('\n').filter((line) => words.some((word) => line.toLowerCase().includes(word))) }))
-        .filter((page) => page.lines.length).map((page) => ({ path: page.path, title: page.title, url: `${origin}${page.path}`, matches: page.lines.slice(0, 8) }));
+      const results = searchDocs(origin, query).map(({ path, title, url, matches }) => ({ path, title, url, matches }));
       return { content: [{ type: 'text' as const, text: JSON.stringify({ query, results }) }] };
     }) as never);
     server.registerTool('get_docs_page', {
@@ -753,7 +810,7 @@ function docsMcp(origin: string) {
 
 // ─── Routing ─────────────────────────────────────────────────────────────────
 
-const sitePaths = new Set(['/robots.txt', '/sitemap.xml', '/llms.txt', '/llms-full.txt', '/docs/llms.txt', '/api/llms.txt', '/agents.md', '/auth.md', '/pricing.md', '/index.md',
+const sitePaths = new Set(['/robots.txt', '/sitemap.xml', '/schemamap.xml', '/llms.txt', '/llms-full.txt', '/docs/llms.txt', '/api/llms.txt', '/agents.md', '/auth.md', '/pricing.md', '/index.md',
   '/.well-known/ard.json', '/.well-known/ai-catalog.json', '/.well-known/agent-skills/index.json', '/.well-known/agent-card.json', '/.well-known/api-catalog',
   '/.well-known/mcp/server-card.json', '/.well-known/did.json', '/docs/mcp', '/open/mcp/server-card', '/me/mcp/server-card', '/docs/mcp/server-card']);
 
@@ -840,6 +897,7 @@ export async function handleSiteRequest(request: Request): Promise<Response | un
   switch (path) {
     case '/robots.txt': return respond(robotsTxt(origin), 'text/plain; charset=utf-8', 3600);
     case '/sitemap.xml': return respond(sitemapXml(origin), 'application/xml; charset=utf-8', 3600);
+    case '/schemamap.xml': return respond(schemaMapXml(origin), 'application/xml; charset=utf-8', 3600);
     case '/llms.txt': return respond(llmsTxt(origin), 'text/plain; charset=utf-8', 3600, { link: linkHeader(origin, '/') });
     case '/llms-full.txt': return respond(llmsFullTxt(origin), 'text/plain; charset=utf-8', 3600);
     case '/docs/llms.txt': case '/api/llms.txt': return respond(docsLlmsTxt(origin), 'text/plain; charset=utf-8', 3600);

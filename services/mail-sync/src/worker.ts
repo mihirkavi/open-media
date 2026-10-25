@@ -3,6 +3,7 @@ import { OAuthProvider } from '@cloudflare/workers-oauth-provider';
 import { handleAuthorization } from './events/auth.js';
 import { handleProtectedEventsRequest, handlePublicEventsRequest, runScheduledRefresh, type EventsEnv } from './events/http.js';
 import { SUPPORTED_SCOPES } from './events/tools.js';
+import { AgentAuthError, agentAuthMetadata, exchangeAssertion, jwtBearerGrant } from './agentAuth.js';
 import { agentFriendlyNotFound } from './agentSite.js';
 import { handleMailRequest, MailEnv } from './mailHandler.js';
 
@@ -50,8 +51,37 @@ const oauth = new OAuthProvider<WorkerEnv>({
   },
 });
 
+/**
+ * Agent self-registration (auth.md) sits beside the OAuth provider: the JWT-bearer grant is
+ * answered here, and the provider's metadata gains the agent_auth block. Everything else is the
+ * provider's own.
+ */
+async function handleRequest(request: Request, env: WorkerEnv, ctx: ExecutionContext): Promise<Response> {
+  const url = new URL(request.url);
+  if (request.method === 'POST' && url.pathname === '/oauth/token') {
+    const form = new URLSearchParams(await request.clone().text().catch(() => ''));
+    if (form.get('grant_type') === jwtBearerGrant) {
+      const headers = { 'content-type': 'application/json', 'cache-control': 'no-store', 'access-control-allow-origin': '*' };
+      try { return new Response(JSON.stringify(await exchangeAssertion(env, url.origin, form)), { headers }); }
+      catch (error) {
+        if (!(error instanceof AgentAuthError)) throw error;
+        return new Response(JSON.stringify({ error: error.code, error_description: error.message }), { status: error.status, headers });
+      }
+    }
+  }
+  const response = await oauth.fetch(request, env, ctx);
+  if (request.method === 'GET' && url.pathname === '/.well-known/oauth-authorization-server' && response.ok) {
+    const metadata = await response.json() as Record<string, unknown>;
+    const grants = Array.isArray(metadata.grant_types_supported) ? metadata.grant_types_supported as string[] : [];
+    const headers = new Headers(response.headers);
+    headers.delete('content-length');
+    return new Response(JSON.stringify({ ...metadata, grant_types_supported: [...grants, jwtBearerGrant], agent_auth: agentAuthMetadata(url.origin) }), { headers });
+  }
+  return response;
+}
+
 export default {
-  fetch: (request: Request, env: WorkerEnv, ctx: ExecutionContext) => oauth.fetch(request, env, ctx),
+  fetch: (request: Request, env: WorkerEnv, ctx: ExecutionContext) => handleRequest(request, env, ctx),
   scheduled: async (_controller: ScheduledController, env: WorkerEnv, ctx: ExecutionContext) => {
     ctx.waitUntil(runScheduledRefresh(env));
   },

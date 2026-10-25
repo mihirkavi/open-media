@@ -55,3 +55,8 @@ services/mail-sync/.env
 .dev.vars
 .dev.vars.*
 !.dev.vars.example
+
+# Client packages: build output
+packages/*/dist/
+packages/python/build/
+packages/python/*.egg-info/

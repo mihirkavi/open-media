@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "open-media"
+version = "0.1.0"
+description = "Official Python client for the Open Media API: one feed and search across Open Media, Farcaster, Lens, Hive and DeSo, Bay Area events, and the person's own account."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+keywords = ["open-media", "social", "farcaster", "lens", "hive", "deso", "mcp", "sdk"]
+classifiers = ["License :: OSI Approved :: MIT License", "Programming Language :: Python :: 3"]
+
+[project.urls]
+Homepage = "https://convo-mail-sync.convo-mail-sync.workers.dev/developers"
+Documentation = "https://convo-mail-sync.convo-mail-sync.workers.dev/docs"
+Repository = "https://github.com/mihirkavi/open-media"
+Issues = "https://github.com/mihirkavi/open-media/issues"
+
+[tool.setuptools]
+packages = ["open_media"]

@@ -34,12 +34,13 @@ import {
   availableChains, cardPaymentsConfigured, checkOnchainPayment, handlePaymentsWebhook, linkWallet, PaymentsEnv, PaymentsError, paymentsAvailability, refreshPayoutAccount, startCardCheckout, startPayoutOnboarding,
 } from './payments.js';
 import { EventsUnavailable, PublicEventsEnv, upcomingEvents } from './publicEvents.js';
-import { handleSiteRequest, isSitePath, llmsTxt as siteLlmsTxt } from './agentSite.js';
+import { AgentAuthEnv, AgentAuthError, agentFromRequest, registerAgent } from './agentAuth.js';
+import { handleSiteRequest, isSitePath, llmsTxt as siteLlmsTxt, searchDocs } from './agentSite.js';
 import { mcpAppMimeType, postsViewHtml, postsViewUri } from './mcpAppView.js';
 import { authenticate } from './session.js';
 import { discloseLegalName, handleVerificationWebhook, startVerification, VerificationEnv, VerificationError, verificationConfigured } from './verification.js';
 
-export type AgentEnv = PublicApiEnv & BridgesEnv & ContactsEnv & VerificationEnv & PublicEventsEnv & PaymentsEnv;
+export type AgentEnv = PublicApiEnv & BridgesEnv & ContactsEnv & VerificationEnv & PublicEventsEnv & PaymentsEnv & AgentAuthEnv;
 
 const version = '1.0.0';
 const sources = ['open-media', 'farcaster', 'lens', 'hive', 'deso'] as const;
@@ -71,7 +72,7 @@ async function paymentsCall<T>(run: () => Promise<T>): Promise<T> {
 /** Paths served here. They are matched before the read-only public API and the mail routes. */
 export function isAgentPath(pathname: string, method: string): boolean {
   const path = pathname.replace(/\/+$/, '') || '/';
-  if (isSitePath(path)) return true;
+  if (isSitePath(path) || path === '/agent/identity' || path === '/ask' || path === '/feeds/posts.jsonl') return true;
   if (['/', '/v1', '/v1/openapi.json', '/llms.txt', '/.well-known/mcp.json', '/.well-known/mcp-server', '/open/mcp', '/me/mcp'].includes(path)) return true;
   if (['/v1/feed', '/v1/search', '/v1/networks', '/v1/settings', '/v1/about', '/v1/events/upcoming'].includes(path)) return true;
   if (method === 'PATCH' && /^\/v1\/me\/listings\/[^/]+$/.test(path)) return true;
@@ -1139,10 +1140,21 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { ...publicHeaders, 'access-control-max-age': '86400' } });
   // Same per-client limit as the read-only API: feed and search fan out to four other networks.
   if (env.PUBLIC_API_RATE_LIMITER) {
-    const { success } = await env.PUBLIC_API_RATE_LIMITER.limit({ key: request.headers.get('cf-connecting-ip') ?? 'unknown' });
+    // A registered agent (auth.md) gets its own bucket instead of sharing one with its IP address.
+    const agent = await agentFromRequest(env, origin, request);
+    const { success } = await env.PUBLIC_API_RATE_LIMITER.limit({ key: agent ?? request.headers.get('cf-connecting-ip') ?? 'unknown' });
     if (!success) return new Response(JSON.stringify({ error: { code: 'rate_limited', message: 'Too many requests. Wait a minute and try again.' } }), { status: 429, headers: { ...publicHeaders, 'content-type': 'application/json; charset=utf-8', 'retry-after': '60' } });
   }
   try {
+    if (path === '/ask' && (request.method === 'POST' || request.method === 'GET')) return nlwebAsk(request, env, origin);
+    if (request.method === 'GET' && path === '/feeds/posts.jsonl') return postsFeed(env, origin);
+    if (request.method === 'POST' && path === '/agent/identity') {
+      try { return json(await registerAgent(env, origin, await request.json().catch(() => ({}))), 0); }
+      catch (error) {
+        if (error instanceof AgentAuthError) return json({ error: error.code, error_description: error.message }, 0, error.status);
+        throw error;
+      }
+    }
     // Pages, Markdown and discovery documents for people and agents.
     const site = await handleSiteRequest(request);
     if (site) return site;
@@ -1278,6 +1290,59 @@ function paymentProgress(outcome: { payment: Payment; detail?: string }, origin:
   response.headers.set('location', poll);
   response.headers.set('retry-after', '5');
   return response;
+}
+
+// ─── NLWeb ───────────────────────────────────────────────────────────────────
+
+/**
+ * NLWeb v0.55 /ask: a plain-language question answered with schema.org items from the docs and
+ * from public posts on every network. Failures keep HTTP 200, as the spec describes. With
+ * prefer.streaming and Accept: text/event-stream the same items arrive as start, result and
+ * complete events.
+ */
+async function nlwebAsk(request: Request, env: AgentEnv, origin: string): Promise<Response> {
+  const url = new URL(request.url);
+  const input = request.method === 'POST' ? await request.json().catch(() => ({})) as { query?: { text?: unknown }; prefer?: { streaming?: unknown } } : { query: { text: url.searchParams.get('query') ?? url.searchParams.get('q') }, prefer: {} };
+  const text = typeof input.query?.text === 'string' ? input.query.text.trim() : '';
+  const meta = { version: '0.55' };
+  if (!text || text.length > 500) return json({ _meta: { ...meta, response_type: 'failure' }, error: { code: 'INVALID_QUERY', message: 'Send query.text with 1 to 500 characters.' } }, 0);
+  const docs = searchDocs(origin, text).slice(0, 3).map((page) => ({ '@type': 'TechArticle', name: page.title, description: page.description, url: page.url, grounding: { source: 'Open Media documentation', excerpts: page.matches.slice(0, 3) } }));
+  let posts: object[] = [];
+  try {
+    const found = await search(env, origin, text) as { posts?: AgentPost[] };
+    posts = (found.posts ?? []).slice(0, 10).map((post) => ({
+      '@type': 'SocialMediaPosting', name: post.title ?? post.text.slice(0, 80), description: post.text.slice(0, 500), url: post.url, datePublished: post.createdAt,
+      author: { '@type': 'Person', name: post.author.name, identifier: post.author.handle }, isPartOf: post.network, grounding: { source: post.network, why: post.why.used },
+    }));
+  } catch { /* Networks can be down; documentation results still answer. */ }
+  const results = [...docs, ...posts];
+  const streaming = input.prefer?.streaming === true && /text\/event-stream/.test(request.headers.get('accept') ?? '');
+  if (!streaming) {
+    if (!results.length) return json({ _meta: { ...meta, response_type: 'failure' }, error: { code: 'NO_RESULTS', message: 'Nothing on Open Media or the open networks matched.' } }, 0);
+    return json({ _meta: { ...meta, response_type: 'answer', response_format: 'conversational_search' }, results }, 0);
+  }
+  const event = (name: string, data: object) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
+  const body = [
+    event('start', { _meta: { ...meta, response_type: 'answer', streaming: true } }),
+    ...(results.length ? results.map((item, index) => event('result', { index, item })) : [event('error', { code: 'NO_RESULTS', message: 'Nothing matched.' })]),
+    event('complete', { _meta: { ...meta, response_type: 'answer' } }),
+  ].join('');
+  return new Response(body, { headers: { ...publicHeaders, 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store' } });
+}
+
+/** Schema feed: Open Media's newest public posts as JSON Lines of schema.org SocialMediaPosting. */
+async function postsFeed(env: AgentEnv, origin: string): Promise<Response> {
+  let records: PublicPostRecord[];
+  try {
+    records = await callRpc<PublicPostRecord[]>(env, fetch, 'open_media_public_posts', { p_limit: 50, p_before_created_at: null, p_before_id: null, p_author_handle: null, p_media: null });
+  } catch {
+    return new Response(JSON.stringify({ error: { code: 'upstream_unavailable', message: 'The posts feed is unavailable right now.' } }), { status: 503, headers: { ...publicHeaders, 'content-type': 'application/json; charset=utf-8', 'retry-after': '30' } });
+  }
+  const lines = (Array.isArray(records) ? records : []).map((record) => JSON.stringify({
+    '@context': 'https://schema.org', '@type': 'SocialMediaPosting', identifier: record.id, url: `${origin}/v1/posts/${record.id}`, datePublished: record.createdAt,
+    articleBody: record.body, author: { '@type': 'Person', name: record.author.displayName, identifier: `@${record.author.handle}`, url: `${origin}/v1/profiles/${record.author.handle}` },
+  }));
+  return new Response(lines.join('\n') + (lines.length ? '\n' : ''), { headers: { ...publicHeaders, 'content-type': 'application/x-ndjson; charset=utf-8', 'cache-control': 'public, max-age=300' } });
 }
 
 function json(body: Json | object, maxAgeSeconds: number, status = 200): Response {

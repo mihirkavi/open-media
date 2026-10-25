@@ -184,11 +184,17 @@ Everything Open Media does for people, it also offers to programs and AI assista
 | `/v1/me`, `/v1/me/posts`, `/v1/me/conversations`, `/v1/me/contacts`, `/v1/me/identity`, `/v1/me/follows`, `/v1/me/listings`, `/v1/me/payments`, `/v1/me/export` | Your access token | Publish, delete and report posts, offer products and services, pay, tip and unlock (always previewed and confirmed first), read and send messages, manage your private contacts, privacy and follows, export your data |
 | MCP: `/open/mcp`, `/me/mcp` and `/docs/mcp` | No / your access token / no | The same as tools for Claude, ChatGPT and other assistants, plus searchable documentation |
 | WebMCP | No | Every page of the API site and the web app registers read-only tools (search, feed, events, profiles) through `document.modelContext` for agents in the browser |
-| Discovery | No | `/llms.txt`, `/agents.md`, `/auth.md`, `/docs`, `/v1/openapi.json`, `/sitemap.xml`, `/.well-known/ard.json`, `/.well-known/agent-skills/index.json`, `/.well-known/agent-card.json`, `/.well-known/api-catalog` and MCP server cards; every page also answers in Markdown (`Accept: text/markdown` or `.md`) |
+| `POST /ask` (NLWeb v0.55) | No | Ask in plain language; answers are schema.org items from the docs and every open network, as JSON or a stream of events |
+| `POST /agent/identity` | No | An agent registers itself and trades the assertion at `/oauth/token` (JWT-bearer grant) for a read-only token with its own rate limit; it never opens anyone's account |
+| Discovery | No | `/llms.txt`, `/agents.md`, `/auth.md`, `/docs`, `/v1/openapi.json`, `/sitemap.xml`, `/.well-known/ard.json`, `/.well-known/agent-skills/index.json`, `/.well-known/agent-card.json`, `/.well-known/api-catalog`, `/schemamap.xml`, `/feeds/posts.jsonl` and MCP server cards; every page also answers in Markdown (`Accept: text/markdown` or `.md`) |
 
 ```json
 { "mcpServers": { "open-media": { "url": "https://<open-media-api>/open/mcp" } } }
 ```
+
+### SDK, command line and Python client
+
+[`packages/`](packages) holds a typed TypeScript SDK (`open-media-sdk`), a command line (`open-media`: `feed`, `search`, `events`, `profile`, `timeline`, `me`, `post --yes`, `payments`, `mcp-config`, all with `--json`) and a Python client. They are not on npm or PyPI yet; build them from source (see [packages/README.md](packages/README.md)). `npm run packages:test` runs their tests.
 
 ### Plugin for Claude Code and Codex
 

@@ -1,0 +1,22 @@
+{
+  "name": "open-media-sdk",
+  "version": "0.1.0",
+  "description": "Official TypeScript client for the Open Media API: one feed and search across Open Media, Farcaster, Lens, Hive and DeSo, Bay Area events, and the person's own Open Media account.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
+  "files": ["dist", "README.md"],
+  "sideEffects": false,
+  "engines": { "node": ">=18" },
+  "homepage": "https://convo-mail-sync.convo-mail-sync.workers.dev/developers",
+  "repository": { "type": "git", "url": "git+https://github.com/mihirkavi/open-media.git", "directory": "packages/sdk" },
+  "bugs": { "url": "https://github.com/mihirkavi/open-media/issues" },
+  "keywords": ["open-media", "social", "farcaster", "lens", "hive", "deso", "feed", "search", "mcp", "sdk"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --import tsx --test src/*.test.ts",
+    "prepublishOnly": "npm run build"
+  }
+}
