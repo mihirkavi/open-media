@@ -113,7 +113,8 @@ export function eventWhen(event: Pick<PostEvent, 'startsAt' | 'dateOnly' | 'time
   }
   const date = new Date(event.startsAt);
   const options: Intl.DateTimeFormatOptions = { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', ...(event.timezone ? { timeZone: event.timezone } : {}) };
-  try { return new Intl.DateTimeFormat(locale, options).format(date).replace(/, (\d)/, ' · $1'); }
+  // iOS formats the time as "… at 9:30 AM"; Android and browsers use a comma. Show " · " on all.
+  try { return new Intl.DateTimeFormat(locale, options).format(date).replace(/(, | at )(\d)/, ' · $2'); }
   catch { return new Intl.DateTimeFormat(locale, { ...options, timeZone: undefined }).format(date); }
 }
 
