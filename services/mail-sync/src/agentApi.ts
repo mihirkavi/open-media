@@ -23,7 +23,7 @@ import { networkSearches } from '../../../src/connectors/networkSearch';
 import { collapseRepeatedPosts, NetworkId, networks } from '../../../src/domain/networkPosts';
 import { explainFeedPost, FeedMode, SocialPost } from '../../../src/domain/posts';
 import { PostListing, validateListing } from '../../../src/domain/listings';
-import { isPaymentChain, onchainTransfer, Payment } from '../../../src/domain/payments';
+import { isPaymentChain, onchainTransfer, Payment, paymentBreakdown, PaymentChain, PaymentRail, previewCharge } from '../../../src/domain/payments';
 import { maxPostLength, PublicPostRecord, socialPostFromPublic } from '../../../src/domain/publicPosts';
 import { parseSearchQuery, postMatchesSearch } from '../../../src/domain/searchQuery';
 import { searchSettings, settingIndex } from '../../../src/domain/settings';
@@ -586,6 +586,50 @@ export class Account {
     return content;
   }
 
+  /**
+   * What a payment would be, without starting it: who is paid, how much, and every fee. Agents
+   * show this to the person and start the payment only after the person agrees to that amount.
+   */
+  async previewPayment(body: Record<string, unknown>) {
+    const contextType = String(body.contextType ?? 'listing');
+    const postId = String(body.contextId ?? body.postId ?? '');
+    const rail = String(body.rail ?? '') as PaymentRail;
+    if (!['listing', 'tip', 'paid_post'].includes(contextType)) throw new AgentError(400, 'bad_request', 'contextType must be listing, tip or paid_post.');
+    if (rail !== 'card' && rail !== 'onchain') throw new AgentError(400, 'bad_request', 'rail must be card or onchain.');
+    const chain = rail === 'onchain' ? String(body.chain ?? 'base-sepolia') as PaymentChain : null;
+    let priceMinor: number | null; let currency: string; let feeBps: number; let card: boolean; let chains: string[];
+    if (contextType === 'listing') {
+      const options = await this.paymentOptions(postId);
+      if (!options.available) throw new AgentError(409, 'refused', 'This listing is sold out.');
+      ({ priceMinor, currency, card, chains } = options); feeBps = options.platformFeeBps;
+    } else {
+      const options = await this.postPaymentOptions(postId);
+      const paid = options.paid as { priceMinor: number; currency: string; unlocked: boolean } | null;
+      if (contextType === 'tip' && !options.tipsEnabled) throw new AgentError(409, 'refused', 'This creator does not take tips.');
+      if (contextType === 'paid_post' && (!paid || paid.unlocked)) throw new AgentError(409, 'refused', paid ? 'The person already unlocked this post.' : 'This post is free.');
+      priceMinor = contextType === 'tip' ? (Number.isInteger(body.amountMinor) ? body.amountMinor as number : null) : paid!.priceMinor;
+      currency = contextType === 'tip' ? 'USD' : paid!.currency;
+      feeBps = options.fees[contextType] ?? 0; card = options.card; chains = options.chains;
+    }
+    if (!priceMinor) throw new AgentError(400, 'bad_request', contextType === 'tip' ? 'Ask the person how much to tip (amountMinor, 100 to 50000 cents).' : 'This has no price. Message the seller instead.');
+    if (rail === 'card' && !card) throw new AgentError(409, 'refused', 'This person does not take card payments here.');
+    if (rail === 'onchain' && !chains.includes(chain!)) throw new AgentError(409, 'refused', 'This person does not take USDC on that network here.');
+    const post = await callRpc<UpstreamPost | null>(this.env, fetch, 'open_media_public_post', { p_post_id: postId }).catch(() => null);
+    const recipient = (post as { author?: { handle?: string } } | null)?.author?.handle ?? null;
+    const charge = previewCharge(priceMinor, currency, rail, chain, feeBps);
+    return { contextType, postId, recipient, ...charge, breakdown: paymentBreakdown({ ...charge, recipient }) };
+  }
+
+  /** The agent's way to pay: refused until the person confirmed exactly this amount. */
+  async startPaymentWithConfirmation(body: Record<string, unknown>) {
+    const preview = await this.previewPayment(body);
+    if (body.confirm !== true) {
+      return { requiresConfirmation: true, preview, note: 'Nothing was started. Show the person who is paid, the amount and the fees. Only if they agree, call again with confirm: true and expectedAmountMinor set to this amountMinor.' };
+    }
+    if (body.expectedAmountMinor !== preview.amountMinor) throw new AgentError(409, 'confirmation_mismatch', 'The amount the person confirmed does not match. Show the new preview and ask again.');
+    return this.pay(body);
+  }
+
   async submitTransaction(id: string, txHash: unknown) {
     if (!uuid.test(id)) throw new AgentError(404, 'not_found', 'Payment not found.');
     if (typeof txHash !== 'string') throw new AgentError(400, 'bad_request', 'Send txHash.');
@@ -745,7 +789,7 @@ function tool(server: McpServer, name: string, config: { title: string; descript
     title: config.title,
     description: config.description,
     inputSchema: z.object(config.input),
-    annotations: { readOnlyHint: config.readOnly, openWorldHint: true, destructiveHint: !config.readOnly && name.startsWith('delete') },
+    annotations: { readOnlyHint: config.readOnly, openWorldHint: true, destructiveHint: !config.readOnly && /^(delete|remove)_/.test(name) },
   }, (async (args: Record<string, unknown>) => {
     try { return result(await run(args ?? {})); } catch (error) { return failure(error); }
   }) as never);
@@ -793,6 +837,24 @@ function registerAccountTools(server: McpServer, account: Account) {
 
   tool(server, 'rate_listing', { title: 'Rate a product or service', description: 'Give a listing 1 to 5 stars, or null to withdraw the person’s rating. Only verified people who show their legal name can rate; there are no written reviews and people are never rated. Ask the person for the number of stars; never choose it for them.', input: { postId: z.string(), stars: z.number().int().min(1).max(5).nullable() }, readOnly: false }, (args) => account.rateListing(String(args.postId), args.stars));
 
+  // Payments, tips and paid posts. Money only moves when the person finishes on Stripe's page or
+  // approves the transfer in their own wallet; agents never hold cards, keys or funds.
+  tool(server, 'get_payment_setup', { title: 'My payment setup', description: 'Whether the person can get paid by card (Stripe) and which wallets they linked, whether they take tips, Open Media’s fees, and what this server supports (test mode or live).', input: {}, readOnly: true }, () => account.paymentSetup());
+  tool(server, 'list_my_payments', { title: 'My payments', description: 'Payments the person sent and received, newest first, with status and history. Private to the person.', input: { limit: z.number().int().min(1).max(200).optional() }, readOnly: true }, (args) => account.payments(Number(args.limit ?? 50)));
+  tool(server, 'get_payment', { title: 'Get a payment', description: 'One of the person’s payments by id.', input: { paymentId: z.string() }, readOnly: true }, (args) => account.payment(String(args.paymentId)));
+  tool(server, 'get_payment_options', { title: 'How something can be paid for', description: 'For a listing (contextType listing) or a post (tip or paid_post): whether card and USDC work, the price and the fee rates.', input: { postId: z.string(), contextType: z.enum(['listing', 'tip', 'paid_post']) }, readOnly: true }, (args) => args.contextType === 'listing' ? account.paymentOptions(String(args.postId)) : account.postPaymentOptions(String(args.postId)));
+  tool(server, 'start_payment', { title: 'Start a payment (asks first)', description: 'Pay for a listing, tip a creator or unlock a paid post. First call without confirm: it starts nothing and returns who is paid, the amount and every fee. Show that to the person; only if they agree, call again with confirm: true and expectedAmountMinor. Card: returns a Stripe checkout link the person opens themselves. USDC: returns the exact transfer for the person’s own wallet. Never choose a tip amount for the person.', input: {
+    contextType: z.enum(['listing', 'tip', 'paid_post']), postId: z.string(), rail: z.enum(['card', 'onchain']), chain: z.enum(['base-sepolia', 'base']).optional(),
+    amountMinor: z.number().int().min(100).max(50_000).optional().describe('Tips only: the amount the person chose, in cents'), confirm: z.boolean().optional(), expectedAmountMinor: z.number().int().optional(),
+  }, readOnly: false }, (args) => account.startPaymentWithConfirmation(args));
+  tool(server, 'submit_payment_transaction', { title: 'Report a USDC transaction', description: 'After the person’s wallet sent the USDC transfer, pass its transaction hash. Open Media then checks it on the network; it is not paid until that check passes.', input: { paymentId: z.string(), txHash: z.string() }, readOnly: false }, (args) => account.submitTransaction(String(args.paymentId), args.txHash));
+  tool(server, 'check_payment', { title: 'Check a payment again', description: 'Re-check a USDC payment on the network, or read a card payment’s status after the person paid on Stripe.', input: { paymentId: z.string() }, readOnly: false }, (args) => account.checkPayment(String(args.paymentId)));
+  tool(server, 'start_payout_setup', { title: 'Set up getting paid by card', description: 'Returns a Stripe link for the person to open themselves to set up payouts. Stripe collects bank and tax details; never ask the person for them.', input: {}, readOnly: false }, () => account.startPayouts());
+  tool(server, 'set_tips', { title: 'Turn tips on or off', description: 'Whether people can tip the person on their posts. Confirm with the person first.', input: { enabled: z.boolean() }, readOnly: false }, (args) => account.setTips(args.enabled));
+  tool(server, 'remove_wallet', { title: 'Remove a linked wallet', description: 'Unlink one of the person’s wallets (by id from get_payment_setup). Linking a wallet needs the person’s own signature in the app.', input: { walletId: z.string() }, readOnly: false }, (args) => account.removeWallet(String(args.walletId)));
+  tool(server, 'publish_paid_post', { title: 'Publish a paid post', description: 'Publish a post with a free public preview and a paid part only buyers can read. Confirm the preview, the paid text and the price with the person first.', input: { preview: z.string().min(1).max(maxPostLength), paidText: z.string().min(1).max(10_000), priceMinor: z.number().int().min(50).max(100_000_000), currency: z.string().length(3).optional() }, readOnly: false }, (args) => account.publishPaidPost(args));
+  tool(server, 'get_paid_post', { title: 'Read a paid post', description: 'The paid part of a post, if the person wrote it or paid for it; otherwise only its price.', input: { postId: z.string() }, readOnly: true }, (args) => account.paidContent(String(args.postId)));
+
   // Identity, privacy and follows
   tool(server, 'get_my_identity', { title: 'My identity and privacy', description: 'The person’s identity tier (2 handle only, 3 declared name, 4 verified, 5 verified with legal name shown), whether they have the blue tick, the name others see, public or private, verification status and how many follow requests wait.', input: {}, readOnly: true }, () => account.identity());
   tool(server, 'set_my_privacy', { title: 'Set name and privacy', description: 'Change which name others see (handle_only, declared, or verified_legal once verified) and whether the account is public or private. Confirm with the person first; private hides posts from everyone but accepted followers.', input: { nameDisclosure: z.enum(['handle_only', 'declared', 'verified_legal']).optional(), visibility: z.enum(['public', 'private']).optional() }, readOnly: false }, (args) => account.setIdentity(args));
@@ -835,7 +897,7 @@ function openMcp(env: AgentEnv, origin: string) {
   }, { legacy: 'stateless', responseMode: 'json' });
 }
 
-function accountMcp(env: AgentEnv, origin: string, account: Account) {
+export function accountMcp(env: AgentEnv, origin: string, account: Account) {
   return createMcpHandler(() => {
     const server = new McpServer({ name: 'open-media-account', title: 'Open Media (your account)', version }, { instructions: `${instructions} These tools act as the signed-in person; ask before publishing, deleting or sending anything.` });
     registerPublicTools(server, env, origin);
@@ -984,6 +1046,27 @@ export function fullOpenApi(origin: string) {
       '/v1/me/follow-requests/{id}': { post: { summary: 'Accept or decline a follow request', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['accept'], properties: { accept: { type: 'boolean' } } } } } }, responses: { 200: ok('Done'), 401: error } } },
       '/v1/me/followers/{id}': { delete: { summary: 'Remove a follower', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], responses: { 200: ok('Done'), 401: error } } },
       '/v1/verification/stripe/webhook': { post: { summary: 'Stripe Identity webhook (signed by Stripe; not for clients)', responses: { 200: ok('Received'), 400: error, 503: error } } },
+      '/v1/payments/stripe/webhook': { post: { summary: 'Stripe payments and Connect webhook (signed by Stripe; not for clients). Each event is re-read from Stripe before it changes a payment.', responses: { 200: ok('Received'), 400: error, 503: error } } },
+      '/v1/me/payments/setup': { get: { summary: 'Your card payouts, linked wallets, tips setting, fees and what this server supports', security: bearer, responses: { 200: ok('Payment setup'), 401: error } } },
+      '/v1/me/payments/payouts': { post: { summary: 'Start or continue Stripe payouts setup (returns a link to open)', security: bearer, responses: { 201: ok('Stripe link'), 401: error, 503: error } } },
+      '/v1/me/payments/payouts/refresh': { post: { summary: 'Re-read your Stripe account status', security: bearer, responses: { 200: ok('Payment setup'), 401: error, 404: error } } },
+      '/v1/me/payments/tips': { put: { summary: 'Turn tips on or off', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['enabled'], properties: { enabled: { type: 'boolean' } } } } } }, responses: { 200: ok('Tips setting'), 400: error, 401: error } } },
+      '/v1/me/payments': {
+        get: { summary: 'Payments you sent and received', security: bearer, parameters: [{ name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 200 } }], responses: { 200: ok('Payments'), 401: error } },
+        post: { summary: 'Start a payment for a listing, a tip or a paid post. The amount and recipient come from Open Media, except a tip’s amount. Card returns checkoutUrl; USDC returns the transfer for your wallet. Nothing is paid until Stripe or the network confirms it.', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['contextType', 'contextId', 'rail'], properties: {
+          contextType: { type: 'string', enum: ['listing', 'tip', 'paid_post'] }, contextId: { type: 'string', format: 'uuid' }, rail: { type: 'string', enum: ['card', 'onchain'] }, chain: { type: 'string', enum: ['base-sepolia', 'base'] },
+          amountMinor: { type: 'integer', minimum: 100, maximum: 50000, description: 'Tips only, in cents' }, idempotencyKey: { type: 'string', format: 'uuid' },
+        } } } } }, responses: { 201: ok('Payment started'), 400: error, 401: error, 409: error, 503: error } },
+      },
+      '/v1/me/payments/{id}': { get: { summary: 'One of your payments', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], responses: { 200: ok('Payment'), 401: error, 404: error } } },
+      '/v1/me/payments/{id}/transaction': { post: { summary: 'Report the USDC transaction that paid; Open Media checks it on the network', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], requestBody: textBody('txHash', 66), responses: { 200: ok('Payment and check result'), 400: error, 401: error, 404: error } } },
+      '/v1/me/payments/{id}/check': { post: { summary: 'Check a payment again', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], responses: { 200: ok('Payment and check result'), 401: error, 404: error } } },
+      '/v1/me/wallets': { post: { summary: 'Link a wallet with a signature of Open Media’s message from that wallet (at most 10 minutes old)', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['message', 'signature'], properties: { message: { type: 'string' }, signature: { type: 'string' } } } } } }, responses: { 201: ok('Linked wallet'), 400: error, 401: error, 409: error } } },
+      '/v1/me/wallets/{id}': { delete: { summary: 'Unlink a wallet', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], responses: { 200: ok('Removed'), 401: error, 404: error } } },
+      '/v1/me/listings/{postId}/payment-options': { get: { summary: 'How a listing can be paid for: card, USDC networks, price and fee', security: bearer, parameters: [{ name: 'postId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], responses: { 200: ok('Options'), 401: error, 404: error } } },
+      '/v1/me/posts/{id}/payment-options': { get: { summary: 'How a post can be paid for: tips, unlocking, card, USDC networks and fees', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], responses: { 200: ok('Options'), 401: error, 404: error } } },
+      '/v1/me/posts/{id}/paid': { get: { summary: 'The paid part of a post, if you wrote it or paid for it; otherwise its price only', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], responses: { 200: ok('Paid part'), 401: error, 404: error } } },
+      '/v1/me/paid-posts': { post: { summary: 'Publish a post with a free preview and a paid part', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['preview', 'paidText', 'priceMinor'], properties: { preview: { type: 'string', maxLength: maxPostLength }, paidText: { type: 'string', maxLength: 10000 }, priceMinor: { type: 'integer', minimum: 50 }, currency: { type: 'string', minLength: 3, maxLength: 3 } } } } } }, responses: { 201: ok('Published'), 400: error, 401: error } } },
       '/v1/me/blocks': { post: { summary: 'Block or unblock someone', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['handle'], properties: { handle: { type: 'string' }, blocked: { type: 'boolean', default: true } } } } } }, responses: { 200: ok('Done'), 404: error, 401: error } } },
       '/v1/me/conversations/{id}/report': { post: { summary: 'Report unwanted contact', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['handle'], properties: { handle: { type: 'string' }, messageId: { type: 'string', format: 'uuid' } } } } } }, responses: { 200: ok('Reported'), 401: error } } },
       '/v1/mail-accounts': {

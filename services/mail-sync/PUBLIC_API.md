@@ -8,7 +8,7 @@ Production host: `https://convo-mail-sync.convo-mail-sync.workers.dev` (the host
 
 ## More for programs and agents
 
-The same Worker also serves the mixed feed, cross-network search, person timelines (`/v1/people/{network}/{handle}`), networks, settings, the mission, an account API (including the person's own encrypted contacts at `/v1/me/contacts`) and MCP servers (`src/agentApi.ts`). Start at `/llms.txt` or `/v1`, which list every interface; `/v1/openapi.json` describes all of them. See [ADR 0012](../../docs/adrs/0012-agent-interfaces-and-design-system.md).
+The same Worker also serves the mixed feed, cross-network search, person timelines (`/v1/people/{network}/{handle}`), networks, settings, the mission, an account API (including the person's own encrypted contacts at `/v1/me/contacts`, and payments, tips and paid posts under `/v1/me/payments` and `/v1/me/paid-posts`, where agents must show the person a preview and get their confirmation before starting a payment) and MCP servers (`src/agentApi.ts`). Start at `/llms.txt` or `/v1`, which list every interface; `/v1/openapi.json` describes all of them. See [ADR 0012](../../docs/adrs/0012-agent-interfaces-and-design-system.md).
 
 ## Endpoints
 

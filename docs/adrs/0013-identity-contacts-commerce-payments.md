@@ -220,6 +220,17 @@ Built:
 
 Not yet (phase 6): the acceptance run (a test-mode tip reaching a creator's Stripe account with fees shown) needs the owner's Stripe test keys, like phase 5. Paid posts are text only; there are no subscriptions or memberships.
 
+### Phase 7 status (2026-10-25)
+
+Built:
+
+- **REST and OpenAPI**: every phase 5 and 6 route is in `/v1/openapi.json`, `/v1` and `/llms.txt`, marked bearer-only, plus the signed `/v1/payments/stripe/webhook`.
+- **MCP** (`/me/mcp`): `get_payment_setup`, `list_my_payments`, `get_payment`, `get_payment_options` and `get_paid_post` are read-only; `start_payment`, `submit_payment_transaction`, `check_payment`, `start_payout_setup`, `set_tips`, `publish_paid_post` and `remove_wallet` (destructive) are writes. The public `/open/mcp` has no payment tools.
+- **Confirmation for high-impact actions**: `start_payment` starts nothing on its first call; it returns who is paid, the amount and every fee. It goes ahead only when called again with `confirm: true` and `expectedAmountMinor` equal to that amount, and even then money moves only when the person finishes on Stripe's page or approves the transfer in their own wallet. Agents can't link wallets (that needs the person's signature) and never choose a tip amount.
+- **Tests** (agent can't exceed the person's permissions): account payment routes refuse requests without a token; the real account MCP server is exercised for tool annotations, for nothing being created before confirmation or with a different amount, and for every call going to the database with the person's own token, never the server key. The database's own checks (phase 5 and 6 pgTAP) apply to agents exactly as to the app.
+
+Not yet: OAuth for third-party agents still covers only Open Media Events (`/mcp`); account tools use the person's access token.
+
 ---
 
 ## 5. Owner decisions (2026-10-24)
