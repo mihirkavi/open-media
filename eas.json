@@ -11,6 +11,18 @@
       "ios": {
         "image": "latest"
       }
+    },
+    "appetize": {
+      "extends": "production",
+      "autoIncrement": false,
+      "distribution": "internal",
+      "ios": {
+        "simulator": true,
+        "image": "latest"
+      },
+      "android": {
+        "buildType": "apk"
+      }
     }
   },
   "submit": {
