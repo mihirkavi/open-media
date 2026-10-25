@@ -17,7 +17,14 @@ This checklist defines “production ready” for the current onboarding private
 - [x] Local browser flow: magic-link onboarding, callback cleanup, profile creation, profile search, direct conversation, send, realtime receive, account export, and responsive layout.
 - [x] Latest signed iOS Store build finished successfully: build 9, EAS `f5916bd3-c316-487a-bbed-f6085bc38fcc`.
 
-## Production deploy of 2026-10-25
+## Production deploy of 2026-10-25 (Phases 3 and 4)
+
+- [x] Applied `20261026120000_post_listings.sql` and `20261026130000_listing_ratings.sql` with `npx supabase db push --linked` after a dry run; all 9 database suites passed locally first.
+- [x] Deployed the Worker as version `f116956c-cc11-487e-89b0-7c3cb6b39dd8`. Rollback target: `4ff6b1f5-d1ba-481f-a402-a75e064edd30`.
+- [x] Live probes: `/health`, `/v1/about`, `/llms.txt`, `/v1/feed`, `/v1/posts` and `/v1/openapi.json` (48 paths) return 200; `/v1/events/upcoming` returns real events with Luma, Meetup and Eventbrite all reporting ok; `/v1/search?q=hiking events this weekend` is understood as upcoming events; `/v1/me/listings` and the rating route return 401 without a token; `/open/mcp` lists `find_upcoming_events`.
+- [ ] Not verified in production: publishing and rating a listing with a real account (needs a production token; rating also needs Stripe Identity keys).
+
+## Production deploy of 2026-10-25 (Phases 1 and 2)
 
 - [x] Production Supabase migration history matched local history through `20261021120000_post_videos.sql` before this deploy, so the public posts, email and short-video migrations below are already in production.
 - [x] Applied `20261024120000_people_and_contacts.sql`, `20261025120000_identity_visibility_follows.sql` and `20261025130000_profile_read_compatibility.sql` with `npx supabase db push --linked` after a dry run. All 7 database suites passed locally first. The compatibility migration keeps installed app versions able to read public, named profile rows and the profiles of people they already talk to.
