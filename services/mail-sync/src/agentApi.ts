@@ -34,6 +34,7 @@ import {
   availableChains, cardPaymentsConfigured, checkOnchainPayment, handlePaymentsWebhook, linkWallet, PaymentsEnv, PaymentsError, paymentsAvailability, refreshPayoutAccount, startCardCheckout, startPayoutOnboarding,
 } from './payments.js';
 import { EventsUnavailable, PublicEventsEnv, upcomingEvents } from './publicEvents.js';
+import { handleSiteRequest, isSitePath, llmsTxt as siteLlmsTxt } from './agentSite.js';
 import { authenticate } from './session.js';
 import { discloseLegalName, handleVerificationWebhook, startVerification, VerificationEnv, VerificationError, verificationConfigured } from './verification.js';
 
@@ -53,6 +54,8 @@ const publicHeaders: Record<string, string> = {
   'access-control-allow-headers': 'authorization, content-type, mcp-protocol-version, mcp-session-id',
   'access-control-expose-headers': 'mcp-session-id',
   'x-content-type-options': 'nosniff',
+  // About 120 requests a minute per client (the Cloudflare limiter does not report what is left).
+  'ratelimit-policy': '"per-client";q=120;w=60',
 };
 
 export class AgentError extends Error {
@@ -67,6 +70,7 @@ async function paymentsCall<T>(run: () => Promise<T>): Promise<T> {
 /** Paths served here. They are matched before the read-only public API and the mail routes. */
 export function isAgentPath(pathname: string, method: string): boolean {
   const path = pathname.replace(/\/+$/, '') || '/';
+  if (isSitePath(path)) return true;
   if (['/', '/v1', '/v1/openapi.json', '/llms.txt', '/.well-known/mcp.json', '/.well-known/mcp-server', '/open/mcp', '/me/mcp'].includes(path)) return true;
   if (['/v1/feed', '/v1/search', '/v1/networks', '/v1/settings', '/v1/about', '/v1/events/upcoming'].includes(path)) return true;
   if (method === 'PATCH' && /^\/v1\/me\/listings\/[^/]+$/.test(path)) return true;
@@ -298,11 +302,11 @@ export class Account {
     return { id: profile.id, handle: profile.handle, displayName: profile.display_name, bio: profile.bio, avatarUrl: profile.avatar_url, url: `${this.origin}/v1/profiles/${profile.handle}` };
   }
 
-  async publish(body: unknown) {
+  async publish(body: unknown, clientId: string = crypto.randomUUID()) {
     const text = typeof body === 'string' ? body.trim() : '';
     if (!text) throw new AgentError(400, 'bad_request', 'Write something before publishing.');
     if (text.length > maxPostLength) throw new AgentError(400, 'bad_request', `Posts can be up to ${maxPostLength} characters.`);
-    const post = await this.rpc<UpstreamPost>('open_media_create_post', { p_client_id: crypto.randomUUID(), p_body: text, p_video: null });
+    const post = await this.rpc<UpstreamPost>('open_media_create_post', { p_client_id: clientId, p_body: text, p_video: null });
     return formatPost(post, this.origin, this.env.SUPABASE_URL);
   }
 
@@ -407,7 +411,7 @@ export class Account {
   }
 
   // Products and services (ADR 0013, phase 3).
-  async publishListing(body: Record<string, unknown>) {
+  async publishListing(body: Record<string, unknown>, clientId: string = crypto.randomUUID()) {
     const checked = validateListing({
       kind: body.kind === 'service' ? 'service' : 'product', title: String(body.title ?? ''), price: body.price === undefined || body.price === null ? undefined : String(body.price),
       currency: typeof body.currency === 'string' ? body.currency : undefined, location: typeof body.location === 'string' ? body.location : undefined, remote: body.remote === true,
@@ -416,7 +420,7 @@ export class Account {
     if (body.kind !== 'product' && body.kind !== 'service') throw new AgentError(400, 'bad_request', 'kind must be product or service.');
     const text = typeof body.text === 'string' ? body.text.trim() : '';
     if (text.length > maxPostLength) throw new AgentError(400, 'bad_request', `Posts can be up to ${maxPostLength} characters.`);
-    const post = await this.rpc<UpstreamPost & { listing?: PostListing }>('open_media_create_listing_post', { p_client_id: crypto.randomUUID(), p_body: text, p_listing: checked.listing });
+    const post = await this.rpc<UpstreamPost & { listing?: PostListing }>('open_media_create_listing_post', { p_client_id: clientId, p_body: text, p_listing: checked.listing });
     return { ...formatPost(post, this.origin, this.env.SUPABASE_URL), listing: post.listing };
   }
 
@@ -568,14 +572,14 @@ export class Account {
     return { ...options, card: options.card && cardPaymentsConfigured(this.env), chains: options.chains.filter((chain) => chains.includes(chain as never)), testMode: !paymentsAvailability(this.env).live };
   }
 
-  async publishPaidPost(body: Record<string, unknown>) {
+  async publishPaidPost(body: Record<string, unknown>, clientId: string = crypto.randomUUID()) {
     const preview = typeof body.preview === 'string' ? body.preview.trim() : '';
     const paid = typeof body.paidText === 'string' ? body.paidText.trim() : '';
     if (!preview || preview.length > maxPostLength) throw new AgentError(400, 'bad_request', `Write a public preview of up to ${maxPostLength} characters.`);
     if (!paid || paid.length > 10_000) throw new AgentError(400, 'bad_request', 'paidText needs 1 to 10,000 characters.');
     if (!Number.isInteger(body.priceMinor) || (body.priceMinor as number) < 50) throw new AgentError(400, 'bad_request', 'priceMinor must be a whole number of cents, at least 50.');
     const currency = typeof body.currency === 'string' && /^[A-Z]{3}$/.test(body.currency) ? body.currency : 'USD';
-    const post = await this.rpc<UpstreamPost & { paid?: unknown }>('open_media_create_paid_post', { p_client_id: crypto.randomUUID(), p_preview: preview, p_paid_body: paid, p_price_minor: body.priceMinor, p_currency: currency });
+    const post = await this.rpc<UpstreamPost & { paid?: unknown }>('open_media_create_paid_post', { p_client_id: clientId, p_preview: preview, p_paid_body: paid, p_price_minor: body.priceMinor, p_currency: currency });
     return { ...formatPost(post, this.origin, this.env.SUPABASE_URL), paid: post.paid };
   }
 
@@ -908,43 +912,9 @@ export function accountMcp(env: AgentEnv, origin: string, account: Account) {
 
 // ─── Discovery ───────────────────────────────────────────────────────────────
 
+/** The llms.txt index; the agent site owns it so every link in it resolves to real content. */
 export function llmsTxt(origin: string): string {
-  const line = (item: { method?: string; path: string; description: string }) => `- ${item.method ? `${item.method} ` : ''}[${item.path}](${origin}${item.path.replace(/\{[^}]+\}/g, ':id').replace(/=$/, '=…')}): ${item.description}`;
-  return [
-    '# Open Media',
-    '',
-    `> ${tagline} ${promise} ${mission}`,
-    '',
-    `${philosophy.line} ${philosophy.body}`,
-    '',
-    'Public data needs no account or key. Account calls take the person’s own short-lived access token (“Authorization: Bearer …”), which they copy from the app (Settings → Developers and agents), and act only as them.',
-    '',
-    '## Discovery',
-    ...agentInterfaces.discovery.map(line),
-    '',
-    '## MCP servers',
-    ...agentInterfaces.mcp.map((server) => `- [${server.path}](${origin}${server.path}) (${server.auth}): ${server.description}`),
-    '',
-    '## Public API',
-    ...agentInterfaces.public.map(line),
-    '',
-    '## Account API',
-    ...agentInterfaces.account.map(line),
-    '',
-    '## Rules',
-    '- Open Media’s own public posts and profiles may be read and indexed freely; please use the API and cache responses.',
-    '- Posts from other networks keep their source and link back to it. Messages, email and contacts are never public.',
-    '- Agents identify as agents and never pose as people. Confirm with the person before publishing, deleting or sending.',
-    '',
-    '## Principles',
-    ...principles.map((item) => `- ${item}`),
-    '',
-    '## Status',
-    ...honestStatus.map((item) => `- ${item}`),
-    '',
-    `Source code (MIT): ${sourceRepository}`,
-    '',
-  ].join('\n');
+  return siteLlmsTxt(origin);
 }
 
 /** MCP server card (SEP-1649 draft): what servers exist here and how to reach them. */
@@ -984,7 +954,7 @@ export function apiIndex(origin: string) {
 }
 
 /** The original public read API's OpenAPI document, extended with the feed, search, account and discovery routes. */
-export function fullOpenApi(origin: string) {
+function baseOpenApi(origin: string) {
   const base = openApiDocument(origin) as { info: Record<string, unknown>; paths: Record<string, unknown>; components: { schemas: Record<string, unknown> } } & Record<string, unknown>;
   const error = { description: 'Error', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } };
   const ok = (description: string, schema: unknown = { type: 'object' }) => ({ description, content: { 'application/json': { schema } } });
@@ -1110,6 +1080,47 @@ export function fullOpenApi(origin: string) {
 
 // ─── REST router ─────────────────────────────────────────────────────────────
 
+const idempotentWrites = new Set(['POST /v1/me/posts', 'POST /v1/me/listings', 'POST /v1/me/paid-posts', 'POST /v1/me/payments']);
+
+/** A unique, readable operationId from the method and path, e.g. GET /v1/me/payments/{id} → getMePaymentsById. */
+function operationIdFor(method: string, path: string): string {
+  const words = path.replace(/^\/v1/, '').split('/').filter(Boolean).flatMap((part) => {
+    const param = part.match(/^\{(.+)\}$/);
+    return param ? ['by', param[1]] : part.replace(/^\./, 'well-known-').split(/[^a-zA-Z0-9]+/);
+  }).filter(Boolean);
+  const name = [method.toLowerCase(), ...words].map((word, index) => index === 0 ? word : word[0].toUpperCase() + word.slice(1)).join('');
+  return path === '/' ? `${method.toLowerCase()}Root` : name;
+}
+
+/**
+ * The OpenAPI document with what agents rely on added to every operation: a unique operationId,
+ * a description, Idempotency-Key where writes honour it, and the error, rate-limit, versioning
+ * and sandbox conventions.
+ */
+export function fullOpenApi(origin: string) {
+  const document = baseOpenApi(origin) as Record<string, any>;
+  for (const [path, operations] of Object.entries(document.paths as Record<string, Record<string, any>>)) {
+    for (const [method, operation] of Object.entries(operations)) {
+      if (!operation || typeof operation !== 'object' || !('responses' in operation)) continue;
+      operation.operationId ??= operationIdFor(method, path);
+      operation.description ??= operation.summary;
+      operation.responses[429] ??= { description: 'Rate limited. Wait for Retry-After seconds.', headers: { 'Retry-After': { schema: { type: 'integer' }, description: 'Seconds to wait' } }, content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } };
+      if (idempotentWrites.has(`${method.toUpperCase()} ${path}`)) {
+        operation.parameters = [...(operation.parameters ?? []), { name: 'Idempotency-Key', in: 'header', required: false, schema: { type: 'string', format: 'uuid' }, description: 'Retrying with the same key returns the first result instead of creating a second one.' }];
+      }
+    }
+  }
+  document.info = {
+    ...document.info,
+    'x-api-lifecycle': { versioning: 'Path-versioned (/v1). Fields may be added; nothing is removed or changed incompatibly without at least 90 days’ notice, a Deprecation header and a Sunset header.', documentation: `${origin}/docs#versioning-and-deprecation` },
+    'x-rate-limits': { policy: 'About 120 requests per minute per client IP on public and agent routes.', headers: ['RateLimit-Policy', 'Retry-After'] },
+    'x-sandbox': { description: 'Payments run in Stripe test mode and on Base Sepolia until live payments are approved; GET /v1/me/payments/setup reports the mode. For a private sandbox, run the open-source stack locally with `npm run local`.', documentation: `${origin}/developers` },
+  };
+  document.servers = [{ url: origin, description: 'Open Media API' }];
+  document.externalDocs = { description: 'API documentation', url: `${origin}/docs` };
+  return document;
+}
+
 export async function handleAgentRequest(request: Request, env: AgentEnv, internal?: InternalHandler): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, '') || '/';
@@ -1121,6 +1132,9 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     if (!success) return new Response(JSON.stringify({ error: { code: 'rate_limited', message: 'Too many requests. Wait a minute and try again.' } }), { status: 429, headers: { ...publicHeaders, 'content-type': 'application/json; charset=utf-8', 'retry-after': '60' } });
   }
   try {
+    // Pages, Markdown and discovery documents for people and agents.
+    const site = await handleSiteRequest(request);
+    if (site) return site;
     if (request.method === 'GET' && (path === '/' || path === '/v1')) return json(apiIndex(origin), 300);
     if (request.method === 'GET' && path === '/v1/openapi.json') return json(fullOpenApi(origin), 300);
     if (path === '/llms.txt') return new Response(llmsTxt(origin), { headers: { ...publicHeaders, 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'public, max-age=3600' } });
@@ -1167,8 +1181,11 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     const account = await Account.fromRequest(request, env, origin, internal);
     const raw = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method) ? await request.json().catch(() => ({})) as unknown : {};
     const body = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+    // Idempotency-Key: a retried write with the same key returns the first result instead of a copy.
+    const idempotencyKey = request.headers.get('idempotency-key')?.trim();
+    if (idempotencyKey !== undefined && !uuid.test(idempotencyKey)) throw new AgentError(400, 'bad_request', 'Idempotency-Key must be a UUID.');
     if (request.method === 'GET' && path === '/v1/me') return json(await account.me(), 0);
-    if (request.method === 'POST' && path === '/v1/me/posts') return json(await account.publish(body.body ?? body.text), 0, 201);
+    if (request.method === 'POST' && path === '/v1/me/posts') return json(await account.publish(body.body ?? body.text, idempotencyKey), 0, 201);
     const postMatch = path.match(/^\/v1\/me\/posts\/([^/]+)$/);
     if (request.method === 'DELETE' && postMatch) return json(await account.deletePost(decodeURIComponent(postMatch[1])), 0);
     const reportMatch = path.match(/^\/v1\/posts\/([^/]+)\/report$/);
@@ -1188,7 +1205,7 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     const contactMatch = path.match(/^\/v1\/me\/contacts\/([^/]+)$/);
     if (request.method === 'DELETE' && contactMatch) return json(await account.deleteContact(decodeURIComponent(contactMatch[1])), 0);
     if (request.method === 'PUT' && path === '/v1/me/linked-accounts') return json(await account.setLinkedAccounts(Array.isArray(raw) ? raw : body.accounts), 0);
-    if (request.method === 'POST' && path === '/v1/me/listings') return json(await account.publishListing(body), 0, 201);
+    if (request.method === 'POST' && path === '/v1/me/listings') return json(await account.publishListing(body, idempotencyKey), 0, 201);
     const listingMatch = path.match(/^\/v1\/me\/listings\/([^/]+)$/);
     if (request.method === 'PATCH' && listingMatch) return json(await account.updateListing(decodeURIComponent(listingMatch[1]), body) as object, 0);
     const ratingMatch = path.match(/^\/v1\/me\/listings\/([^/]+)\/rating$/);
@@ -1198,7 +1215,7 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     if (request.method === 'PUT' && path === '/v1/me/identity') return json(await account.setIdentity(body), 0);
     if (request.method === 'POST' && path === '/v1/me/verification') return json(await account.startVerification(), 0, 201);
     if (request.method === 'GET' && path === '/v1/me/payments') return json(await account.payments(Number(url.searchParams.get('limit') ?? 50)), 0);
-    if (request.method === 'POST' && path === '/v1/me/payments') return json(await account.pay(body), 0, 201);
+    if (request.method === 'POST' && path === '/v1/me/payments') return json(await account.pay(idempotencyKey ? { ...body, idempotencyKey } : body), 0, 201);
     if (request.method === 'GET' && path === '/v1/me/payments/setup') return json(await account.paymentSetup(), 0);
     if (request.method === 'POST' && path === '/v1/me/payments/payouts') return json(await account.startPayouts(), 0, 201);
     if (request.method === 'POST' && path === '/v1/me/payments/payouts/refresh') return json(await account.refreshPayouts(), 0);
@@ -1209,7 +1226,7 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     const checkMatch = path.match(/^\/v1\/me\/payments\/([^/]+)\/check$/);
     if (request.method === 'POST' && checkMatch) return json(await account.checkPayment(decodeURIComponent(checkMatch[1])), 0);
     if (request.method === 'PUT' && path === '/v1/me/payments/tips') return json(await account.setTips(body.enabled), 0);
-    if (request.method === 'POST' && path === '/v1/me/paid-posts') return json(await account.publishPaidPost(body), 0, 201);
+    if (request.method === 'POST' && path === '/v1/me/paid-posts') return json(await account.publishPaidPost(body, idempotencyKey), 0, 201);
     const postOptionsMatch = path.match(/^\/v1\/me\/posts\/([^/]+)\/payment-options$/);
     if (request.method === 'GET' && postOptionsMatch) return json(await account.postPaymentOptions(decodeURIComponent(postOptionsMatch[1])), 0);
     const paidMatch = path.match(/^\/v1\/me\/posts\/([^/]+)\/paid$/);
@@ -1229,7 +1246,11 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     if (request.method === 'DELETE' && followerMatch) return json(await account.removeFollower(decodeURIComponent(followerMatch[1])) as object, 0);
     throw new AgentError(404, 'not_found', 'No such endpoint. See /v1 or /llms.txt.');
   } catch (error) {
-    if (error instanceof AgentError) return json({ error: { code: error.code, message: error.message } }, 0, error.status);
+    if (error instanceof AgentError) {
+      const response = json({ error: { code: error.code, message: error.message } }, 0, error.status);
+      if (error.status === 401) response.headers.set('www-authenticate', `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource"`);
+      return response;
+    }
     console.error(JSON.stringify({ event: 'agent_api_failed', path, error: error instanceof Error ? error.message.slice(0, 300) : 'unknown' }));
     return json({ error: { code: 'upstream_unavailable', message: 'Open Media is temporarily unavailable. Try again shortly.' } }, 0, 502);
   }

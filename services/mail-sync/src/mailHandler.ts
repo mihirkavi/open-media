@@ -82,6 +82,8 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
       return json(200, await runSearchAssist(await readJSON(request), env), headers);
     }
 
+    // Unknown paths are a 404 for everyone, so agents learn a URL is wrong rather than that they need a token.
+    if (!/^\/v1\/(mail-accounts|bridges|cross-posting)(\/|$)/.test(url.pathname)) return json(404, { error: 'Not found. Start at /llms.txt or /docs.' }, headers);
     const session = await authenticate(request, env.SUPABASE_URL);
     const repository = new SupabaseRestRepository(env.SUPABASE_URL, env.SUPABASE_PUBLISHABLE_KEY, session.token);
 

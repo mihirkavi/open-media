@@ -67,7 +67,8 @@
     "test:db": "supabase test db",
     "export:web": "expo export --platform web --output-dir .expo-dist",
     "check": "npm run typecheck && npm test && npm run typecheck --prefix services/mail-sync && npm test --prefix services/mail-sync && npm run export:web",
-    "mail:check": "npm run check-mailbox --prefix services/mail-sync"
+    "mail:check": "npm run check-mailbox --prefix services/mail-sync",
+    "agent-plugin:sync": "node --import tsx scripts/sync-agent-plugin.ts"
   },
   "private": true,
   "overrides": {

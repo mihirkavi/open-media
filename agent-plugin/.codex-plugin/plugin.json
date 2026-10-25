@@ -1,0 +1,51 @@
+{
+  "name": "open-media",
+  "version": "1.0.0",
+  "description": "Open Media for AI agents: one feed and search across Open Media, Farcaster, Lens, Hive and DeSo, Bay Area events, and the person's own Open Media account.",
+  "author": {
+    "name": "Open Media",
+    "url": "https://github.com/mihirkavi/open-media"
+  },
+  "homepage": "https://convo-mail-sync.convo-mail-sync.workers.dev/agents",
+  "repository": "https://github.com/mihirkavi/open-media",
+  "license": "MIT",
+  "keywords": [
+    "social",
+    "farcaster",
+    "lens",
+    "hive",
+    "deso",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "mcpServers": {
+    "open-media": {
+      "url": "https://convo-mail-sync.convo-mail-sync.workers.dev/open/mcp"
+    },
+    "open-media-docs": {
+      "url": "https://convo-mail-sync.convo-mail-sync.workers.dev/docs/mcp"
+    },
+    "open-media-account": {
+      "url": "https://convo-mail-sync.convo-mail-sync.workers.dev/me/mcp",
+      "bearer_token_env_var": "OPEN_MEDIA_TOKEN"
+    }
+  },
+  "interface": {
+    "displayName": "Open Media",
+    "shortDescription": "One open feed and inbox across social networks",
+    "developerName": "Open Media",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://convo-mail-sync.convo-mail-sync.workers.dev/",
+    "privacyPolicyURL": "https://convo-mail-sync.convo-mail-sync.workers.dev/privacy",
+    "defaultPrompt": [
+      "What are people saying about ethereum on Lens and Farcaster today?"
+    ],
+    "brandColor": "#111111",
+    "logo": "./assets/logo.png",
+    "longDescription": "Search and read public posts across Open Media, Farcaster, Lens, Hive and DeSo, find Bay Area events, and act for the person on Open Media with their own token: posts, messages, contacts, listings and payments that are always confirmed first."
+  }
+}

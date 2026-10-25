@@ -8,6 +8,7 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { AppErrorBoundary } from './src/ui/AppErrorBoundary';
 import { OpenMediaEntry } from './src/ui/OpenMediaEntry';
 import { OpenMediaThemeProvider, useOpenMediaTheme } from './src/themeContext';
+import { registerWebMcpTools } from './src/web/webMcp';
 
 // Keep the launch screen up until the fonts are ready, so text never flashes in a fallback font.
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
@@ -27,6 +28,8 @@ export default function App() {
   useEffect(() => {
     if (loaded || error) SplashScreen.hideAsync().catch(() => undefined);
   }, [loaded, error]);
+  // On the web, agents in the person's browser can search and read through WebMCP.
+  useEffect(() => registerWebMcpTools(), []);
   if (!loaded && !error) return null;
   return <AppErrorBoundary><SafeAreaProvider><OpenMediaThemeProvider><ThemedApp /></OpenMediaThemeProvider></SafeAreaProvider></AppErrorBoundary>;
 }

@@ -64,6 +64,7 @@ const baseHeaders: Record<string, string> = {
   'access-control-expose-headers': 'link',
   'x-content-type-options': 'nosniff',
   'x-robots-tag': 'all',
+  'ratelimit-policy': '"per-client";q=120;w=60',
 };
 
 /** Paths served by the public API. Everything else stays on the authenticated mail routes. */

@@ -1,0 +1,12 @@
+{
+  "name": "open-media",
+  "interface": { "displayName": "Open Media" },
+  "plugins": [
+    {
+      "name": "open-media",
+      "source": { "source": "local", "path": "./agent-plugin" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_USE" },
+      "category": "Productivity"
+    }
+  ]
+}

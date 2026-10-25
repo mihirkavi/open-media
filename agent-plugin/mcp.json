@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "open-media": {
+      "type": "streamable-http",
+      "url": "https://convo-mail-sync.convo-mail-sync.workers.dev/open/mcp",
+      "extensions": { "com.openai": { "auth": { "type": "none" } } }
+    },
+    "open-media-docs": {
+      "type": "streamable-http",
+      "url": "https://convo-mail-sync.convo-mail-sync.workers.dev/docs/mcp",
+      "extensions": { "com.openai": { "auth": { "type": "none" } } }
+    },
+    "open-media-account": {
+      "type": "streamable-http",
+      "url": "https://convo-mail-sync.convo-mail-sync.workers.dev/me/mcp",
+      "extensions": { "com.openai": { "auth": { "type": "api_key", "headerScheme": "bearer" } } }
+    }
+  }
+}

@@ -39,11 +39,13 @@ test('contacts and linked accounts are account-only and documented', async () =>
   assert.equal(document.paths['/v1/people/{network}/{handle}'].get.security, undefined);
 });
 
-test('every documented interface appears in llms.txt, the API index and the server card', () => {
+test('every documented interface appears in the docs, the API index and the server card', async () => {
+  const docs = await (await handleAgentRequest(new Request(`${origin}/docs.md`), env)).text();
   const text = llmsTxt(origin);
   const index = JSON.stringify(apiIndex(origin));
+  for (const item of [...agentInterfaces.public, ...agentInterfaces.account]) assert.ok(docs.includes(item.path), `/docs lists ${item.path}`);
+  for (const item of agentInterfaces.mcp.filter((server) => server.path !== '/mcp')) assert.ok(text.includes(`${origin}${item.path}`), `llms.txt names ${item.path}`);
   for (const item of [...agentInterfaces.discovery, ...agentInterfaces.public, ...agentInterfaces.account, ...agentInterfaces.mcp]) {
-    assert.ok(text.includes(item.path), `llms.txt lists ${item.path}`);
     assert.ok(index.includes(item.path), `/v1 lists ${item.path}`);
   }
   assert.deepEqual(serverCard(origin).servers.map((server) => server.url), [`${origin}/open/mcp`, `${origin}/me/mcp`, `${origin}/mcp`]);

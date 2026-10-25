@@ -15,3 +15,9 @@ Open Media ships as one app on web, iOS, and Android. A change is not done until
 - **Android**: run it on the Android emulator (`npx expo run:android`). This needs JDK 17 or newer; the Mac currently has JDK 11, so install a newer JDK before the first Android run.
 - **Shared logic**: add or update unit tests (`npm run check` covers the typecheck, app and Worker tests, and the web export), and run `npm run test:db` for database changes.
 - **Report honestly**: say which platforms were verified and how, and name anything not verified (for example, a feature that needs a real network account, a physical device, or production-only services) instead of implying it works.
+
+## Agent plugin and agent site
+
+- Skills live in `src/domain/agentSkills.ts`; run `npm run agent-plugin:sync` after changing them (a test fails if `agent-plugin/skills` drifts). Never edit the generated `SKILL.md` files.
+- Keep the version equal in `agent-plugin/plugin.json`, `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`. Claude Code reads `agent-plugin/.mcp.json` (`type: http`, `headers`); Codex reads the servers inline in `.codex-plugin/plugin.json` (`url`, `bearer_token_env_var`).
+- WebMCP tools are data in `src/domain/webMcpTools.ts`, used by both the Worker's pages and the web app. Keep them read-only.

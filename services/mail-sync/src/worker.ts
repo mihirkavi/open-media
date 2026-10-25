@@ -3,6 +3,7 @@ import { OAuthProvider } from '@cloudflare/workers-oauth-provider';
 import { handleAuthorization } from './events/auth.js';
 import { handleProtectedEventsRequest, handlePublicEventsRequest, runScheduledRefresh, type EventsEnv } from './events/http.js';
 import { SUPPORTED_SCOPES } from './events/tools.js';
+import { agentFriendlyNotFound } from './agentSite.js';
 import { handleMailRequest, MailEnv } from './mailHandler.js';
 
 type WorkerEnv = Env & MailEnv & EventsEnv;
@@ -10,9 +11,10 @@ type WorkerEnv = Env & MailEnv & EventsEnv;
 /** Public routes: OAuth owner sign-in, the signed plan calendar, event API docs, then mail sync and the public API. */
 const defaultHandler = {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
-    return (await handleAuthorization(request, env))
+    const response = (await handleAuthorization(request, env))
       ?? (await handlePublicEventsRequest(request, env))
-      ?? handleMailRequest(request, env);
+      ?? (await handleMailRequest(request, env));
+    return agentFriendlyNotFound(request, response);
   },
 };
 
@@ -32,6 +34,8 @@ const oauth = new OAuthProvider<WorkerEnv>({
   clientRegistrationEndpoint: '/oauth/register',
   clientIdMetadataDocumentEnabled: true,
   scopesSupported: [...SUPPORTED_SCOPES],
+  // RFC 9728 metadata names the scopes agents can ask for. `resource` stays unset so existing grants keep working.
+  resourceMetadata: { scopes_supported: [...SUPPORTED_SCOPES], bearer_methods_supported: ['header'], resource_name: 'Open Media' },
   accessTokenTTL: 60 * 60,
   refreshTokenTTL: 60 * 60 * 24 * 90,
   allowPlainPKCE: false,

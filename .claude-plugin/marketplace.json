@@ -1,0 +1,14 @@
+{
+  "name": "open-media",
+  "owner": { "name": "Open Media", "url": "https://github.com/mihirkavi/open-media" },
+  "metadata": { "description": "The Open Media plugin for Claude Code and Codex." },
+  "plugins": [
+    {
+      "name": "open-media",
+      "source": "./agent-plugin",
+      "description": "One feed and search across Open Media, Farcaster, Lens, Hive and DeSo, Bay Area events, and the person's own Open Media account.",
+      "version": "1.0.0",
+      "category": "productivity"
+    }
+  ]
+}

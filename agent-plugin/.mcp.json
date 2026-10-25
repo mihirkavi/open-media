@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "open-media": { "type": "http", "url": "https://convo-mail-sync.convo-mail-sync.workers.dev/open/mcp" },
+    "open-media-docs": { "type": "http", "url": "https://convo-mail-sync.convo-mail-sync.workers.dev/docs/mcp" },
+    "open-media-account": {
+      "type": "http",
+      "url": "https://convo-mail-sync.convo-mail-sync.workers.dev/me/mcp",
+      "headers": { "Authorization": "Bearer ${OPEN_MEDIA_TOKEN}" }
+    }
+  }
+}

@@ -181,15 +181,28 @@ Everything Open Media does for people, it also offers to programs and AI assista
 | Interface | Account needed | What you can do |
 | --- | --- | --- |
 | `GET /v1/feed`, `/v1/search`, `/v1/posts`, `/v1/profiles/{handle}`, `/v1/people/{network}/{handle}`, `/v1/events/upcoming`, `/v1/networks`, `/v1/settings`, `/v1/about` | No | Read the mixed feed with “Why this?” reasons, search every open network in plain language, read public posts, profiles and one person's posts across networks, find upcoming events, see exactly what each network supports, find any setting, read the mission |
-| `/v1/me`, `/v1/me/posts`, `/v1/me/conversations`, `/v1/me/contacts`, `/v1/me/identity`, `/v1/me/follows`, `/v1/me/listings`, `/v1/me/export` | Your access token | Publish, delete and report posts, offer products and services, read and send messages, manage your private contacts, privacy and follows, export your data |
-| MCP: `/open/mcp` and `/me/mcp` | No / your access token | The same, as tools for Claude, ChatGPT and other assistants |
-| `/llms.txt`, `/v1/openapi.json`, `/.well-known/mcp.json` | No | Discovery for language models and programs |
+| `/v1/me`, `/v1/me/posts`, `/v1/me/conversations`, `/v1/me/contacts`, `/v1/me/identity`, `/v1/me/follows`, `/v1/me/listings`, `/v1/me/payments`, `/v1/me/export` | Your access token | Publish, delete and report posts, offer products and services, pay, tip and unlock (always previewed and confirmed first), read and send messages, manage your private contacts, privacy and follows, export your data |
+| MCP: `/open/mcp`, `/me/mcp` and `/docs/mcp` | No / your access token / no | The same as tools for Claude, ChatGPT and other assistants, plus searchable documentation |
+| WebMCP | No | Every page of the API site and the web app registers read-only tools (search, feed, events, profiles) through `document.modelContext` for agents in the browser |
+| Discovery | No | `/llms.txt`, `/agents.md`, `/auth.md`, `/docs`, `/v1/openapi.json`, `/sitemap.xml`, `/.well-known/ard.json`, `/.well-known/agent-skills/index.json`, `/.well-known/agent-card.json`, `/.well-known/api-catalog` and MCP server cards; every page also answers in Markdown (`Accept: text/markdown` or `.md`) |
 
 ```json
 { "mcpServers": { "open-media": { "url": "https://<open-media-api>/open/mcp" } } }
 ```
 
-Your access token comes from **Settings → Developers and agents** in the app and expires after about an hour. Every account call acts only as you; the database refuses anything else. See [ADR 0012](docs/adrs/0012-agent-interfaces-and-design-system.md) and the [public API guide](services/mail-sync/PUBLIC_API.md).
+### Plugin for Claude Code and Codex
+
+The [agent-plugin](agent-plugin) folder bundles the three MCP servers and two skills (using Open Media, and paying safely):
+
+```
+/plugin install open-media --marketplace mihirkavi/open-media
+```
+
+```bash
+codex plugin marketplace add mihirkavi/open-media && codex plugin add open-media@open-media
+```
+
+Set `OPEN_MEDIA_TOKEN` to use your own account from the plugin. Your access token comes from **Settings → Developers and agents** in the app and expires after about an hour. Every account call acts only as you; the database refuses anything else. See [ADR 0012](docs/adrs/0012-agent-interfaces-and-design-system.md) and the [public API guide](services/mail-sync/PUBLIC_API.md).
 
 ## Why now
 
