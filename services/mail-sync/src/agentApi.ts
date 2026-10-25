@@ -427,6 +427,14 @@ export class Account {
     return this.rpc('open_media_update_listing', { p_post_id: postId, p_changes: changes });
   }
 
+  /** One to five stars, or null to withdraw. The database allows only tier 5 (verified, legal name shown). */
+  async rateListing(postId: string, stars: unknown) {
+    if (!uuid.test(postId)) throw new AgentError(404, 'not_found', 'Listing not found.');
+    if (stars === null) return this.rpc('open_media_remove_rating', { p_post_id: postId });
+    if (!Number.isInteger(stars) || (stars as number) < 1 || (stars as number) > 5) throw new AgentError(400, 'bad_request', 'stars must be a whole number from 1 to 5, or null to withdraw.');
+    return this.rpc('open_media_rate_listing', { p_post_id: postId, p_stars: stars });
+  }
+
   // Identity, privacy and follows (ADR 0013, phase 2). Tier and tick are computed by the database.
   async identity() {
     const identity = await this.rpc<Record<string, unknown>>('open_media_my_identity', {});
@@ -652,6 +660,8 @@ function registerAccountTools(server: McpServer, account: Account) {
   tool(server, 'publish_listing', { title: 'Offer a product or service', description: 'Publish a public post offering a product or service, with a price. Anyone can read it and message the person about it. Confirm the title, price and text with the person first. No payment happens here.', input: { kind: z.enum(['product', 'service']), title: z.string().min(1).max(120), price: z.string().max(20).optional().describe('e.g. "25" or "25.50"; leave out for "ask for price"'), currency: z.string().length(3).optional(), location: z.string().max(120).optional(), remote: z.boolean().optional().describe('Service available remotely, or product can ship'), text: z.string().max(maxPostLength).optional() }, readOnly: false }, (args) => account.publishListing(args));
   tool(server, 'update_listing', { title: 'Update a listing', description: 'Change the availability (available, limited, sold_out), price (whole cents, or null) or place of one of the person’s listings.', input: { postId: z.string(), availability: z.enum(['available', 'limited', 'sold_out']).optional(), priceMinor: z.number().int().min(0).max(100_000_000).nullable().optional(), location: z.string().max(120).nullable().optional(), remote: z.boolean().optional() }, readOnly: false }, (args) => account.updateListing(String(args.postId), args));
 
+  tool(server, 'rate_listing', { title: 'Rate a product or service', description: 'Give a listing 1 to 5 stars, or null to withdraw the person’s rating. Only verified people who show their legal name can rate; there are no written reviews and people are never rated. Ask the person for the number of stars; never choose it for them.', input: { postId: z.string(), stars: z.number().int().min(1).max(5).nullable() }, readOnly: false }, (args) => account.rateListing(String(args.postId), args.stars));
+
   // Identity, privacy and follows
   tool(server, 'get_my_identity', { title: 'My identity and privacy', description: 'The person’s identity tier (2 handle only, 3 declared name, 4 verified, 5 verified with legal name shown), whether they have the blue tick, the name others see, public or private, verification status and how many follow requests wait.', input: {}, readOnly: true }, () => account.identity());
   tool(server, 'set_my_privacy', { title: 'Set name and privacy', description: 'Change which name others see (handle_only, declared, or verified_legal once verified) and whether the account is public or private. Confirm with the person first; private hides posts from everyone but accepted followers.', input: { nameDisclosure: z.enum(['handle_only', 'declared', 'verified_legal']).optional(), visibility: z.enum(['public', 'private']).optional() }, readOnly: false }, (args) => account.setIdentity(args));
@@ -826,6 +836,10 @@ export function fullOpenApi(origin: string) {
       '/v1/me/linked-accounts': { put: { summary: 'Set the open-network accounts shown on your public profile (public, up to 8)', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'array', maxItems: 8, items: { type: 'object', required: ['network', 'handle'], properties: { network: { type: 'string', enum: ['farcaster', 'lens', 'hive', 'deso'] }, handle: { type: 'string', pattern: '^[A-Za-z0-9._-]{1,64}$' } } } } } } }, responses: { 200: ok('Saved'), 400: error, 401: error } } },
       '/v1/me/listings': { post: { summary: 'Offer a product or service as a public post', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['kind', 'title'], properties: { kind: { type: 'string', enum: ['product', 'service'] }, title: { type: 'string', maxLength: 120 }, price: { type: 'string', description: 'e.g. "25.50"; omit for ask-for-price' }, currency: { type: 'string', pattern: '^[A-Z]{3}$' }, location: { type: 'string', maxLength: 120 }, remote: { type: 'boolean' }, text: { type: 'string' } } } } } }, responses: { 201: ok('The post with its listing'), 400: error, 401: error } } },
       '/v1/me/listings/{postId}': { patch: { summary: 'Change a listing’s availability, price or place', security: bearer, parameters: [{ name: 'postId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { availability: { type: 'string', enum: ['available', 'limited', 'sold_out'] }, priceMinor: { type: ['integer', 'null'] }, location: { type: ['string', 'null'] }, remote: { type: 'boolean' } } } } } }, responses: { 200: ok('The listing'), 400: error, 401: error } } },
+      '/v1/me/listings/{postId}/rating': {
+        put: { summary: 'Rate a listing 1–5 stars (verified people who show their legal name only)', security: bearer, parameters: [{ name: 'postId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['stars'], properties: { stars: { type: 'integer', minimum: 1, maximum: 5 } } } } } }, responses: { 200: ok('The listing’s rating summary'), 400: error, 401: error, 403: error } },
+        delete: { summary: 'Withdraw your rating', security: bearer, parameters: [{ name: 'postId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], responses: { 200: ok('The listing’s rating summary'), 401: error } },
+      },
       '/v1/me/identity': {
         get: { summary: 'Your identity tier, tick, shown name, privacy and verification status', security: bearer, responses: { 200: ok('Your identity'), 401: error } },
         put: { summary: 'Choose the name others see and whether your account is private', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { nameDisclosure: { type: 'string', enum: ['handle_only', 'declared', 'verified_legal'] }, visibility: { type: 'string', enum: ['public', 'private'] } } } } } }, responses: { 200: ok('Updated identity'), 400: error, 401: error, 409: error } },
@@ -959,6 +973,9 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     if (request.method === 'POST' && path === '/v1/me/listings') return json(await account.publishListing(body), 0, 201);
     const listingMatch = path.match(/^\/v1\/me\/listings\/([^/]+)$/);
     if (request.method === 'PATCH' && listingMatch) return json(await account.updateListing(decodeURIComponent(listingMatch[1]), body) as object, 0);
+    const ratingMatch = path.match(/^\/v1\/me\/listings\/([^/]+)\/rating$/);
+    if (request.method === 'PUT' && ratingMatch) return json(await account.rateListing(decodeURIComponent(ratingMatch[1]), body.stars) as object, 0);
+    if (request.method === 'DELETE' && ratingMatch) return json(await account.rateListing(decodeURIComponent(ratingMatch[1]), null) as object, 0);
     if (request.method === 'GET' && path === '/v1/me/identity') return json(await account.identity(), 0);
     if (request.method === 'PUT' && path === '/v1/me/identity') return json(await account.setIdentity(body), 0);
     if (request.method === 'POST' && path === '/v1/me/verification') return json(await account.startVerification(), 0, 201);

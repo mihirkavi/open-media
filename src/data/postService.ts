@@ -1,6 +1,6 @@
 import { getSupabaseClient } from '../auth/supabase';
 import { deletePostVideoFiles } from './videoUpload';
-import { PostListing } from '../domain/listings';
+import { ListingRating, PostListing } from '../domain/listings';
 import { SocialPost } from '../domain/posts';
 import { StoredPostVideo } from '../domain/postVideo';
 import { isPublicPostRecord, maxPostLength, PublicPostRecord, socialPostFromPublic } from '../domain/publicPosts';
@@ -64,6 +64,15 @@ export async function publishListing(body: string, clientId: string, listing: Po
   if (error) throw error;
   if (!isPublicPostRecord(data)) throw new Error('Open Media returned an unexpected post.');
   return fromRecord(data);
+}
+
+/** Rates a listing 1–5 stars. The server allows it only for verified people who show their legal name. */
+export async function rateListing(postId: string, stars: number | null): Promise<ListingRating> {
+  const { data, error } = stars === null
+    ? await requireClient().rpc('open_media_remove_rating', { p_post_id: postId })
+    : await requireClient().rpc('open_media_rate_listing', { p_post_id: postId, p_stars: stars });
+  if (error) throw new Error(error.code === '42501' ? 'Only verified people who show their legal name can rate. Verify in Profile → Privacy and identity.' : error.message);
+  return data as ListingRating;
 }
 
 /** Changes the price, place or availability of one of your listings. */

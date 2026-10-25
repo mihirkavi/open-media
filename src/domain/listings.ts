@@ -16,9 +16,13 @@ export interface PostListing {
   location?: string;
   remote: boolean;
   availability: ListingAvailability;
-  /** Shared by copies of the same item so ratings (phase 4) count once. */
+  /** Shared by copies of the same item so ratings count once. */
   groupId?: string;
+  /** Five-star ratings from verified people (tier 5). `mine` is the viewer's own, when signed in. */
+  rating?: ListingRating;
 }
+
+export interface ListingRating { average: number | null; count: number; mine: number | null }
 
 export interface ListingInput {
   kind: ListingKind;

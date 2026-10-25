@@ -183,7 +183,18 @@ Built:
 - **Search**: "events this weekend", "desk for sale" and "hire a designer" are understood as events, products and services, in the app and for agents.
 - **Agents**: `GET /v1/events/upcoming` and the `find_upcoming_events` tool (public); `POST /v1/me/listings`, `PATCH /v1/me/listings/{postId}` and the `publish_listing` and `update_listing` tools on `/me/mcp`.
 
-Not yet: events cover the San Francisco Bay Area only, because the events engine's area list does; Open Media members cannot yet post their own events (event posts come only from public listings); payments for listings arrive in phase 5; "Ask organizer" for organizers on Open Media is not built.
+Not yet (phase 3): events cover the San Francisco Bay Area only, because the events engine's area list does; Open Media members cannot yet post their own events (event posts come only from public listings); payments for listings arrive in phase 5; "Ask organizer" for organizers on Open Media is not built.
+
+### Phase 4 status (2026-10-25)
+
+Built:
+
+- **Ratings** (`supabase/migrations/20261026130000_listing_ratings.sql`): one 1–5 star rating per person per listed item (`listing_group_id`), written only through `open_media_rate_listing`, which checks tier 5 in the database (verified and showing the legal name). Changing a rating replaces it, so edits never count twice; `open_media_remove_rating` withdraws it. Every change is kept in `listing_rating_history`, which clients cannot read, for abuse review. People cannot rate their own listings or the listings of someone they blocked. There are no written reviews, no replies and no ratings of people.
+- **Listing cards** show the average, the count and the viewer's own stars; tapping a star rates, tapping it again withdraws. Anyone below tier 5 is told how to qualify.
+- **Agents**: `PUT` and `DELETE /v1/me/listings/{postId}/rating` and the `rate_listing` tool, which tells agents to ask the person for the number of stars.
+- **Tests**: 10 pgTAP checks (unverified and tier 4 refused, out-of-range stars refused, edits don't double count, averages and the rater's own stars in the feed, no direct writes, withdrawal, history).
+
+Not yet: nobody can rate in production until identity verification is configured (no Stripe Identity keys yet); rating abuse goes through the existing post report flow, with no rating-specific review screen.
 
 ---
 

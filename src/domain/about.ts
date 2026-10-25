@@ -124,6 +124,7 @@ export const agentInterfaces = {
     { method: 'PUT', path: '/v1/me/linked-accounts', description: 'Set the open-network accounts shown on your public profile.' },
     { method: 'POST', path: '/v1/me/listings', description: 'Offer a product or service as a public post, with a price.' },
     { method: 'PATCH', path: '/v1/me/listings/{postId}', description: 'Change a listing’s availability, price or place.' },
+    { method: 'PUT', path: '/v1/me/listings/{postId}/rating', description: 'Rate a listing 1–5 stars (verified people who show their legal name only); DELETE withdraws it.' },
     { method: 'GET', path: '/v1/me/identity', description: 'Your identity tier, blue tick, the name others see, public or private, and verification status.' },
     { method: 'PUT', path: '/v1/me/identity', description: 'Choose the name others see and whether your account is private.' },
     { method: 'POST', path: '/v1/me/verification', description: 'Start identity verification with Stripe Identity (a link you open yourself).' },

@@ -1,18 +1,27 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Switch, View } from 'react-native';
 
-import { eventPriceText, eventWhen, listingCurrencies, ListingInput, listingLine, PostEvent, PostListing, providerName } from '../domain/listings';
+import { eventPriceText, eventWhen, listingCurrencies, ListingInput, listingLine, ListingRating, PostEvent, PostListing, providerName } from '../domain/listings';
 import { safeHttpsUrl } from '../domain/networkPosts';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { Text, TextInput } from './Text';
 
 /** A product or service inside a post: what it is, the price, where, and a way to ask about it. */
-export function ListingCard({ listing, onMessage }: { listing: PostListing; onMessage?: () => void }) {
+export function ListingCard({ listing, onMessage, onRate }: { listing: PostListing; onMessage?: () => void; onRate?: (stars: number | null) => Promise<ListingRating> }) {
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const soldOut = listing.availability === 'sold_out';
+  const [rating, setRating] = useState<ListingRating>(listing.rating ?? { average: null, count: 0, mine: null });
+  const [note, setNote] = useState('');
+  const rate = async (stars: number) => {
+    if (!onRate) return;
+    setNote('');
+    try { setRating(await onRate(rating.mine === stars ? null : stars)); }
+    catch (reason) { setNote(reason instanceof Error ? reason.message : 'Rating didn’t work. Try again.'); }
+  };
+  const shown = rating.mine ?? Math.round(rating.average ?? 0);
   return <View accessibilityLabel={`${listing.kind === 'product' ? 'Product' : 'Service'}: ${listing.title}, ${listingLine(listing)}`} style={styles.card}>
     <View style={styles.cardTop}>
       <View style={styles.kind}><Ionicons name={listing.kind === 'product' ? 'pricetag-outline' : 'construct-outline'} size={13} color={colors.textSecondary} /><Text style={styles.kindText}>{listing.kind === 'product' ? 'Product' : 'Service'}</Text></View>
@@ -20,6 +29,13 @@ export function ListingCard({ listing, onMessage }: { listing: PostListing; onMe
     </View>
     <Text style={styles.title}>{listing.title}</Text>
     <Text style={styles.line}>{listingLine(listing)}</Text>
+    {rating.count || onRate ? <View style={styles.stars}>
+      {[1, 2, 3, 4, 5].map((stars) => <Pressable key={stars} accessibilityRole="button" accessibilityLabel={`Rate ${stars} ${stars === 1 ? 'star' : 'stars'}`} accessibilityState={{ selected: rating.mine === stars, disabled: !onRate }} disabled={!onRate} onPress={() => rate(stars)} hitSlop={4}>
+        <Ionicons name={stars <= shown ? 'star' : 'star-outline'} size={16} color={rating.mine ? colors.text : colors.textSecondary} />
+      </Pressable>)}
+      <Text style={styles.small}>{rating.count ? `${rating.average?.toFixed(1)} · ${rating.count} ${rating.count === 1 ? 'rating' : 'ratings'}${rating.mine ? ' · yours' : ''}` : 'No ratings yet'}</Text>
+    </View> : null}
+    {note ? <Text accessibilityLiveRegion="polite" style={styles.small}>{note}</Text> : null}
     {onMessage && !soldOut ? <Pressable accessibilityRole="button" onPress={onMessage} style={styles.primary}><Ionicons name="chatbubble-outline" size={15} color={colors.surface} /><Text style={styles.primaryText}>{listing.kind === 'product' ? 'Message seller' : 'Ask about this'}</Text></Pressable> : null}
   </View>;
 }
@@ -88,6 +104,7 @@ function createStyles(colors: ThemeColors) {
     title: { color: colors.text, fontSize: 17, lineHeight: 23, fontWeight: '700' },
     line: { color: colors.textSecondary, fontSize: 14, lineHeight: 20 },
     small: { color: colors.textTertiary, fontSize: 12, lineHeight: 17 },
+    stars: { flexDirection: 'row', alignItems: 'center', gap: 3 },
     primary: { alignSelf: 'flex-start', marginTop: 6, minHeight: 38, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 19, backgroundColor: colors.text },
     primaryText: { color: colors.surface, fontSize: 14, fontWeight: '600' },
     secondary: { alignSelf: 'flex-start', marginTop: 6, minHeight: 38, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 19, borderWidth: 1, borderColor: colors.border },

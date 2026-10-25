@@ -8,7 +8,7 @@ import { Text, TextInput } from './Text';
 import { createClientId } from '../data/openMediaService';
 import { crossPost } from '../data/crossPostService';
 import { interleaveEvents, loadUpcomingEvents } from '../data/eventsService';
-import { PostReportReason, publishListing, publishPost } from '../data/postService';
+import { PostReportReason, publishListing, publishPost, rateListing } from '../data/postService';
 import { formatPrice, ListingInput, validateListing } from '../domain/listings';
 import { crossPostVideo, discardPreparedVideo, draftCrossPostVideo, prepareVideo, PreparedVideo, uploadPostVideo, UploadedVideo, VideoError } from '../data/videoUpload';
 import { CrossPostOutcome, CrossPostVideo, destinationSummary, outcomeSummary, prepareCrossPost } from '../domain/crossPosting';
@@ -277,7 +277,7 @@ export function PostCard({ post, mode, viewer, onDelete, onReport }: { post: Soc
     {menuOpen ? <PostMenu own={own} onDelete={() => onDelete!(post.id)} onReport={(reason) => onReport!(post.id, reason)} /> : null}
     {post.title ? <Text selectable style={styles.postTitle}>{post.title}</Text> : null}
     {post.body && post.body !== post.listing?.title ? <Text selectable numberOfLines={long && !showAll ? 8 : undefined} style={[styles.body, post.title ? styles.bodyAfterTitle : null]}>{post.body}</Text> : null}
-    {post.listing ? <ListingCard listing={post.listing} onMessage={native && !own && people?.message ? () => people.message!(post.author.handle.replace(/^@/, '')) : undefined} /> : null}
+    {post.listing ? <ListingCard listing={post.listing} onMessage={native && !own && people?.message ? () => people.message!(post.author.handle.replace(/^@/, '')) : undefined} onRate={native && !own && viewer ? (stars) => rateListing(post.id, stars) : undefined} /> : null}
     {post.event ? <EventCard event={post.event} /> : null}
     {long ? <Pressable accessibilityRole="button" accessibilityState={{ expanded: showAll }} onPress={() => setShowAll((value) => !value)} style={styles.showMore}><Text style={styles.whyText}>{showAll ? 'Show less' : 'Show more'}</Text></Pressable> : null}
     {image?.kind === 'image' && image.url ? <PostImage url={image.url} altText={image.altText} /> : image?.kind === 'video' && image.url ? <FeedVideo uri={image.url} streaming={image.streaming} posterUrl={image.posterUrl} aspectRatio={image.aspectRatio} altText={image.altText} /> : image ? <View accessibilityLabel={image.altText} style={[styles.media, post.kind === 'video' && styles.video]}><Ionicons name={post.kind === 'video' ? 'play' : 'image-outline'} size={30} color="#FFFFFF" /><Text style={styles.alt}>{image.altText}</Text></View> : null}
