@@ -145,7 +145,7 @@ export function PersonProfile({ target, viewerId, onBack, onMessage }: { target:
         {filters.map((item) => <Pressable key={item} accessibilityRole="tab" accessibilityState={{ selected: filter === item }} onPress={() => setFilter(item)} style={[styles.filter, filter === item && styles.filterActive]}><Text style={[styles.filterText, filter === item && styles.filterTextActive]}>{item === 'all' ? 'All' : item === 'open-media' ? 'Open Media' : networks[item as keyof typeof networks].displayName}</Text></Pressable>)}
       </ScrollView> : null}
       {failed.length ? <Text style={styles.small}>{failed.map(sourceLabel).join(', ')} {failed.length === 1 ? 'isn’t' : 'aren’t'} loading right now.</Text> : null}
-      {posts === undefined ? <ActivityIndicator style={styles.loading} color={colors.text} /> : visible.length === 0 ? <Text style={styles.empty}>{sources.length ? 'No public posts to show.' : 'This person has no public posts here.'}</Text> : visible.map((post) => <PostCard key={post.id} post={post} mode="raw" />)}
+      {posts === undefined ? <ActivityIndicator style={styles.loading} color={colors.text} /> : visible.length === 0 ? <Text style={styles.empty}>{sources.length ? 'No public posts to show.' : 'This person has no public posts here.'}</Text> : visible.map((post) => <PostCard key={post.id} post={post} mode="raw" viewer={viewerId ? { id: viewerId, initials: '' } : undefined} />)}
     </View>}
   </ScrollView>;
 }

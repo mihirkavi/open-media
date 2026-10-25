@@ -9,7 +9,7 @@ import { SocialPost } from '../domain/posts';
 import { conversationTitle } from '../domain/selectors';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
-import { PostCard } from './OpenMediaFeed';
+import { FeedViewer, PostCard } from './OpenMediaFeed';
 import { useUniversalSearch } from './useUniversalSearch';
 
 export type SearchTarget = 'feed' | 'messages' | 'settings';
@@ -20,7 +20,7 @@ const suggestions = ['videos about cooking today', 'ethereum on lens', 'dark mod
  * Universal search: everything Open Media knows plus public posts across every network, with a
  * basic AI summary. Messages and email are matched on this device only.
  */
-export function SearchView({ posts, conversations, onNavigate, onClose }: { posts: SocialPost[]; conversations: Conversation[]; onNavigate?: (target: SearchTarget) => void; onClose?: () => void }) {
+export function SearchView({ posts, conversations, viewer, onNavigate, onClose }: { posts: SocialPost[]; conversations: Conversation[]; viewer?: FeedViewer; onNavigate?: (target: SearchTarget) => void; onClose?: () => void }) {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
   const [query, setQuery] = useState('');
   const search = useUniversalSearch(query, posts, conversations);
@@ -67,7 +67,7 @@ export function SearchView({ posts, conversations, onNavigate, onClose }: { post
       <Text style={styles.sectionLabel}>Posts from everywhere</Text>
       <Text style={styles.note}>{search.sources.filter((source) => source.status !== 'skipped').map((source) => `${networks[source.id].displayName}: ${source.status === 'searching' ? 'searching…' : source.status === 'failed' ? 'unavailable' : `${source.count} (${source.method})`}`).join(' · ')}</Text>
     </View> : null}
-    {search.posts.map((post) => <PostCard key={post.id} post={post} mode="raw" />)}
+    {search.posts.map((post) => <PostCard key={post.id} post={post} mode="raw" viewer={viewer} />)}
     {hasQuery && search.searching && !search.posts.length ? <View style={styles.status}><ActivityIndicator color={colors.text} /></View> : null}
     {nothing ? <Text style={styles.empty}>Nothing found. Try fewer or different words.</Text> : null}
   </ScrollView>;

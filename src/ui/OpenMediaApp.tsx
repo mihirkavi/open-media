@@ -428,6 +428,7 @@ export function OpenMediaApp({
           <SearchView
             posts={feed.posts}
             conversations={conversations}
+            viewer={viewer}
             onNavigate={navigate}
           />
         ) : null}

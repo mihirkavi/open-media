@@ -132,7 +132,7 @@ export function PaymentSheet({ target, recipient, onClose, onPaid }: { target: P
         </View>
         {!options && !error ? <ActivityIndicator style={styles.loading} color={colors.text} /> : null}
         {options && !options.available && !done ? <Text style={styles.hint}>{options.unavailableReason}</Text> : null}
-        {options?.available && !rail ? <Text style={styles.hint}>{usdcPossible && !browserWalletsSupported() ? `@${recipient} takes USDC. Open Open Media on the web with a browser wallet to pay.` : `@${recipient} doesn’t take payments in Open Media yet.`}</Text> : null}
+        {options?.available && !rail ? <Text style={styles.hint}>{usdcPossible && !browserWalletsSupported() ? `@${recipient} takes USDC, which you can pay from a browser wallet in the Open Media web app. Paying with USDC on phones is coming.` : `@${recipient} doesn’t take payments in Open Media yet.`}</Text> : null}
         {options?.available && rail && preview ? <>
           {options.testMode ? <View style={styles.test}><Ionicons name="flask-outline" size={15} color={colors.text} /><Text style={styles.testText}>Test mode: use a Stripe test card or test USDC. No real money moves.</Text></View> : null}
           {target.kind === 'tip' ? <View style={styles.choices}>
