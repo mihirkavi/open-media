@@ -146,7 +146,12 @@ function configuredAPIURL(): string | undefined {
   return (process.env.EXPO_PUBLIC_OPEN_MEDIA_API_URL ?? process.env.EXPO_PUBLIC_CONVO_API_URL)?.replace(/\/$/, '');
 }
 
-function getAPIURL(): string {
+/** True when this build can reach the Open Media service (account features). */
+export function apiConfigured(): boolean {
+  try { return Boolean(getAPIURL()); } catch { return false; }
+}
+
+export function getAPIURL(): string {
   const configured = configuredAPIURL();
   if (configured) return configured;
   if (__DEV__) return 'http://127.0.0.1:8787';

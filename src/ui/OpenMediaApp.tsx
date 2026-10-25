@@ -42,6 +42,11 @@ import {
   OpenMediaProfile,
   OpenMediaSettings,
 } from "./OpenMediaUtilities";
+import { PeopleProvider, PersonTarget, useContactsStore } from "./people";
+import { PersonProfile } from "./PersonProfile";
+import { encounterForConversation } from "../domain/people";
+import { loadPublicPerson } from "../data/peopleService";
+import { apiConfigured } from "../connectors/mailApiConnector";
 
 export type PrimaryDestination = "feed" | "clips" | "messages";
 export type Destination =
@@ -305,6 +310,38 @@ export function OpenMediaApp({
     refreshMail();
   };
 
+  // Unified profiles (ADR 0013): any name or avatar opens the person, over the current screen.
+  const [person, setPerson] = useState<PersonTarget>();
+  const [openConversationId, setOpenConversationId] = useState<string>();
+  const encounters = useMemo(
+    () => conversations.map(encounterForConversation).filter((item): item is NonNullable<typeof item> => Boolean(item)),
+    [conversations],
+  );
+  const contacts = useContactsStore(messageMode === "open_media" && apiConfigured(), encounters);
+  const openPerson = useCallback((target: PersonTarget) => {
+    setPerson(target);
+    if (Platform.OS === "web" && typeof window !== "undefined") window.history.pushState({ person: true }, "", `${window.location.pathname}${window.location.hash}`);
+  }, []);
+  const closePerson = () => {
+    if (Platform.OS === "web" && typeof window !== "undefined" && window.history.state?.person) window.history.back();
+    else setPerson(undefined);
+  };
+  useEffect(() => {
+    if (Platform.OS !== "web" || typeof window === "undefined") return;
+    const onPop = () => { if (!window.history.state?.person) setPerson(undefined); };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+  const messagePerson = async (handle: string) => {
+    const target = await loadPublicPerson(handle);
+    if (!target) return;
+    const id = await beginConversation(target.id);
+    setPerson(undefined);
+    setOpenConversationId(id);
+    navigate("messages");
+  };
+  const people = useMemo(() => ({ open: openPerson, contacts: messageMode === "open_media" ? contacts : undefined }), [openPerson, contacts, messageMode]);
+
   // Create opens the writing box at the top of Feed; no pop-up.
   const startPost = () => {
     navigate("feed");
@@ -318,6 +355,7 @@ export function OpenMediaApp({
   };
 
   return (
+    <PeopleProvider value={people}>
     <View style={[styles.app, compact && styles.appCompact]}>
       {!compact ? (
         <DesktopRail
@@ -330,11 +368,20 @@ export function OpenMediaApp({
         {compact ? (
           <Header
             destination={destination}
+            back={Boolean(person)}
             onNavigate={navigate}
-            onBack={() => navigate(lastPrimary)}
+            onBack={person ? closePerson : () => navigate(lastPrimary)}
           />
         ) : null}
-        {destination === "feed" ? (
+        {person ? (
+          <PersonProfile
+            target={person}
+            viewerId={currentUserId}
+            onBack={compact ? undefined : closePerson}
+            onMessage={messageMode === "open_media" ? (handle) => { messagePerson(handle).catch(() => undefined); } : undefined}
+          />
+        ) : null}
+        {!person && destination === "feed" ? (
           <FeedView
             mode={feedMode}
             onModeChange={setFeedMode}
@@ -356,8 +403,8 @@ export function OpenMediaApp({
             onReportPost={canPost ? reportPost : undefined}
           />
         ) : null}
-        {destination === "clips" ? <ClipsView sessionKey={currentUserId} /> : null}
-        {destination === "messages" ? (
+        {!person && destination === "clips" ? <ClipsView sessionKey={currentUserId} /> : null}
+        {!person && destination === "messages" ? (
           <OpenMediaMessages
             conversations={conversations}
             loading={messagesLoading}
@@ -370,16 +417,17 @@ export function OpenMediaApp({
             onStartConversation={beginConversation}
             onSetBlocked={updateBlock}
             onReport={reportConversation}
+            openConversationId={openConversationId}
           />
         ) : null}
-        {destination === "search" ? (
+        {!person && destination === "search" ? (
           <SearchView
             posts={feed.posts}
             conversations={conversations}
             onNavigate={navigate}
           />
         ) : null}
-        {destination === "profile" ? (
+        {!person && destination === "profile" ? (
           <OpenMediaProfile
             profile={profile}
             onNavigate={navigate}
@@ -387,7 +435,7 @@ export function OpenMediaApp({
             onAccountDeleted={onAccountDeleted}
           />
         ) : null}
-        {destination === "settings" ? (
+        {!person && destination === "settings" ? (
           <OpenMediaSettings
             feedMode={feedMode}
             onFeedModeChange={setFeedMode}
@@ -404,6 +452,7 @@ export function OpenMediaApp({
       ) : null}
 
     </View>
+    </PeopleProvider>
   );
 }
 
@@ -518,16 +567,18 @@ function NavButton({
 
 function Header({
   destination,
+  back,
   onNavigate,
   onBack,
 }: {
   destination: Destination;
+  back?: boolean;
   onNavigate: (value: Destination) => void;
   onBack: () => void;
 }) {
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const utility = !primary.some((item) => item.id === destination);
+  const utility = back || !primary.some((item) => item.id === destination);
   return (
     <View style={styles.header}>
       {utility ? (

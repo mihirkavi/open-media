@@ -40,6 +40,7 @@ export interface UpstreamProfile {
   avatarUrl: string | null;
   joinedAt: string;
   postCount: number;
+  linkedAccounts?: { network: string; handle: string }[];
 }
 
 export interface Cursor { createdAt: string; id: string }
@@ -190,6 +191,7 @@ export function formatProfile(profile: UpstreamProfile, origin: string) {
     avatarUrl: profile.avatarUrl,
     joinedAt: profile.joinedAt,
     postCount: profile.postCount,
+    linkedAccounts: profile.linkedAccounts ?? [],
     url: `${origin}/v1/profiles/${profile.handle}`,
     postsUrl: `${origin}/v1/profiles/${profile.handle}/posts`,
   };

@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ActivityIndicator, Image, Keyboard, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from "react-native";
+import { PersonLink, PersonTarget } from "./people";
 import { Text, TextInput } from "./Text";
 
 import { bridgedSourceOf } from "../connectors/bridgesConnector";
@@ -8,6 +9,7 @@ import { attachmentURL } from "../connectors/mailApiConnector";
 import { formatEmailBody } from "../domain/emailBody";
 import { formatListTime, layoutThread } from "../domain/threadLayout";
 import { Conversation, Message, MessageAttachment, PeopleFilter, Person } from "../domain/models";
+import { encounterForConversation } from "../domain/people";
 import { conversationTitle, filterConversations } from "../domain/selectors";
 import { ThemeColors } from "../theme";
 import { useOpenMediaTheme } from "../themeContext";
@@ -24,6 +26,8 @@ interface Props {
   onSend: (conversationId: string, body: string, replyTo?: Message) => Promise<void>;
   onSearchProfiles: (query: string) => Promise<Person[]>;
   onStartConversation: (personId: string) => Promise<string>;
+  /** Opens this conversation, e.g. after “Message” on someone's profile. */
+  openConversationId?: string;
   onSetBlocked: (personId: string, blocked: boolean) => Promise<void>;
   onReport: (
     conversationId: string,
@@ -44,13 +48,15 @@ export function OpenMediaMessages({
   onStartConversation,
   onSetBlocked,
   onReport,
+  openConversationId,
 }: Props) {
   const { width } = useWindowDimensions();
   const compact = width < 760;
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [query, setQuery] = useState("");
-  const [selectedId, setSelectedId] = useState<string>();
+  const [selectedId, setSelectedId] = useState<string | undefined>(openConversationId);
+  useEffect(() => { if (openConversationId) setSelectedId(openConversationId); }, [openConversationId]);
   const [peopleFilter, setPeopleFilter] = useState<PeopleFilter>("all");
   const [newMessageOpen, setNewMessageOpen] = useState(false);
   const filtered = useMemo(
@@ -361,6 +367,7 @@ function MessageThread({
             <Ionicons name="chevron-back" size={22} color={colors.text} />
           </Pressable>
         ) : null}
+        <PersonLink target={threadTarget(conversation, otherPerson)} label={`Open ${conversationTitle(conversation)}’s profile`} style={styles.threadHeadingLink}>
         <View style={styles.threadHeading}>
           <Avatar
             initials={otherPerson?.initials ?? "OM"}
@@ -387,6 +394,7 @@ function MessageThread({
                   : "Imported conversation · reply unavailable"}
           </Text>
         </View>
+        </PersonLink>
         {otherPerson &&
         !conversation.groupTitle &&
         conversation.sourceSummary.includes("open_media") ? (
@@ -1224,6 +1232,7 @@ function createStyles(colors: ThemeColors) {
     preview: { marginTop: 2, color: colors.textSecondary, fontSize: 13, lineHeight: 18 },
     threadPane: { flex: 1, minWidth: 0 },
     thread: { flex: 1, backgroundColor: colors.surface },
+    threadHeadingLink: { flex: 1, minWidth: 0 },
     threadHeader: {
       minHeight: 96,
       paddingHorizontal: 12,
@@ -1479,4 +1488,10 @@ function createStyles(colors: ThemeColors) {
     },
     reportActionText: { color: colors.danger, fontSize: 13, fontWeight: "800" },
   });
+}
+
+/** The person a one-to-one thread is with, for opening their profile; groups open the first member. */
+function threadTarget(conversation: Conversation, person?: Person): PersonTarget {
+  const encounter = encounterForConversation(conversation);
+  return { ref: encounter?.ref ?? { kind: 'open_media', handle: person?.identities.find((identity) => identity.source === 'open_media')?.value.replace(/^@/, '') ?? '' }, name: conversationTitle(conversation), avatarUrl: person?.avatarUrls?.[0] };
 }

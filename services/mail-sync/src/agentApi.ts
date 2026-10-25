@@ -17,6 +17,7 @@ import {
   agentInterfaces, honestStatus, mission, neverDefaults, philosophy, principles, promise, promises, roadmap, sourceRepository, surfaces, tagline,
 } from '../../../src/domain/about';
 import { chatNetworks, unreachableChatNetworks } from '../../../src/domain/chatNetworks';
+import { authorNetworks, fetchAuthorPosts } from '../../../src/connectors/networkAuthors';
 import { networkConnectors } from '../../../src/connectors/networkFeeds';
 import { networkSearches } from '../../../src/connectors/networkSearch';
 import { collapseRepeatedPosts, NetworkId, networks } from '../../../src/domain/networkPosts';
@@ -25,10 +26,11 @@ import { maxPostLength, PublicPostRecord, socialPostFromPublic } from '../../../
 import { parseSearchQuery, postMatchesSearch } from '../../../src/domain/searchQuery';
 import { searchSettings, settingIndex } from '../../../src/domain/settings';
 import { availableNetworks, BridgesEnv } from './bridges.js';
+import { contactsKey, ContactsEnv, openCard, sealCard, validCards } from './contactsStore.js';
 import { callRpc, formatPost, formatProfile, openApiDocument, PublicApiEnv, UpstreamPost, UpstreamProfile } from './publicApi.js';
 import { authenticate } from './session.js';
 
-export type AgentEnv = PublicApiEnv & BridgesEnv;
+export type AgentEnv = PublicApiEnv & BridgesEnv & ContactsEnv;
 
 const version = '1.0.0';
 const sources = ['open-media', 'farcaster', 'lens', 'hive', 'deso'] as const;
@@ -40,7 +42,7 @@ const handlePattern = /^[a-z0-9_]{3,24}$/i;
 
 const publicHeaders: Record<string, string> = {
   'access-control-allow-origin': '*',
-  'access-control-allow-methods': 'GET, POST, DELETE, OPTIONS',
+  'access-control-allow-methods': 'GET, POST, PUT, DELETE, OPTIONS',
   'access-control-allow-headers': 'authorization, content-type, mcp-protocol-version, mcp-session-id',
   'access-control-expose-headers': 'mcp-session-id',
   'x-content-type-options': 'nosniff',
@@ -56,6 +58,7 @@ export function isAgentPath(pathname: string, method: string): boolean {
   if (['/', '/v1', '/v1/openapi.json', '/llms.txt', '/.well-known/mcp.json', '/.well-known/mcp-server', '/open/mcp', '/me/mcp'].includes(path)) return true;
   if (['/v1/feed', '/v1/search', '/v1/networks', '/v1/settings', '/v1/about'].includes(path)) return true;
   if (path === '/v1/me' || path.startsWith('/v1/me/')) return true;
+  if (method === 'GET' && /^\/v1\/people\/[^/]+\/[^/]+$/.test(path)) return true;
   return method !== 'GET' && /^\/v1\/posts\/[^/]+\/report$/.test(path);
 }
 
@@ -221,6 +224,33 @@ async function publicProfile(env: AgentEnv, origin: string, handle: string) {
   return { ...formatProfile(profile, origin), recentPosts: (Array.isArray(posts) ? posts : []).map((post) => formatPost(post, origin, env.SUPABASE_URL)) };
 }
 
+/**
+ * One person's public posts in one timeline (ADR 0013). For an Open Media handle: their profile,
+ * their posts, and the open-network accounts they chose to list, merged newest first. For an
+ * open-network handle: that account's own posts. Linked accounts are declared, not proven.
+ */
+export async function personTimeline(env: AgentEnv, origin: string, network: string, handle: string, cursor?: string) {
+  const clean = handle.replace(/^@/, '');
+  if (network !== 'open-media' && network !== 'open_media') {
+    if (!(authorNetworks as string[]).includes(network)) throw new AgentError(400, 'bad_request', `network must be open-media or one of ${authorNetworks.join(', ')}.`);
+    if (!/^[A-Za-z0-9._-]{1,64}$/.test(clean)) throw new AgentError(404, 'not_found', 'Account not found.');
+    const page = await fetchAuthorPosts(network as NetworkId, clean, cursor).catch(() => { throw new AgentError(502, 'upstream_unavailable', `${networks[network as NetworkId].displayName} did not answer. Try again shortly.`); });
+    return { network, handle: clean, data: page.posts.map((post) => agentPost(post, 'raw', origin)), nextCursor: page.cursor ?? null };
+  }
+  const profile = await publicProfile(env, origin, clean);
+  const linked = (profile.linkedAccounts ?? []).filter((item) => (authorNetworks as string[]).includes(item.network));
+  const pages = await Promise.allSettled(linked.map((item) => fetchAuthorPosts(item.network as NetworkId, item.handle)));
+  const posts: SocialPost[] = [];
+  const unavailable: string[] = [];
+  pages.forEach((page, index) => page.status === 'fulfilled' ? posts.push(...page.value.posts) : unavailable.push(`${linked[index].network}:${linked[index].handle}`));
+  const own = profile.recentPosts as (ReturnType<typeof formatPost> & { createdAt?: string })[];
+  const theirs = posts.map((post) => agentPost(post, 'raw', origin));
+  const merged = [...own.map((post) => ({ at: Date.parse(String(post.createdAt ?? '')), post: post as unknown })), ...theirs.map((post) => ({ at: Date.parse(post.createdAt), post: post as unknown }))]
+    .sort((left, right) => (right.at || 0) - (left.at || 0)).map((item) => item.post);
+  const { recentPosts: _recent, ...person } = profile;
+  return { person, data: merged, unavailable, note: 'Linked accounts are listed by the person themselves and are not proof of ownership.' };
+}
+
 // ─── Account capabilities (the person's own access token) ───────────────────
 
 /** Acts as one signed-in person through Supabase's REST API; row-level security enforces it. */
@@ -319,6 +349,39 @@ export class Account {
     return this.rpc<Record<string, unknown>>('open_media_export_account_data', {});
   }
 
+  // Contact cards: the person's own address book, encrypted before storage (ADR 0013).
+  async contacts() {
+    const key = contactsKey(this.env);
+    const rows = await this.rest<{ id: string; ciphertext: string }[]>('GET', '/rest/v1/contact_cards?select=id,ciphertext&order=updated_at.desc&limit=5000');
+    return { data: rows.map((row) => openCard(row.ciphertext, key)).filter(Boolean), note: 'Only you can read these. They are never shown to anyone else.' };
+  }
+
+  async saveContacts(value: unknown) {
+    let cards: ReturnType<typeof validCards>;
+    try { cards = validCards(value); } catch (error) { throw new AgentError(400, 'bad_request', error instanceof Error ? error.message : 'Check the contact cards.'); }
+    const key = contactsKey(this.env);
+    const now = new Date().toISOString();
+    await this.rest('POST', '/rest/v1/contact_cards?on_conflict=id', cards.map((card) => ({ id: card.id, owner_id: this.userId, ciphertext: sealCard(card, key), updated_at: now })), 'resolution=merge-duplicates,return=minimal');
+    return { saved: cards.length };
+  }
+
+  async deleteContact(id: string) {
+    if (!uuid.test(id)) throw new AgentError(404, 'not_found', 'Contact not found.');
+    await this.rest('DELETE', `/rest/v1/contact_cards?id=eq.${id}`);
+    return { deleted: id };
+  }
+
+  /** Public, owner-declared accounts on open networks; they build the person's unified timeline. */
+  async setLinkedAccounts(value: unknown) {
+    const accounts = Array.isArray(value) ? value : [];
+    if (accounts.length > 8 || !accounts.every((item) => item && typeof item === 'object' && ['farcaster', 'lens', 'hive', 'deso'].includes((item as { network?: string }).network ?? '') && /^[A-Za-z0-9._-]{1,64}$/.test(String((item as { handle?: string }).handle ?? '').replace(/^@/, '')))) {
+      throw new AgentError(400, 'bad_request', 'Give up to 8 accounts as {network: farcaster|lens|hive|deso, handle}.');
+    }
+    const clean = accounts.map((item) => ({ network: (item as { network: string }).network, handle: String((item as { handle: string }).handle).replace(/^@/, '') }));
+    await this.rest('PATCH', `/rest/v1/profiles?id=eq.${this.userId}`, { linked_accounts: clean });
+    return { linkedAccounts: clean, note: 'These links are public and declared by you; they are not proof of ownership.' };
+  }
+
   // Email: stored mail is read from the database; mailbox actions go through the mail routes.
   async email(limit = 50) {
     const rows = await this.rpc<Record<string, unknown>[]>('open_media_list_mail_messages', { p_limit: Math.min(500, Math.max(1, limit)) });
@@ -403,7 +466,7 @@ export class Account {
     return this.rest<T>('POST', `/rest/v1/rpc/${name}`, args);
   }
 
-  private async rest<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
+  private async rest<T = unknown>(method: string, path: string, body?: unknown, prefer?: string): Promise<T> {
     const response = await fetch(`${this.env.SUPABASE_URL.replace(/\/$/, '')}${path}`, {
       method,
       headers: {
@@ -411,7 +474,7 @@ export class Account {
         authorization: `Bearer ${this.token}`,
         accept: 'application/json',
         ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
-        ...(method === 'POST' && !path.includes('/rpc/') ? { prefer: 'return=minimal' } : {}),
+        ...(prefer ? { prefer } : method === 'POST' && !path.includes('/rpc/') ? { prefer: 'return=minimal' } : {}),
       },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
@@ -460,6 +523,8 @@ function registerPublicTools(server: McpServer, env: AgentEnv, origin: string) {
     (args) => search(env, origin, String(args.query)));
   tool(server, 'get_post', { title: 'Get a post', description: 'One public Open Media post by id.', input: { id: z.string() }, readOnly: true }, (args) => publicPost(env, origin, String(args.id)));
   tool(server, 'get_profile', { title: 'Get a profile', description: 'A public Open Media profile by handle, with recent posts.', input: { handle: z.string() }, readOnly: true }, (args) => publicProfile(env, origin, String(args.handle)));
+  tool(server, 'get_person_timeline', { title: 'Get a person’s timeline', description: 'One person’s public posts in one timeline. For an Open Media handle: their profile plus posts from the Farcaster, Lens, Hive and DeSo accounts they listed (declared by them, not proven). For an open-network handle: that account’s own posts.', input: { network: z.enum(['open-media', ...authorNetworks] as [string, ...string[]]), handle: z.string(), cursor: z.string().optional() }, readOnly: true },
+    (args) => personTimeline(env, origin, String(args.network), String(args.handle), args.cursor as string | undefined));
   tool(server, 'list_networks', { title: 'List networks and capabilities', description: 'Every network Open Media connects to and exactly what works today: open networks, email, chat bridges running on this server, and networks that cannot be reached.', input: {}, readOnly: true }, () => networksDescription(env));
   tool(server, 'find_setting', { title: 'Find a setting', description: 'Find where a control lives in the Open Media app, e.g. “dark mode”, “stop posting to farcaster”, “export my data”.', input: { query: z.string().min(1).max(120) }, readOnly: true }, (args) => settingsLookup(String(args.query)));
   tool(server, 'about_open_media', { title: 'About Open Media', description: 'The mission, principles, three promises, roadmap and honest status, plus every interface for agents.', input: {}, readOnly: true }, () => aboutOpenMedia(origin));
@@ -477,6 +542,12 @@ function registerAccountTools(server: McpServer, account: Account) {
   tool(server, 'block_person', { title: 'Block or unblock someone', description: 'Block (or unblock) an Open Media person by handle. Blocked people cannot message the person, and their posts are hidden.', input: { handle: z.string(), blocked: z.boolean().optional() }, readOnly: false }, (args) => account.block(args.handle, args.blocked));
   tool(server, 'report_conversation', { title: 'Report a conversation', description: 'Report unwanted contact in a conversation, naming the other person’s handle.', input: { conversationId: z.string(), handle: z.string(), messageId: z.string().optional() }, readOnly: false }, (args) => account.reportConversation(String(args.conversationId), args.handle, args.messageId));
   tool(server, 'delete_my_account', { title: 'Delete my account', description: 'Permanently delete the person’s Open Media account and data. Only call this after the person explicitly asks; pass confirmation exactly "delete my account".', input: { confirmation: z.string() }, readOnly: false }, (args) => account.deleteAccount(args.confirmation));
+
+  // People and contacts (private to the person; encrypted at rest)
+  tool(server, 'list_my_contacts', { title: 'My contacts', description: 'The person’s own address book: saved names, numbers, emails, notes, and which accounts each contact is linked to (with why). Private to the person; never share it with anyone else.', input: {}, readOnly: true }, () => account.contacts());
+  tool(server, 'save_contacts', { title: 'Save contacts', description: 'Create or replace contact cards (matched by id; up to 500 per call). Each card: {id (uuid), source: device|manual, name, nicknames[], phones[], emails[], notes, links[{ref, method: auto|confirmed, evidence, linkedAt}], rejected[], updatedAt}. Only link identities the person confirmed or that share an exact email or phone number. Confirm changes with the person first.', input: { cards: z.array(z.record(z.string(), z.unknown())).min(1).max(500) }, readOnly: false }, (args) => account.saveContacts(args.cards));
+  tool(server, 'delete_contact', { title: 'Delete a contact', description: 'Delete one of the person’s contact cards. The people themselves are not affected.', input: { id: z.string() }, readOnly: false }, (args) => account.deleteContact(String(args.id)));
+  tool(server, 'set_linked_accounts', { title: 'Set my accounts elsewhere', description: 'Replace the list of the person’s own Farcaster, Lens, Hive and DeSo accounts shown on their public profile (up to 8). This list is public. Confirm with the person first.', input: { accounts: z.array(z.object({ network: z.enum(authorNetworks as [string, ...string[]]), handle: z.string() })).max(8) }, readOnly: false }, (args) => account.setLinkedAccounts(args.accounts));
 
   // Email
   tool(server, 'list_email', { title: 'Read my email', description: 'The person’s stored email from connected mailboxes (inbound and sent), newest first. Run sync_mailbox first for the latest.', input: { limit: z.number().int().min(1).max(500).optional() }, readOnly: true }, (args) => account.email(Number(args.limit ?? 50)));
@@ -617,6 +688,7 @@ export function fullOpenApi(origin: string) {
       '/v1/search': { get: { summary: 'Plain-language search across public posts on every network, plus matching settings', parameters: [{ name: 'q', in: 'query', required: true, schema: { type: 'string', maxLength: 200 } }], responses: { 200: ok('Results with what was understood and how each network was searched'), 400: error } } },
       '/v1/networks': { get: { summary: 'Every network and connector, with what works today', responses: { 200: ok('Networks and capabilities') } } },
       '/v1/settings': { get: { summary: 'The searchable settings index', parameters: [{ name: 'q', in: 'query', schema: { type: 'string' } }], responses: { 200: ok('Matching settings') } } },
+      '/v1/people/{network}/{handle}': { get: { summary: 'One person’s public posts in one timeline (Open Media profile plus the accounts they listed, or one open-network account)', parameters: [{ name: 'network', in: 'path', required: true, schema: { type: 'string', enum: ['open-media', ...authorNetworks] } }, { name: 'handle', in: 'path', required: true, schema: { type: 'string' } }, { name: 'cursor', in: 'query', schema: { type: 'string' } }], responses: { 200: ok('The person and their posts, newest first'), 400: error, 404: error } } },
       '/v1/about': { get: { summary: 'Mission, principles, promises, roadmap and honest status', responses: { 200: ok('About Open Media') } } },
       '/v1/me': {
         get: { summary: 'Your profile', security: bearer, responses: { 200: ok('Profile'), 401: error } },
@@ -632,6 +704,12 @@ export function fullOpenApi(origin: string) {
       '/v1/me/conversations/{id}/messages': { post: { summary: 'Send a message', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], requestBody: textBody('body', 8000), responses: { 201: ok('Sent'), 400: error, 401: error, 403: error } } },
       '/v1/me/export': { get: { summary: 'Export a readable copy of your data', security: bearer, responses: { 200: ok('Your data'), 401: error } } },
       '/v1/me/email': { get: { summary: 'Your stored email, newest first', security: bearer, parameters: [{ name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 500, default: 50 } }], responses: { 200: ok('Email'), 401: error } } },
+      '/v1/me/contacts': {
+        get: { summary: 'Your contacts (private; stored encrypted)', security: bearer, responses: { 200: ok('Your contact cards'), 401: error } },
+        put: { summary: 'Create or replace contact cards by id (up to 500)', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'array', maxItems: 500, items: { type: 'object', required: ['id', 'name', 'phones', 'emails', 'links', 'rejected', 'nicknames', 'notes'], properties: { id: { type: 'string', format: 'uuid' }, source: { type: 'string', enum: ['device', 'manual'] }, name: { type: 'string' }, nicknames: { type: 'array', items: { type: 'string' } }, phones: { type: 'array', items: { type: 'string' } }, emails: { type: 'array', items: { type: 'string' } }, notes: { type: 'string' }, links: { type: 'array', items: { type: 'object' } }, rejected: { type: 'array', items: { type: 'string' } }, updatedAt: { type: 'string' } } } } } } }, responses: { 200: ok('Saved'), 400: error, 401: error } },
+      },
+      '/v1/me/contacts/{id}': { delete: { summary: 'Delete one of your contact cards', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], responses: { 200: ok('Deleted'), 404: error, 401: error } } },
+      '/v1/me/linked-accounts': { put: { summary: 'Set the open-network accounts shown on your public profile (public, up to 8)', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'array', maxItems: 8, items: { type: 'object', required: ['network', 'handle'], properties: { network: { type: 'string', enum: ['farcaster', 'lens', 'hive', 'deso'] }, handle: { type: 'string', pattern: '^[A-Za-z0-9._-]{1,64}$' } } } } } } }, responses: { 200: ok('Saved'), 400: error, 401: error } } },
       '/v1/me/blocks': { post: { summary: 'Block or unblock someone', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['handle'], properties: { handle: { type: 'string' }, blocked: { type: 'boolean', default: true } } } } } }, responses: { 200: ok('Done'), 404: error, 401: error } } },
       '/v1/me/conversations/{id}/report': { post: { summary: 'Report unwanted contact', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['handle'], properties: { handle: { type: 'string' }, messageId: { type: 'string', format: 'uuid' } } } } } }, responses: { 200: ok('Reported'), 401: error } } },
       '/v1/mail-accounts': {
@@ -711,10 +789,13 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     if (request.method === 'GET' && path === '/v1/networks') return json(networksDescription(env), 300);
     if (request.method === 'GET' && path === '/v1/settings') return json(settingsLookup(url.searchParams.get('q')), 3600);
     if (request.method === 'GET' && path === '/v1/about') return json(aboutOpenMedia(origin), 3600);
+    const personPath = path.match(/^\/v1\/people\/([^/]+)\/([^/]+)$/);
+    if (request.method === 'GET' && personPath) return json(await personTimeline(env, origin, decodeURIComponent(personPath[1]), decodeURIComponent(personPath[2]), url.searchParams.get('cursor') ?? undefined), 60);
 
     // Account routes: every one needs the person's own token.
     const account = await Account.fromRequest(request, env, origin, internal);
-    const body = request.method === 'POST' || request.method === 'DELETE' ? await request.json().catch(() => ({})) as Record<string, unknown> : {};
+    const raw = ['POST', 'PUT', 'DELETE'].includes(request.method) ? await request.json().catch(() => ({})) as unknown : {};
+    const body = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
     if (request.method === 'GET' && path === '/v1/me') return json(await account.me(), 0);
     if (request.method === 'POST' && path === '/v1/me/posts') return json(await account.publish(body.body ?? body.text), 0, 201);
     const postMatch = path.match(/^\/v1\/me\/posts\/([^/]+)$/);
@@ -731,6 +812,11 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     const conversationReport = path.match(/^\/v1\/me\/conversations\/([^/]+)\/report$/);
     if (request.method === 'POST' && conversationReport) return json(await account.reportConversation(decodeURIComponent(conversationReport[1]), body.handle, body.messageId), 0);
     if (request.method === 'DELETE' && path === '/v1/me') return json(await account.deleteAccount(body.confirmation), 0);
+    if (request.method === 'GET' && path === '/v1/me/contacts') return json(await account.contacts(), 0);
+    if (request.method === 'PUT' && path === '/v1/me/contacts') return json(await account.saveContacts(Array.isArray(raw) ? raw : body.cards), 0);
+    const contactMatch = path.match(/^\/v1\/me\/contacts\/([^/]+)$/);
+    if (request.method === 'DELETE' && contactMatch) return json(await account.deleteContact(decodeURIComponent(contactMatch[1])), 0);
+    if (request.method === 'PUT' && path === '/v1/me/linked-accounts') return json(await account.setLinkedAccounts(Array.isArray(raw) ? raw : body.accounts), 0);
     throw new AgentError(404, 'not_found', 'No such endpoint. See /v1 or /llms.txt.');
   } catch (error) {
     if (error instanceof AgentError) return json({ error: { code: error.code, message: error.message } }, 0, error.status);

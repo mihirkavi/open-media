@@ -8,7 +8,7 @@ Production host: `https://convo-mail-sync.convo-mail-sync.workers.dev` (the host
 
 ## More for programs and agents
 
-The same Worker also serves the mixed feed, cross-network search, networks, settings, the mission, an account API and MCP servers (`src/agentApi.ts`). Start at `/llms.txt` or `/v1`, which list every interface; `/v1/openapi.json` describes all of them. See [ADR 0012](../../docs/adrs/0012-agent-interfaces-and-design-system.md).
+The same Worker also serves the mixed feed, cross-network search, person timelines (`/v1/people/{network}/{handle}`), networks, settings, the mission, an account API (including the person's own encrypted contacts at `/v1/me/contacts`) and MCP servers (`src/agentApi.ts`). Start at `/llms.txt` or `/v1`, which list every interface; `/v1/openapi.json` describes all of them. See [ADR 0012](../../docs/adrs/0012-agent-interfaces-and-design-system.md).
 
 ## Endpoints
 
@@ -18,7 +18,7 @@ The same Worker also serves the mixed feed, cross-network search, networks, sett
 | GET | `/v1/openapi.json` | OpenAPI 3.1 document |
 | GET | `/v1/posts?limit=&cursor=&media=` | Public posts, newest first; `media=video` lists only video posts |
 | GET | `/v1/posts/{id}` | One public post |
-| GET | `/v1/profiles/{handle}` | One public profile |
+| GET | `/v1/profiles/{handle}` | One public profile, including the open-network accounts its owner chose to list (`linkedAccounts`; declared by them, not proven) |
 | GET | `/v1/profiles/{handle}/posts?limit=&cursor=` | A profile's public posts, newest first |
 | GET | `/robots.txt` | Allows all crawlers |
 

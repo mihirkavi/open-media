@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Image, LayoutChangeEvent, Linking, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { PersonLink, targetForPost } from './people';
 import { Text } from './Text';
 
 import { networks, safeHttpsUrl, sourceName } from '../domain/networkPosts';
@@ -97,7 +98,7 @@ function Clip({ post, height, active, mounted, muted, onToggleMute, onFailed }: 
     </Pressable>
     <Pressable accessibilityRole="button" accessibilityLabel={muted ? 'Turn sound on' : 'Mute'} onPress={onToggleMute} style={styles.mute}><Ionicons name={muted ? 'volume-mute' : 'volume-high'} size={20} color="#FFFFFF" /></Pressable>
     <View pointerEvents="box-none" style={styles.overlay}>
-      <Text style={styles.author}>{post.author.displayName} <Text style={styles.handle}>{post.author.handle} · {formatRelativeTime(post.createdAt)}</Text></Text>
+      <PersonLink target={targetForPost(post)} label={`Open ${post.author.displayName}’s profile`} style={styles.authorLink}><Text style={styles.author}>{post.author.displayName} <Text style={styles.handle}>{post.author.handle} · {formatRelativeTime(post.createdAt)}</Text></Text></PersonLink>
       {post.title || post.body ? <Text numberOfLines={3} style={styles.body}>{post.title ?? post.body}</Text> : null}
       <View style={styles.meta}>
         <Text style={styles.source}>{network}{media.durationSeconds ? ` · ${Math.round(media.durationSeconds)}s` : ''}</Text>
@@ -117,6 +118,7 @@ const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#000000' },
   clip: { width: '100%', backgroundColor: '#000000', overflow: 'hidden' },
   overlay: { position: 'absolute', left: 0, right: 0, bottom: 0, paddingLeft: 18, paddingRight: 88, paddingTop: 40, paddingBottom: 22, gap: 6, backgroundColor: 'rgba(0,0,0,0.45)' },
+  authorLink: { alignSelf: 'flex-start' },
   author: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
   handle: { color: '#C9C9C4', fontWeight: '400', fontSize: 13 },
   body: { color: '#FFFFFF', fontSize: 14, lineHeight: 20 },

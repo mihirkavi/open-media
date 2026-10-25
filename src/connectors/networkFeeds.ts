@@ -48,7 +48,7 @@ export async function requestJSON<T>(url: string, init?: RequestInit, timeoutMs 
 
 const farcasterProfiles = new Map<number, Promise<FarcasterProfile>>();
 
-async function snapchain<T>(path: string): Promise<T> {
+export async function snapchain<T>(path: string): Promise<T> {
   let lastError: unknown;
   for (const node of snapchainNodes) {
     try { return await requestJSON<T>(`${node}${path}`); } catch (error) { lastError = error; }
@@ -56,7 +56,7 @@ async function snapchain<T>(path: string): Promise<T> {
   throw lastError;
 }
 
-function farcasterProfile(fid: number) {
+export function farcasterProfile(fid: number) {
   let profile = farcasterProfiles.get(fid);
   if (!profile) {
     profile = snapchain<{ messages?: Parameters<typeof farcasterProfileFromUserData>[1] }>(`/v1/userDataByFid?fid=${fid}`)

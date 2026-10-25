@@ -16,6 +16,27 @@ test('agent routes are matched before the read-only API, and only for their path
   assert.equal(isAgentPath('/v1/posts', 'GET'), false);
   assert.equal(isAgentPath('/v1/profiles/ada', 'GET'), false);
   assert.equal(isAgentPath('/v1/mail-accounts', 'GET'), false);
+  assert.equal(isAgentPath('/v1/people/farcaster/dwr', 'GET'), true);
+  assert.equal(isAgentPath('/v1/people/farcaster/dwr', 'POST'), false);
+});
+
+test('person timelines name the networks they accept and refuse bad handles', async () => {
+  const status = async (path: string) => (await handleAgentRequest(new Request(`${origin}${path}`), env)).status;
+  assert.equal(await status('/v1/people/myspace/tom'), 400);
+  assert.equal(await status('/v1/people/hive/bad%20name'), 404);
+  assert.equal(await status('/v1/people/open-media/bad%20name'), 404);
+});
+
+test('contacts and linked accounts are account-only and documented', async () => {
+  for (const [method, path] of [['GET', '/v1/me/contacts'], ['PUT', '/v1/me/contacts'], ['DELETE', '/v1/me/contacts/6f1c2a0e-6b1d-4c39-9d7e-2f4b8a1c0d11'], ['PUT', '/v1/me/linked-accounts']]) {
+    const response = await handleAgentRequest(new Request(`${origin}${path}`, { method, headers: { 'content-type': 'application/json' }, body: method === 'GET' ? undefined : '[]' }), env);
+    assert.equal(response.status, 401, `${method} ${path}`);
+  }
+  const document = fullOpenApi(origin) as { paths: Record<string, Record<string, { security?: unknown }>> };
+  assert.ok(document.paths['/v1/me/contacts'].get.security);
+  assert.ok(document.paths['/v1/me/contacts'].put.security);
+  assert.ok(document.paths['/v1/me/linked-accounts'].put.security);
+  assert.equal(document.paths['/v1/people/{network}/{handle}'].get.security, undefined);
 });
 
 test('every documented interface appears in llms.txt, the API index and the server card', () => {

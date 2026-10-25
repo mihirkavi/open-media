@@ -13,6 +13,8 @@ import { BrandMark } from './BrandMark';
 import { DevelopersPage } from './DevelopersPage';
 import { LandingPage, PublicPage } from './LandingPage';
 import { MissionPage } from './MissionPage';
+import { PeopleProvider, PersonTarget } from './people';
+import { PersonProfile } from './PersonProfile';
 import { OpenMediaApp } from './OpenMediaApp';
 import { FeedView } from './OpenMediaFeed';
 import { SearchView } from './SearchView';
@@ -110,6 +112,9 @@ function pageFromHash(): PublicPage {
  */
 function PublicSite({ onSignIn }: { onSignIn: () => void }) {
   const [page, setPage] = useState<PublicPage>(pageFromHash);
+  // Guests can open anyone's public profile; private details need an account.
+  const [person, setPerson] = useState<PersonTarget>();
+  const people = useMemo(() => ({ open: setPerson }), []);
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
     const onHash = () => setPage(pageFromHash());
@@ -123,10 +128,11 @@ function PublicSite({ onSignIn }: { onSignIn: () => void }) {
     }
     setPage(Platform.OS === 'web' || next !== 'landing' ? next : 'feed');
   };
+  if (person) return <PeopleProvider value={people}><View style={{ flex: 1 }}><PersonProfile target={person} onBack={() => setPerson(undefined)} /></View></PeopleProvider>;
   if (page === 'landing') return <LandingPage onNavigate={navigate} onSignIn={onSignIn} />;
   if (page === 'mission') return <MissionPage chrome={Platform.OS === 'web' ? 'public' : 'app'} onNavigate={navigate} onSignIn={onSignIn} onBack={() => navigate('feed')} />;
   if (page === 'developers') return <DevelopersPage chrome={Platform.OS === 'web' ? 'public' : 'app'} onNavigate={navigate} onSignIn={onSignIn} onBack={() => navigate('feed')} />;
-  return <PublicHome onSignIn={onSignIn} onNavigate={navigate} />;
+  return <PeopleProvider value={people}><PublicHome onSignIn={onSignIn} onNavigate={navigate} /></PeopleProvider>;
 }
 
 /** Signed-out feed: public posts are readable by anyone, without an account. */

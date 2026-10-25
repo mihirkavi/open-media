@@ -18,6 +18,13 @@ export async function scanDeviceContacts(): Promise<ContactCleanupSuggestion[]> 
   return contacts.map(toSnapshot).map(suggestContactCleanup).filter((item): item is ContactCleanupSuggestion => Boolean(item));
 }
 
+/** Every contact on the device, for importing into the person's encrypted Open Media contacts. */
+export async function readDeviceContacts(): Promise<DeviceContactSnapshot[]> {
+  const permission = await Contacts.requestPermissionsAsync();
+  if (!permission.granted) throw new Error('Contacts access was not granted.');
+  return (await Contacts.Contact.getAllDetails(fields)).map(toSnapshot);
+}
+
 export async function applyContactCleanup(suggestion: ContactCleanupSuggestion): Promise<void> {
   const contact = new Contacts.Contact(suggestion.contactId);
   await contact.patch({
