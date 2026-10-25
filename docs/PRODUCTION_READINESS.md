@@ -17,6 +17,15 @@ This checklist defines “production ready” for the current onboarding private
 - [x] Local browser flow: magic-link onboarding, callback cleanup, profile creation, profile search, direct conversation, send, realtime receive, account export, and responsive layout.
 - [x] Latest signed iOS Store build finished successfully: build 9, EAS `f5916bd3-c316-487a-bbed-f6085bc38fcc`.
 
+## Production deploy of 2026-10-25
+
+- [x] Production Supabase migration history matched local history through `20261021120000_post_videos.sql` before this deploy, so the public posts, email and short-video migrations below are already in production.
+- [x] Applied `20261024120000_people_and_contacts.sql`, `20261025120000_identity_visibility_follows.sql` and `20261025130000_profile_read_compatibility.sql` with `npx supabase db push --linked` after a dry run. All 7 database suites passed locally first. The compatibility migration keeps installed app versions able to read public, named profile rows and the profiles of people they already talk to.
+- [x] Deployed the Worker (`convo-mail-sync`) as version `4ff6b1f5-d1ba-481f-a402-a75e064edd30`, with every change through Phase 2 of ADR 0013 and the agent interfaces of ADR 0012. Rollback target: `b058d7bb-89ed-4620-947c-ff37c123ad72` (`npx wrangler rollback b058d7bb-89ed-4620-947c-ff37c123ad72`).
+- [x] Live probes: `/health`, `/v1/about`, `/llms.txt`, `/.well-known/mcp.json`, `/v1/feed`, `/v1/people/hive/acidyo`, `/v1/posts` and `/v1/openapi.json` (44 paths) return 200; `/v1/me/contacts` and `/v1/me/identity` return 401 without a token; the verification webhook reports "not available"; `/open/mcp` lists the public tools including `get_person_timeline`.
+- [x] Cloudflare inventory: Open Media runs on the single production Worker `convo-mail-sync`; no sandbox exists.
+- [ ] Not verified in production: signed-in account routes (needs a production account token), contact sync with a real account, and identity verification (needs Stripe Identity keys; see `services/mail-sync/README.md`).
+
 ## Public posts and open read API (2026-10-09, not yet in production)
 
 - [x] `20260927120000_public_posts.sql` applies cleanly to a local stack and passes `supabase db lint`.
