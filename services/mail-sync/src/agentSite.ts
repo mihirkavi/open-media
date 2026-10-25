@@ -24,6 +24,15 @@ const aiBots = /(GPTBot|ChatGPT-User|OAI-SearchBot|ClaudeBot|Claude-User|Claude-
 
 interface Page { path: string; title: string; description: string; body: (origin: string) => string }
 
+/** The same answers as the FAQ in the README. */
+const faq = [
+  { question: 'Is Open Media free?', answer: 'Yes. The app and its source code are free and open source under the MIT licence. There are no ads by default.' },
+  { question: 'Do my friends need to join for it to be useful?', answer: 'No. Open Media is useful on day one by connecting the networks and email accounts you already use. Friends on Open Media are a bonus, not a requirement.' },
+  { question: 'Can it show my Instagram, X, TikTok or LinkedIn feed?', answer: 'Not today. Those companies do not offer open access for apps like Open Media, and Open Media does not scrape them. It connects to networks that allow it (Farcaster, Lens, Hive, DeSo and email).' },
+  { question: 'Do I need a crypto wallet?', answer: 'No. You sign in with your email. Some open networks use blockchain technology behind the scenes, but you never need to understand it, hold tokens or pay fees to read the feed.' },
+  { question: 'Can AI agents use Open Media?', answer: 'Yes. Public data needs no key: agents can use the MCP servers, the REST API, WebMCP tools in the browser, or the plugin for Claude Code and Codex. Acting for a person needs that person’s own token.' },
+];
+
 const md = (origin: string, path: string) => `${origin}${path === '/' ? '/index' : path}.md`;
 const account = (origin: string) => agentInterfaces.account.map((item) => `- \`${item.method} ${item.path}\`: ${item.description}`).join('\n');
 const publicRoutes = (origin: string) => agentInterfaces.public.map((item) => `- \`${item.method} ${item.path}\`: ${item.description}`).join('\n');
@@ -54,10 +63,14 @@ Everything a person can do in the app has an interface here. Public data needs n
 
 - [Agent guide](${origin}/agents): when to use Open Media and how to call it.
 - [API documentation](${origin}/docs): REST endpoints, MCP servers, errors, limits and examples.
-- [Developer portal](${origin}/developers): quickstart, access tokens and the test-mode sandbox.
+- [Developer portal](${origin}/developers): quickstart and access tokens. [Sandbox](${origin}/sandbox): test mode and a private local stack.
 - [Authentication](${origin}/auth.md): which calls need no credential and how to get the person's token.
 - [OpenAPI 3.1](${origin}/v1/openapi.json), [llms.txt](${origin}/llms.txt) and the public MCP server at \`${origin}/open/mcp\`.
 - In the browser, this page registers WebMCP tools (search, feed, events, profiles) through \`document.modelContext\`.
+
+## Frequently asked questions
+
+${faq.map((item) => `### ${item.question}\n\n${item.answer}`).join('\n\n')}
 
 ## Pricing
 
@@ -188,6 +201,32 @@ There are no API keys to request and no sales process. Public data is free and k
 `,
   },
   {
+    path: '/sandbox', title: 'Open Media sandbox and test mode',
+    description: 'How agents and developers can exercise the Open Media API without touching live money or real people’s data.',
+    body: (origin) => `# Open Media sandbox and test mode
+
+Use these to build and test an integration without touching live money or other people's data.
+
+## Test mode for payments
+
+Every payment on this server runs in test mode until live payments are approved: cards use Stripe's test mode and USDC uses the Base Sepolia test network, so no real money moves. \`GET ${origin}/v1/me/payments/setup\` returns \`available.live: false\` while test mode is on. Use Stripe's published test cards and test USDC from a Base Sepolia faucet.
+
+## Read-only exploration
+
+All public endpoints are read-only and need no key, so an agent can explore safely: \`GET ${origin}/v1/feed\`, \`GET ${origin}/v1/search?q=\`, \`GET ${origin}/v1/events/upcoming\`, and the tools on \`${origin}/open/mcp\`.
+
+## Confirmation before writes
+
+Account tools that publish, send or pay first return a preview. Payments start only when called again with \`confirm: true\` and the exact amount, and money moves only when the person finishes on Stripe's page or in their own wallet.
+
+## A private sandbox on your machine
+
+The whole stack is open source. Clone ${sourceRepository} and run \`npm run local\`: it starts the database, auth, this API and the web app on your computer with test accounts and a local inbox, so you can create accounts, post, message and pay with test data that never leaves your machine.
+
+See the [developer portal](${origin}/developers) and [API documentation](${origin}/docs).
+`,
+  },
+  {
     path: '/about', title: 'About Open Media',
     description: 'Open Media is an open-source project building the open communication layer for humanity.',
     body: (origin) => `# About Open Media
@@ -296,7 +335,7 @@ See the [developer portal](${origin}/developers) to get started.
     description: 'How agents obtain credentials for Open Media: no credential for public data, the person’s bearer token for the account API, and OAuth 2.1 for Open Media Events.',
     body: (origin) => `# Agent authentication on Open Media
 
-How an agent gets access to Open Media, and exactly which credentials exist. This file lives at \`/auth.md\`, the discovery path from the WorkOS auth.md spec (https://github.com/workos/auth.md). Open Media documents what it implements here, and says plainly what it does not.
+How an agent gets access to Open Media, and exactly which credentials exist. This file lives at \`/auth.md\`, the discovery path from the WorkOS auth.md spec. Open Media documents what it implements here, and says plainly what it does not.
 
 ## Discover
 
@@ -375,7 +414,8 @@ function frontmatter(page: Page, origin: string): string {
 }
 
 export function pageMarkdown(page: Page, origin: string): string {
-  return frontmatter(page, origin) + page.body(origin);
+  // auth.md must lead with its heading (WorkOS auth.md); the other pages carry frontmatter.
+  return page.path === '/auth' ? page.body(origin) : frontmatter(page, origin) + page.body(origin);
 }
 
 function jsonLd(origin: string, page: Page) {
@@ -391,6 +431,10 @@ function jsonLd(origin: string, page: Page) {
       operatingSystem: 'iOS, Android, Web', image: coverUrl, license: 'https://opensource.org/licenses/MIT', sameAs: [sourceRepository], publisher: { '@id': `${origin}/#organization` },
       offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD', description: 'Free app, public API and MCP servers. No Open Media fee on payments between people today.' },
     });
+  }
+  if (page.path === '/') {
+    graph.push({ '@type': 'FAQPage', '@id': `${origin}/#faq`, mainEntity: faq.map((item) => ({ '@type': 'Question', name: item.question, acceptedAnswer: { '@type': 'Answer', text: item.answer } })) });
+    graph.push({ '@type': 'ItemList', '@id': `${origin}/#features`, name: 'What Open Media does', itemListElement: promises.map((item, index) => ({ '@type': 'ListItem', position: index + 1, name: item.title, description: item.body })) });
   }
   if (page.path === '/' || page.path === '/docs' || page.path === '/developers') {
     graph.push({ '@type': 'WebAPI', '@id': `${origin}/#api`, name: 'Open Media API', description: 'Public feed, search, profiles and events without a key; the account API with the person’s own token; MCP servers for agents.', documentation: `${origin}/docs`, url: `${origin}/v1`, provider: { '@id': `${origin}/#organization` }, termsOfService: `${origin}/privacy` });
@@ -433,7 +477,7 @@ export function webMcpScript(origin: string): string {
 
 function pageHtml(page: Page, origin: string): string {
   const canonical = `${origin}${page.path}`;
-  const nav = [['/', 'Home'], ['/agents', 'Agents'], ['/docs', 'API'], ['/developers', 'Developers'], ['/pricing', 'Pricing'], ['/about', 'About'], ['/contact', 'Contact'], ['/privacy', 'Privacy']]
+  const nav = [['/', 'Home'], ['/agents', 'Agents'], ['/docs', 'API'], ['/developers', 'Developers'], ['/sandbox', 'Sandbox'], ['/pricing', 'Pricing'], ['/about', 'About'], ['/contact', 'Contact'], ['/privacy', 'Privacy']]
     .map(([path, label]) => `<a href="${origin}${path}"${path === page.path ? ' aria-current="page"' : ''}>${label}</a>`).join(' ');
   return `<!doctype html>
 <html lang="en">
@@ -624,7 +668,7 @@ Open Media is a free, open-source social app (iPhone, Android, web) with one fee
 - [Agent guide](${origin}/agents.md): when and how to call Open Media.
 - [API documentation](${origin}/docs.md): endpoints, errors, rate limits, idempotency, versioning, sandbox.
 - [Authentication](${origin}/auth.md): no credential for public data; the person's bearer token for their account.
-- [Developer portal](${origin}/developers.md) and [pricing](${origin}/pricing.md) (free).
+- [Developer portal](${origin}/developers.md), [sandbox and test mode](${origin}/sandbox.md) and [pricing](${origin}/pricing.md) (free).
 - [OpenAPI 3.1](${origin}/v1/openapi.json) and the [API index](${origin}/v1).
 
 ## MCP servers (Streamable HTTP)
@@ -696,7 +740,7 @@ function docsMcp(origin: string) {
     }) as never);
     server.registerTool('get_docs_page', {
       title: 'Read an Open Media docs page',
-      description: 'Read one Open Media documentation page as Markdown by its path: /, /agents, /docs, /developers, /auth, /pricing, /about, /contact or /privacy.',
+      description: 'Read one Open Media documentation page as Markdown by its path: /, /agents, /docs, /developers, /sandbox, /auth, /pricing, /about, /contact or /privacy.',
       inputSchema: z.object({ path: z.enum(pages.map((page) => page.path) as [string, ...string[]]).describe('The page path') }),
       annotations: { readOnlyHint: true, openWorldHint: false },
     }, (async ({ path }: { path: string }) => {

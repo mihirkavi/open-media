@@ -35,6 +35,7 @@ import {
 } from './payments.js';
 import { EventsUnavailable, PublicEventsEnv, upcomingEvents } from './publicEvents.js';
 import { handleSiteRequest, isSitePath, llmsTxt as siteLlmsTxt } from './agentSite.js';
+import { mcpAppMimeType, postsViewHtml, postsViewUri } from './mcpAppView.js';
 import { authenticate } from './session.js';
 import { discloseLegalName, handleVerificationWebhook, startVerification, VerificationEnv, VerificationError, verificationConfigured } from './verification.js';
 
@@ -778,9 +779,11 @@ const instructions = `Open Media is one open, black-and-white app for a person's
 
 type Json = Record<string, unknown> | unknown[];
 
-function result(payload: unknown) {
+function result(payload: unknown, structured = false) {
   const text = JSON.stringify(payload);
-  return { content: [{ type: 'text' as const, text: text.length > 60_000 ? `${text.slice(0, 60_000)}…` : text }] };
+  const content = [{ type: 'text' as const, text: text.length > 60_000 ? `${text.slice(0, 60_000)}…` : text }];
+  // Tools with an MCP Apps view also return the object itself for the view to render.
+  return structured && payload && typeof payload === 'object' && !Array.isArray(payload) ? { content, structuredContent: payload as Record<string, unknown> } : { content };
 }
 
 function failure(error: unknown) {
@@ -788,22 +791,25 @@ function failure(error: unknown) {
   return { isError: true, content: [{ type: 'text' as const, text: JSON.stringify({ error: error instanceof AgentError ? error.code : 'internal_error', message }) }] };
 }
 
-function tool(server: McpServer, name: string, config: { title: string; description: string; input: z.ZodRawShape; readOnly: boolean }, run: (args: Record<string, unknown>) => Promise<unknown> | unknown) {
+function tool(server: McpServer, name: string, config: { title: string; description: string; input: z.ZodRawShape; readOnly: boolean; view?: string }, run: (args: Record<string, unknown>) => Promise<unknown> | unknown) {
   server.registerTool(name, {
     title: config.title,
     description: config.description,
     inputSchema: z.object(config.input),
     annotations: { readOnlyHint: config.readOnly, openWorldHint: true, destructiveHint: !config.readOnly && /^(delete|remove)_/.test(name) },
+    ...(config.view ? { _meta: { ui: { resourceUri: config.view }, 'openai/outputTemplate': config.view } } : {}),
   }, (async (args: Record<string, unknown>) => {
-    try { return result(await run(args ?? {})); } catch (error) { return failure(error); }
+    try { return result(await run(args ?? {}), Boolean(config.view)); } catch (error) { return failure(error); }
   }) as never);
 }
 
 function registerPublicTools(server: McpServer, env: AgentEnv, origin: string) {
+  server.registerResource('posts-view', postsViewUri, { title: 'Open Media posts', description: 'Shows posts from get_feed and search as a readable list with source links.', mimeType: mcpAppMimeType },
+    async (uri) => ({ contents: [{ uri: uri.href, mimeType: mcpAppMimeType, text: postsViewHtml, _meta: { ui: { prefersBorder: true } } }] }));
   const sourceEnum = z.enum(sources);
-  tool(server, 'get_feed', { title: 'Read the feed', description: 'The mixed feed: Open Media plus Farcaster, Lens, Hive and DeSo public posts, newest first (raw) or ranked (relevant). Each post includes its network, source link and “why” reasons. Pass nextCursor back to read further.', input: { sources: z.array(sourceEnum).optional(), kind: z.enum(['feed', 'clips']).optional().describe('clips = short videos only'), mode: z.enum(['raw', 'relevant']).optional(), cursor: z.string().optional() }, readOnly: true },
+  tool(server, 'get_feed', { title: 'Read the feed', description: 'The mixed feed: Open Media plus Farcaster, Lens, Hive and DeSo public posts, newest first (raw) or ranked (relevant). Each post includes its network, source link and “why” reasons. Pass nextCursor back to read further.', input: { sources: z.array(sourceEnum).optional(), kind: z.enum(['feed', 'clips']).optional().describe('clips = short videos only'), mode: z.enum(['raw', 'relevant']).optional(), cursor: z.string().optional() }, readOnly: true, view: postsViewUri },
     (args) => feed(env, origin, { sources: args.sources as Source[] | undefined, kind: args.kind as 'feed' | 'clips' | undefined, mode: args.mode as FeedMode | undefined, cursor: args.cursor as string | undefined }));
-  tool(server, 'search', { title: 'Search everything public', description: 'Plain-language search across public posts on Open Media, Farcaster, Lens, Hive and DeSo, plus matching app settings. Understands phrases like “videos about ethereum on lens today” and says what it understood and how each network was searched.', input: { query: z.string().min(1).max(200) }, readOnly: true },
+  tool(server, 'search', { title: 'Search everything public', description: 'Plain-language search across public posts on Open Media, Farcaster, Lens, Hive and DeSo, plus matching app settings. Understands phrases like “videos about ethereum on lens today” and says what it understood and how each network was searched.', input: { query: z.string().min(1).max(200) }, readOnly: true, view: postsViewUri },
     (args) => search(env, origin, String(args.query)));
   tool(server, 'get_post', { title: 'Get a post', description: 'One public Open Media post by id.', input: { id: z.string() }, readOnly: true }, (args) => publicPost(env, origin, String(args.id)));
   tool(server, 'get_profile', { title: 'Get a profile', description: 'A public Open Media profile by handle, with recent posts.', input: { handle: z.string() }, readOnly: true }, (args) => publicProfile(env, origin, String(args.handle)));
@@ -959,6 +965,11 @@ function baseOpenApi(origin: string) {
   const error = { description: 'Error', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } };
   const ok = (description: string, schema: unknown = { type: 'object' }) => ({ description, content: { 'application/json': { schema } } });
   const bearer = [{ bearerAuth: [] }];
+  const asyncPayment = {
+    description: 'Accepted: the network has not settled the payment yet. Poll the Location (or POST to job.check) after Retry-After seconds.',
+    headers: { Location: { schema: { type: 'string', format: 'uri' }, description: 'The payment to poll' }, 'Retry-After': { schema: { type: 'integer' } } },
+    content: { 'application/json': { schema: { type: 'object', required: ['payment', 'job'], properties: { payment: { type: 'object' }, detail: { type: 'string' }, job: { type: 'object', required: ['id', 'status', 'poll'], properties: { id: { type: 'string', format: 'uuid' }, status: { type: 'string', enum: ['running'] }, poll: { type: 'string', format: 'uri' }, check: { type: 'string', format: 'uri' }, retryAfterSeconds: { type: 'integer' } } } } } } },
+  };
   const textBody = (field: string, max: number) => ({ required: true, content: { 'application/json': { schema: { type: 'object', required: [field], properties: { [field]: { type: 'string', maxLength: max } } } } } });
   return {
     ...base,
@@ -1029,8 +1040,8 @@ function baseOpenApi(origin: string) {
         } } } } }, responses: { 201: ok('Payment started'), 400: error, 401: error, 409: error, 503: error } },
       },
       '/v1/me/payments/{id}': { get: { summary: 'One of your payments', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], responses: { 200: ok('Payment'), 401: error, 404: error } } },
-      '/v1/me/payments/{id}/transaction': { post: { summary: 'Report the USDC transaction that paid; Open Media checks it on the network', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], requestBody: textBody('txHash', 66), responses: { 200: ok('Payment and check result'), 400: error, 401: error, 404: error } } },
-      '/v1/me/payments/{id}/check': { post: { summary: 'Check a payment again', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], responses: { 200: ok('Payment and check result'), 401: error, 404: error } } },
+      '/v1/me/payments/{id}/transaction': { post: { summary: 'Report the USDC transaction that paid; Open Media checks it on the network', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], requestBody: textBody('txHash', 66), responses: { 200: ok('Payment and check result'), 202: asyncPayment, 400: error, 401: error, 404: error } } },
+      '/v1/me/payments/{id}/check': { post: { summary: 'Check a payment again', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], responses: { 200: ok('Payment and check result'), 202: asyncPayment, 401: error, 404: error } } },
       '/v1/me/wallets': { post: { summary: 'Link a wallet with a signature of Open Media’s message from that wallet (at most 10 minutes old)', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['message', 'signature'], properties: { message: { type: 'string' }, signature: { type: 'string' } } } } } }, responses: { 201: ok('Linked wallet'), 400: error, 401: error, 409: error } } },
       '/v1/me/wallets/{id}': { delete: { summary: 'Unlink a wallet', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], responses: { 200: ok('Removed'), 401: error, 404: error } } },
       '/v1/me/listings/{postId}/payment-options': { get: { summary: 'How a listing can be paid for: card, USDC networks, price and fee', security: bearer, parameters: [{ name: 'postId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], responses: { 200: ok('Options'), 401: error, 404: error } } },
@@ -1222,9 +1233,9 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     const paymentMatch = path.match(/^\/v1\/me\/payments\/([^/]+)$/);
     if (request.method === 'GET' && paymentMatch) return json(await account.payment(decodeURIComponent(paymentMatch[1])), 0);
     const transactionMatch = path.match(/^\/v1\/me\/payments\/([^/]+)\/transaction$/);
-    if (request.method === 'POST' && transactionMatch) return json(await account.submitTransaction(decodeURIComponent(transactionMatch[1]), body.txHash), 0);
+    if (request.method === 'POST' && transactionMatch) return paymentProgress(await account.submitTransaction(decodeURIComponent(transactionMatch[1]), body.txHash), origin);
     const checkMatch = path.match(/^\/v1\/me\/payments\/([^/]+)\/check$/);
-    if (request.method === 'POST' && checkMatch) return json(await account.checkPayment(decodeURIComponent(checkMatch[1])), 0);
+    if (request.method === 'POST' && checkMatch) return paymentProgress(await account.checkPayment(decodeURIComponent(checkMatch[1])), origin);
     if (request.method === 'PUT' && path === '/v1/me/payments/tips') return json(await account.setTips(body.enabled), 0);
     if (request.method === 'POST' && path === '/v1/me/paid-posts') return json(await account.publishPaidPost(body, idempotencyKey), 0, 201);
     const postOptionsMatch = path.match(/^\/v1\/me\/posts\/([^/]+)\/payment-options$/);
@@ -1254,6 +1265,19 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     console.error(JSON.stringify({ event: 'agent_api_failed', path, error: error instanceof Error ? error.message.slice(0, 300) : 'unknown' }));
     return json({ error: { code: 'upstream_unavailable', message: 'Open Media is temporarily unavailable. Try again shortly.' } }, 0, 502);
   }
+}
+
+/**
+ * A USDC payment the network has not settled yet is still running: 202 Accepted, with the payment
+ * to poll in Location and a job object, so agents follow it instead of retrying.
+ */
+function paymentProgress(outcome: { payment: Payment; detail?: string }, origin: string): Response {
+  if (outcome.payment.status !== 'submitted') return json(outcome, 0);
+  const poll = `${origin}/v1/me/payments/${outcome.payment.id}`;
+  const response = json({ ...outcome, job: { id: outcome.payment.id, status: 'running', poll, check: `${poll}/check`, retryAfterSeconds: 5 } }, 0, 202);
+  response.headers.set('location', poll);
+  response.headers.set('retry-after', '5');
+  return response;
 }
 
 function json(body: Json | object, maxAgeSeconds: number, status = 200): Response {
