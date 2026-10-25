@@ -9,7 +9,7 @@ import { useOpenMediaTheme } from '../themeContext';
 import { Text, TextInput } from './Text';
 
 /** A product or service inside a post: what it is, the price, where, and a way to ask about it. */
-export function ListingCard({ listing, onMessage, onRate }: { listing: PostListing; onMessage?: () => void; onRate?: (stars: number | null) => Promise<ListingRating> }) {
+export function ListingCard({ listing, onMessage, onRate, onBuy }: { listing: PostListing; onMessage?: () => void; onRate?: (stars: number | null) => Promise<ListingRating>; onBuy?: () => void }) {
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const soldOut = listing.availability === 'sold_out';
@@ -36,7 +36,10 @@ export function ListingCard({ listing, onMessage, onRate }: { listing: PostListi
       <Text style={styles.small}>{rating.count ? `${rating.average?.toFixed(1)} · ${rating.count} ${rating.count === 1 ? 'rating' : 'ratings'}${rating.mine ? ' · yours' : ''}` : 'No ratings yet'}</Text>
     </View> : null}
     {note ? <Text accessibilityLiveRegion="polite" style={styles.small}>{note}</Text> : null}
-    {onMessage && !soldOut ? <Pressable accessibilityRole="button" onPress={onMessage} style={styles.primary}><Ionicons name="chatbubble-outline" size={15} color={colors.surface} /><Text style={styles.primaryText}>{listing.kind === 'product' ? 'Message seller' : 'Ask about this'}</Text></Pressable> : null}
+    {(onMessage || onBuy) && !soldOut ? <View style={styles.actions}>
+      {onBuy && listing.priceMinor ? <Pressable accessibilityRole="button" accessibilityHint="Shows the price and fees before you pay" onPress={onBuy} style={styles.primary}><Text style={styles.primaryText}>{listing.kind === 'product' ? 'Buy' : 'Pay'}</Text></Pressable> : null}
+      {onMessage ? <Pressable accessibilityRole="button" onPress={onMessage} style={onBuy && listing.priceMinor ? styles.secondary : styles.primary}><Ionicons name="chatbubble-outline" size={15} color={onBuy && listing.priceMinor ? colors.text : colors.surface} /><Text style={onBuy && listing.priceMinor ? styles.secondaryText : styles.primaryText}>{listing.kind === 'product' ? 'Message seller' : 'Ask about this'}</Text></Pressable> : null}
+    </View> : null}
   </View>;
 }
 
@@ -89,7 +92,7 @@ export function ListingFields({ value, onChange, onRemove, disabled }: { value: 
       <TextInput accessibilityLabel="Where" value={value.location ?? ''} onChangeText={(location) => set({ location })} maxLength={120} placeholder="City or neighbourhood (optional)" placeholderTextColor={colors.textTertiary} style={[styles.input, styles.grow]} editable={!disabled} />
       <View style={styles.toggle}><Text style={styles.small}>{value.kind === 'service' ? 'Remote' : 'Ships'}</Text><Switch accessibilityLabel={value.kind === 'service' ? 'Available remotely' : 'Can ship'} value={Boolean(value.remote)} onValueChange={(remote) => set({ remote })} disabled={disabled} trackColor={{ false: colors.border, true: colors.text }} thumbColor={colors.surface} /></View>
     </View>
-    <Text style={styles.small}>Shown in the Feed with your post. People can message you about it. Payments come later; never send money outside a method you trust.</Text>
+    <Text style={styles.small}>Shown in the Feed with your post. People can message you about it, and pay in the app once you set up payments in Profile. Never send money outside a method you trust.</Text>
   </View>;
 }
 
@@ -105,6 +108,7 @@ function createStyles(colors: ThemeColors) {
     line: { color: colors.textSecondary, fontSize: 14, lineHeight: 20 },
     small: { color: colors.textTertiary, fontSize: 12, lineHeight: 17 },
     stars: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+    actions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
     primary: { alignSelf: 'flex-start', marginTop: 6, minHeight: 38, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 19, backgroundColor: colors.text },
     primaryText: { color: colors.surface, fontSize: 14, fontWeight: '600' },
     secondary: { alignSelf: 'flex-start', marginTop: 6, minHeight: 38, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 19, borderWidth: 1, borderColor: colors.border },

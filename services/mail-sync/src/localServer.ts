@@ -7,6 +7,8 @@ import { createServer } from 'node:http';
 
 import { handleMailRequest, Limiter, MailEnv } from './mailHandler.js';
 import { latestSignInCode } from './localSignIn.js';
+import { PaymentsEnv } from './payments.js';
+import { VerificationEnv } from './verification.js';
 
 const port = Number(process.env.PORT ?? 8787);
 const host = process.env.HOST ?? '127.0.0.1';
@@ -29,7 +31,7 @@ function limiter(limit: number, periodSeconds = 60): Limiter {
   };
 }
 
-const env: MailEnv = {
+const env: MailEnv & PaymentsEnv & VerificationEnv = {
   SUPABASE_URL: required('SUPABASE_URL'),
   SUPABASE_PUBLISHABLE_KEY: required('SUPABASE_PUBLISHABLE_KEY'),
   MAIL_CREDENTIALS_KEY: required('MAIL_CREDENTIALS_KEY'),
@@ -53,6 +55,14 @@ const env: MailEnv = {
   BRIDGES_SLACK_URL: process.env.BRIDGES_SLACK_URL,
   BRIDGES_DISCORD_URL: process.env.BRIDGES_DISCORD_URL,
   BRIDGES_GVOICE_URL: process.env.BRIDGES_GVOICE_URL,
+  // Server-only steps (payments, verification). Stripe stays off unless test keys are added.
+  SUPABASE_SECRET_KEY: process.env.SUPABASE_SECRET_KEY,
+  STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY,
+  STRIPE_IDENTITY_WEBHOOK_SECRET: process.env.STRIPE_IDENTITY_WEBHOOK_SECRET,
+  STRIPE_PAYMENTS_WEBHOOK_SECRET: process.env.STRIPE_PAYMENTS_WEBHOOK_SECRET,
+  STRIPE_CONNECT_WEBHOOK_SECRET: process.env.STRIPE_CONNECT_WEBHOOK_SECRET,
+  PAYMENTS_RETURN_URL: process.env.PAYMENTS_RETURN_URL ?? process.env.CONVO_APP_ORIGIN ?? 'http://localhost:8081',
+  BASE_SEPOLIA_RPC_URL: process.env.BASE_SEPOLIA_RPC_URL,
   MAIL_CONNECT_RATE_LIMITER: limiter(5),
   MAIL_SYNC_RATE_LIMITER: limiter(12),
   MAIL_SEND_RATE_LIMITER: limiter(10),

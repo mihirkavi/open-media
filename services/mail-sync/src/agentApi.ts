@@ -23,17 +23,21 @@ import { networkSearches } from '../../../src/connectors/networkSearch';
 import { collapseRepeatedPosts, NetworkId, networks } from '../../../src/domain/networkPosts';
 import { explainFeedPost, FeedMode, SocialPost } from '../../../src/domain/posts';
 import { PostListing, validateListing } from '../../../src/domain/listings';
+import { isPaymentChain, onchainTransfer, Payment } from '../../../src/domain/payments';
 import { maxPostLength, PublicPostRecord, socialPostFromPublic } from '../../../src/domain/publicPosts';
 import { parseSearchQuery, postMatchesSearch } from '../../../src/domain/searchQuery';
 import { searchSettings, settingIndex } from '../../../src/domain/settings';
 import { availableNetworks, BridgesEnv } from './bridges.js';
 import { contactsKey, ContactsEnv, openCard, sealCard, validCards } from './contactsStore.js';
 import { callRpc, formatPost, formatProfile, openApiDocument, PublicApiEnv, UpstreamPost, UpstreamProfile } from './publicApi.js';
+import {
+  availableChains, cardPaymentsConfigured, checkOnchainPayment, handlePaymentsWebhook, linkWallet, PaymentsEnv, PaymentsError, paymentsAvailability, refreshPayoutAccount, startCardCheckout, startPayoutOnboarding,
+} from './payments.js';
 import { EventsUnavailable, PublicEventsEnv, upcomingEvents } from './publicEvents.js';
 import { authenticate } from './session.js';
 import { discloseLegalName, handleVerificationWebhook, startVerification, VerificationEnv, VerificationError, verificationConfigured } from './verification.js';
 
-export type AgentEnv = PublicApiEnv & BridgesEnv & ContactsEnv & VerificationEnv & PublicEventsEnv;
+export type AgentEnv = PublicApiEnv & BridgesEnv & ContactsEnv & VerificationEnv & PublicEventsEnv & PaymentsEnv;
 
 const version = '1.0.0';
 const sources = ['open-media', 'farcaster', 'lens', 'hive', 'deso'] as const;
@@ -55,6 +59,11 @@ export class AgentError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
 }
 
+async function paymentsCall<T>(run: () => Promise<T>): Promise<T> {
+  try { return await run(); }
+  catch (error) { throw error instanceof PaymentsError ? new AgentError(error.status, error.code, error.message) : error; }
+}
+
 /** Paths served here. They are matched before the read-only public API and the mail routes. */
 export function isAgentPath(pathname: string, method: string): boolean {
   const path = pathname.replace(/\/+$/, '') || '/';
@@ -64,6 +73,7 @@ export function isAgentPath(pathname: string, method: string): boolean {
   if (path === '/v1/me' || path.startsWith('/v1/me/')) return true;
   if (method === 'GET' && /^\/v1\/people\/[^/]+\/[^/]+$/.test(path)) return true;
   if (method === 'POST' && path === '/v1/verification/stripe/webhook') return true;
+  if (method === 'POST' && path === '/v1/payments/stripe/webhook') return true;
   return method !== 'GET' && /^\/v1\/posts\/[^/]+\/report$/.test(path);
 }
 
@@ -467,6 +477,93 @@ export class Account {
   async startVerification() {
     try { return { ...(await startVerification(this.env, this.userId)), note: 'Open this link to verify with Stripe Identity. Stripe keeps your document and selfie; Open Media keeps only the result.' }; }
     catch (error) { throw error instanceof VerificationError ? new AgentError(error.status, error.code, error.message) : error; }
+  }
+
+  // Payments (ADR 0013, phase 5). Who is paid and how much always come from the database, never
+  // from the caller, and only Stripe's webhook or the chain can confirm a payment.
+  async paymentSetup() {
+    const setup = await this.rpc<Record<string, unknown>>('open_media_payment_setup', {});
+    return { ...setup, available: paymentsAvailability(this.env) };
+  }
+
+  async startPayouts() {
+    const [row] = await this.rest<{ stripe_account_id: string }[]>('GET', `/rest/v1/payment_accounts?user_id=eq.${this.userId}&select=stripe_account_id`);
+    const link = await paymentsCall(() => startPayoutOnboarding(this.env, this.userId, row?.stripe_account_id ?? null));
+    return { url: link.url, note: 'Open this link to set up payouts with Stripe. Stripe collects your bank and tax details; Open Media never sees them.' };
+  }
+
+  async refreshPayouts() {
+    const [row] = await this.rest<{ stripe_account_id: string }[]>('GET', `/rest/v1/payment_accounts?user_id=eq.${this.userId}&select=stripe_account_id`);
+    if (!row) throw new AgentError(404, 'not_found', 'Set up payouts first.');
+    await paymentsCall(() => refreshPayoutAccount(this.env, this.userId, row.stripe_account_id));
+    return this.paymentSetup();
+  }
+
+  async linkWallet(body: Record<string, unknown>) {
+    return paymentsCall(() => linkWallet(this.env, this.userId, body));
+  }
+
+  async removeWallet(id: string) {
+    if (!uuid.test(id)) throw new AgentError(404, 'not_found', 'Wallet not found.');
+    await this.rpc('open_media_remove_wallet', { p_wallet_id: id });
+    return { removed: true };
+  }
+
+  async paymentOptions(postId: string) {
+    if (!uuid.test(postId)) throw new AgentError(404, 'not_found', 'Listing not found.');
+    const options = await this.rpc<{ card: boolean; chains: string[]; priceMinor: number | null; currency: string; available: boolean; platformFeeBps: number } | null>('open_media_listing_payment_options', { p_post_id: postId });
+    if (!options) throw new AgentError(404, 'not_found', 'Listing not found.');
+    const chains = availableChains(this.env);
+    return { ...options, card: options.card && cardPaymentsConfigured(this.env), chains: options.chains.filter((chain) => chains.includes(chain as never)), testMode: !paymentsAvailability(this.env).live };
+  }
+
+  async payments(limit = 50) {
+    return this.rpc<Payment[]>('open_media_my_payments', { p_limit: Math.min(Math.max(Math.trunc(limit) || 50, 1), 200) });
+  }
+
+  async payment(id: string) {
+    if (!uuid.test(id)) throw new AgentError(404, 'not_found', 'Payment not found.');
+    const payment = await this.rpc<Payment | null>('open_media_payment', { p_intent_id: id });
+    if (!payment) throw new AgentError(404, 'not_found', 'Payment not found.');
+    const transfer = payment.rail === 'onchain' && payment.direction === 'sent' && ['created', 'awaiting_payer'].includes(payment.status) ? onchainTransfer(payment) : undefined;
+    return { ...payment, ...(transfer ? { transfer } : {}) };
+  }
+
+  /**
+   * Starts paying for something. Card: returns Stripe's checkout page for the person to open.
+   * USDC: returns the exact transfer for the person's own wallet to approve. Nothing is charged here.
+   */
+  async pay(body: Record<string, unknown>) {
+    const contextType = String(body.contextType ?? 'listing');
+    const contextId = String(body.contextId ?? body.postId ?? '');
+    const rail = String(body.rail ?? '');
+    if (contextType !== 'listing') throw new AgentError(400, 'bad_request', 'contextType must be listing.');
+    if (!uuid.test(contextId)) throw new AgentError(400, 'bad_request', 'contextId must be the listing’s post id.');
+    if (rail !== 'card' && rail !== 'onchain') throw new AgentError(400, 'bad_request', 'rail must be card or onchain.');
+    const chain = rail === 'onchain' ? String(body.chain ?? 'base-sepolia') : null;
+    if (rail === 'card' && !cardPaymentsConfigured(this.env)) throw new AgentError(503, 'not_configured', 'Card payments are not available on this server yet.');
+    if (chain && (!isPaymentChain(chain) || !availableChains(this.env).includes(chain))) throw new AgentError(503, 'not_configured', `USDC payments on ${chain} are not available on this server.`);
+    const key = typeof body.idempotencyKey === 'string' && uuid.test(body.idempotencyKey) ? body.idempotencyKey : crypto.randomUUID();
+    const created = await this.rpc<Payment>('open_media_create_payment_intent', { p_idempotency_key: key, p_context_type: contextType, p_context_id: contextId, p_rail: rail, p_chain: chain });
+    if (rail === 'card') {
+      const { checkoutUrl } = await paymentsCall(() => startCardCheckout(this.env, created.id, this.userId));
+      return { payment: await this.payment(created.id), checkoutUrl, note: 'Open checkoutUrl to pay by card on Stripe’s page. The payment is confirmed only after Stripe reports it paid.' };
+    }
+    return { payment: await this.payment(created.id), note: 'Approve this USDC transfer in your own wallet, then send its transaction hash. It is confirmed only after Open Media reads it on the network.' };
+  }
+
+  async submitTransaction(id: string, txHash: unknown) {
+    if (!uuid.test(id)) throw new AgentError(404, 'not_found', 'Payment not found.');
+    if (typeof txHash !== 'string') throw new AgentError(400, 'bad_request', 'Send txHash.');
+    await this.rpc('open_media_submit_onchain_payment', { p_intent_id: id, p_tx_hash: txHash });
+    return this.checkPayment(id);
+  }
+
+  async checkPayment(id: string) {
+    const payment = await this.payment(id);
+    if (payment.rail !== 'onchain' || payment.direction !== 'sent' || payment.status !== 'submitted') return { payment };
+    const check = await paymentsCall(() => checkOnchainPayment(this.env, id, this.userId));
+    return { payment: await this.payment(id), detail: check.detail };
   }
 
   follows() { return this.rpc('open_media_my_follows', {}); }
@@ -945,6 +1042,10 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
       catch (error) { throw error instanceof VerificationError ? new AgentError(error.status, error.code, error.message) : error; }
     }
 
+    if (request.method === 'POST' && path === '/v1/payments/stripe/webhook') {
+      return json(await paymentsCall(async () => handlePaymentsWebhook(env, await request.text(), request.headers.get('stripe-signature'))), 0);
+    }
+
     // Account routes: every one needs the person's own token.
     const account = await Account.fromRequest(request, env, origin, internal);
     const raw = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method) ? await request.json().catch(() => ({})) as unknown : {};
@@ -979,6 +1080,22 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     if (request.method === 'GET' && path === '/v1/me/identity') return json(await account.identity(), 0);
     if (request.method === 'PUT' && path === '/v1/me/identity') return json(await account.setIdentity(body), 0);
     if (request.method === 'POST' && path === '/v1/me/verification') return json(await account.startVerification(), 0, 201);
+    if (request.method === 'GET' && path === '/v1/me/payments') return json(await account.payments(Number(url.searchParams.get('limit') ?? 50)), 0);
+    if (request.method === 'POST' && path === '/v1/me/payments') return json(await account.pay(body), 0, 201);
+    if (request.method === 'GET' && path === '/v1/me/payments/setup') return json(await account.paymentSetup(), 0);
+    if (request.method === 'POST' && path === '/v1/me/payments/payouts') return json(await account.startPayouts(), 0, 201);
+    if (request.method === 'POST' && path === '/v1/me/payments/payouts/refresh') return json(await account.refreshPayouts(), 0);
+    const paymentMatch = path.match(/^\/v1\/me\/payments\/([^/]+)$/);
+    if (request.method === 'GET' && paymentMatch) return json(await account.payment(decodeURIComponent(paymentMatch[1])), 0);
+    const transactionMatch = path.match(/^\/v1\/me\/payments\/([^/]+)\/transaction$/);
+    if (request.method === 'POST' && transactionMatch) return json(await account.submitTransaction(decodeURIComponent(transactionMatch[1]), body.txHash), 0);
+    const checkMatch = path.match(/^\/v1\/me\/payments\/([^/]+)\/check$/);
+    if (request.method === 'POST' && checkMatch) return json(await account.checkPayment(decodeURIComponent(checkMatch[1])), 0);
+    if (request.method === 'POST' && path === '/v1/me/wallets') return json(await account.linkWallet(body) as object, 0, 201);
+    const walletMatch = path.match(/^\/v1\/me\/wallets\/([^/]+)$/);
+    if (request.method === 'DELETE' && walletMatch) return json(await account.removeWallet(decodeURIComponent(walletMatch[1])), 0);
+    const optionsMatch = path.match(/^\/v1\/me\/listings\/([^/]+)\/payment-options$/);
+    if (request.method === 'GET' && optionsMatch) return json(await account.paymentOptions(decodeURIComponent(optionsMatch[1])), 0);
     if (request.method === 'GET' && path === '/v1/me/follows') return json(await account.follows() as object, 0);
     if (request.method === 'POST' && path === '/v1/me/follows') return json(await account.follow(body.handle) as object, 0, 201);
     const followMatch = path.match(/^\/v1\/me\/follows\/([^/]+)$/);

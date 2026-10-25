@@ -17,6 +17,14 @@ This checklist defines “production ready” for the current onboarding private
 - [x] Local browser flow: magic-link onboarding, callback cleanup, profile creation, profile search, direct conversation, send, realtime receive, account export, and responsive layout.
 - [x] Latest signed iOS Store build finished successfully: build 9, EAS `f5916bd3-c316-487a-bbed-f6085bc38fcc`.
 
+## Phase 5: payments (built 2026-10-25, not deployed)
+
+- [x] `20261027120000_payments.sql`: 22 pgTAP checks and a clean lint locally; Worker and domain tests; on-chain checks verified against a real Base Sepolia USDC transfer; web flow checked locally (wallet linking, confirmation sheet, a test transaction left unconfirmed).
+- [ ] Owner: approve the migration and Worker deploy.
+- [ ] Owner: Stripe test mode. Enable Connect (Express), then set `STRIPE_SECRET_KEY` (an `sk_test_` key), `STRIPE_PAYMENTS_WEBHOOK_SECRET` (endpoint `/v1/payments/stripe/webhook` with `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`, `checkout.session.expired`, `charge.refunded`), optionally `STRIPE_CONNECT_WEBHOOK_SECRET` (a Connect endpoint with `account.updated`), and `PAYMENTS_RETURN_URL`.
+- [ ] Acceptance: one test-mode card payment and one Base Sepolia USDC payment confirmed end to end (needs a funded test wallet).
+- [ ] Live money: only after the owner approves live Stripe keys and Base mainnet, set `PAYMENTS_LIVE=1`.
+
 ## Production deploy of 2026-10-25 (Phases 3 and 4)
 
 - [x] Applied `20261026120000_post_listings.sql` and `20261026130000_listing_ratings.sql` with `npx supabase db push --linked` after a dry run; all 9 database suites passed locally first.

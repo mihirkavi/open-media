@@ -196,6 +196,19 @@ Built:
 
 Not yet: nobody can rate in production until identity verification is configured (no Stripe Identity keys yet); rating abuse goes through the existing post report flow, with no rating-specific review screen.
 
+### Phase 5 status (2026-10-25)
+
+Built:
+
+- **Database** (`supabase/migrations/20261027120000_payments.sql`): `payment_intents` and the append-only `payment_events`, `payment_wallets`, `payment_accounts` (Stripe Express) and `payment_fees` (0 % for every kind). A payment is created only through `open_media_create_payment_intent`, which takes the recipient, amount and currency from the listing, never from the client, and is idempotent per payer key. Status changes only through `open_media_record_payment_event`, which only the server can call and which allows confirmation only from `stripe_webhook` or `chain` evidence. A transaction hash can pay for one thing only. Payers and recipients read their own payments; nobody else can.
+- **Cards** (`services/mail-sync/src/payments.ts`): sellers set up a Stripe Connect Express account from Profile → Payments. Buyers pay on Stripe Checkout (destination charge to the seller, `application_fee_amount` only when the fee is above 0), so card numbers never touch Open Media. `POST /v1/payments/stripe/webhook` checks Stripe's signature, then re-reads the session or account from Stripe before changing anything; the amount and currency must match.
+- **USDC on Base** (external wallets only): people link a wallet by signing Open Media's message (checked by the Worker, at most 10 minutes old). The payer's own wallet sends `transfer(seller, amount)` on the USDC contract; the Worker confirms only after reading the receipt: success, USDC contract, sender is one of the payer's linked wallets, recipient and amount match, the block is after the payment started, and enough blocks have followed (2 on Base Sepolia, 6 on Base). Checked against a real Base Sepolia transfer.
+- **Safety**: the Worker refuses live Stripe keys and Base mainnet unless `PAYMENTS_LIVE=1`, so only Stripe test mode and Base Sepolia work today. Every payment starts from one confirmation sheet showing the recipient, amount, Open Media's fee and the provider's.
+- **App**: "Buy" or "Pay" on priced listings opens that sheet; Profile → Payments has card payouts, wallets and history. Browser wallets are found through EIP-6963.
+- **Tests**: 22 pgTAP checks (forged confirmations and direct writes refused, amounts from the listing, idempotency, no double use of a transaction, no paying yourself or for sold-out items, one wallet per account) and Worker tests for webhooks, wallet signatures and chain checks.
+
+Not yet (phase 5): the acceptance runs need the owner's keys: a Stripe test-mode card payment end to end needs `STRIPE_SECRET_KEY` (test) and the payments webhook secret, and a Base Sepolia USDC payment needs a funded test wallet. Phones can pay by card but not with USDC yet (WalletConnect needs Open Media's own project id). Refunds are recorded from Stripe but started in Stripe's dashboard. Deleting an account deletes its payment records for both sides.
+
 ---
 
 ## 5. Owner decisions (2026-10-24)
