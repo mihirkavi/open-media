@@ -1306,28 +1306,39 @@ async function nlwebAsk(request: Request, env: AgentEnv, origin: string): Promis
   const text = typeof input.query?.text === 'string' ? input.query.text.trim() : '';
   const meta = { version: '0.55' };
   if (!text || text.length > 500) return json({ _meta: { ...meta, response_type: 'failure' }, error: { code: 'INVALID_QUERY', message: 'Send query.text with 1 to 500 characters.' } }, 0);
-  const docs = searchDocs(origin, text).slice(0, 3).map((page) => ({ '@type': 'TechArticle', name: page.title, description: page.description, url: page.url, grounding: { source: 'Open Media documentation', excerpts: page.matches.slice(0, 3) } }));
-  let posts: object[] = [];
-  try {
-    const found = await search(env, origin, text) as { posts?: AgentPost[] };
-    posts = (found.posts ?? []).slice(0, 10).map((post) => ({
-      '@type': 'SocialMediaPosting', name: post.title ?? post.text.slice(0, 80), description: post.text.slice(0, 500), url: post.url, datePublished: post.createdAt,
-      author: { '@type': 'Person', name: post.author.name, identifier: post.author.handle }, isPartOf: post.network, grounding: { source: post.network, why: post.why.used },
-    }));
-  } catch { /* Networks can be down; documentation results still answer. */ }
-  const results = [...docs, ...posts];
+  const docs: object[] = searchDocs(origin, text).slice(0, 3).map((page) => ({ '@type': 'TechArticle', name: page.title, description: page.description, url: page.url, grounding: { source: 'Open Media documentation', excerpts: page.matches.slice(0, 3) } }));
   const streaming = input.prefer?.streaming === true && /text\/event-stream/.test(request.headers.get('accept') ?? '');
+  // Some networks answer slowly; posts that miss the budget are left out rather than holding up the answer.
+  const posts = nlwebPosts(env, origin, text, streaming ? 4000 : 2500);
   if (!streaming) {
+    const results = [...docs, ...await posts];
     if (!results.length) return json({ _meta: { ...meta, response_type: 'failure' }, error: { code: 'NO_RESULTS', message: 'Nothing on Open Media or the open networks matched.' } }, 0);
     return json({ _meta: { ...meta, response_type: 'answer', response_format: 'conversational_search' }, results }, 0);
   }
-  const event = (name: string, data: object) => `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
-  const body = [
-    event('start', { _meta: { ...meta, response_type: 'answer', streaming: true } }),
-    ...(results.length ? results.map((item, index) => event('result', { index, item })) : [event('error', { code: 'NO_RESULTS', message: 'Nothing matched.' })]),
-    event('complete', { _meta: { ...meta, response_type: 'answer' } }),
-  ].join('');
+  const event = (name: string, data: object) => new TextEncoder().encode(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`);
+  // Documentation results go out at once; posts follow when the networks answer.
+  const { readable: body, writable } = new TransformStream<Uint8Array, Uint8Array>();
+  const writer = writable.getWriter();
+  void (async () => {
+    await writer.write(event('start', { _meta: { ...meta, response_type: 'answer', streaming: true } }));
+    for (const [index, item] of docs.entries()) await writer.write(event('result', { index, item }));
+    const later = await posts;
+    for (const [index, item] of later.entries()) await writer.write(event('result', { index: docs.length + index, item }));
+    if (!docs.length && !later.length) await writer.write(event('error', { code: 'NO_RESULTS', message: 'Nothing matched.' }));
+    await writer.write(event('complete', { _meta: { ...meta, response_type: 'answer' } }));
+    await writer.close();
+  })().catch(() => writer.abort().catch(() => undefined));
   return new Response(body, { headers: { ...publicHeaders, 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store' } });
+}
+
+/** Public posts from every network matching the question, as schema.org items, within a time budget. */
+async function nlwebPosts(env: AgentEnv, origin: string, text: string, budgetMs: number): Promise<object[]> {
+  const timeout = new Promise<undefined>((resolve) => setTimeout(resolve, budgetMs));
+  const found = await Promise.race([(search(env, origin, text) as Promise<{ posts?: AgentPost[] }>).catch(() => undefined), timeout]);
+  return (found?.posts ?? []).slice(0, 10).map((post) => ({
+    '@type': 'SocialMediaPosting', name: post.title ?? post.text.slice(0, 80), description: post.text.slice(0, 500), url: post.url, datePublished: post.createdAt,
+    author: { '@type': 'Person', name: post.author.name, identifier: post.author.handle }, isPartOf: post.network, grounding: { source: post.network, why: post.why.used },
+  }));
 }
 
 /** Schema feed: Open Media's newest public posts as JSON Lines of schema.org SocialMediaPosting. */
