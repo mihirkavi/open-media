@@ -1,3 +1,5 @@
+import type { PostEvent, PostListing } from './listings';
+
 export type PostKind = 'text' | 'image' | 'video' | 'link';
 export type FeedMode = 'relevant' | 'raw';
 
@@ -46,6 +48,10 @@ export interface SocialPost {
    * from and which published filters were applied to that stream. Shown verbatim in “Why this?”.
    */
   eligibility?: { selection: string; filters: string[] };
+  /** A product or service the author offers (ADR 0013). */
+  listing?: PostListing;
+  /** A real-world event read from public event listings; registration happens on the official page. */
+  event?: PostEvent;
 }
 
 export interface FeedExplanation {

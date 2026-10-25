@@ -162,6 +162,7 @@ Open Media is in **public beta**. Everything below is in the code today.
 | **Cross-posting** | One post to Farcaster, Lens, Hive and DeSo using keys you approve in each network's own app. No seed phrases. | 🧪 Beta: built, not yet tested on live networks |
 | **People** | Tap any name to open one profile with that person's posts from every network they list. Your own contacts, notes and nicknames are encrypted and visible only to you, link to accounts only on an exact email or phone match, and every link can be undone. | ✅ Live |
 | **Privacy and follows** | Make your account private so only followers you approve see your posts, choose which name people see, and follow people. Verified people get a blue tick. | 🧪 Beta: verification turns on once Stripe Identity is configured |
+| **Products, services and events** | Offer something for sale or a service from the composer, with a price, and people can message you about it. Upcoming public events from Luma, Meetup and Eventbrite appear in the Feed with a link to register on the official page. | 🧪 Beta: events cover the San Francisco Bay Area for now; payments come later |
 | **Messages** | Real-time chats between Open Media users, blocking and reporting. | ✅ Live |
 | **Email** | Connect Gmail, iCloud, Yahoo, Fastmail or any other IMAP account. Read and reply as conversations. Verified brand logos for trusted senders. | ✅ Live |
 | **Chat bridges** | WhatsApp, Signal, Google Messages, Google Voice, Instagram, Messenger, LinkedIn, X, Bluesky, Slack and Discord through open-source bridges, with Telegram ready once its app ID is set. Opt-in, with a clear warning and step-by-step sign-in for each network. | 🧪 Beta: local setup only |
@@ -178,8 +179,8 @@ Everything Open Media does for people, it also offers to programs and AI assista
 
 | Interface | Account needed | What you can do |
 | --- | --- | --- |
-| `GET /v1/feed`, `/v1/search`, `/v1/posts`, `/v1/profiles/{handle}`, `/v1/people/{network}/{handle}`, `/v1/networks`, `/v1/settings`, `/v1/about` | No | Read the mixed feed with “Why this?” reasons, search every open network in plain language, read public posts, profiles and one person's posts across networks, see exactly what each network supports, find any setting, read the mission |
-| `/v1/me`, `/v1/me/posts`, `/v1/me/conversations`, `/v1/me/contacts`, `/v1/me/identity`, `/v1/me/follows`, `/v1/me/export` | Your access token | Publish, delete and report posts, read and send messages, manage your private contacts, privacy and follows, export your data |
+| `GET /v1/feed`, `/v1/search`, `/v1/posts`, `/v1/profiles/{handle}`, `/v1/people/{network}/{handle}`, `/v1/events/upcoming`, `/v1/networks`, `/v1/settings`, `/v1/about` | No | Read the mixed feed with “Why this?” reasons, search every open network in plain language, read public posts, profiles and one person's posts across networks, find upcoming events, see exactly what each network supports, find any setting, read the mission |
+| `/v1/me`, `/v1/me/posts`, `/v1/me/conversations`, `/v1/me/contacts`, `/v1/me/identity`, `/v1/me/follows`, `/v1/me/listings`, `/v1/me/export` | Your access token | Publish, delete and report posts, offer products and services, read and send messages, manage your private contacts, privacy and follows, export your data |
 | MCP: `/open/mcp` and `/me/mcp` | No / your access token | The same, as tools for Claude, ChatGPT and other assistants |
 | `/llms.txt`, `/v1/openapi.json`, `/.well-known/mcp.json` | No | Discovery for language models and programs |
 

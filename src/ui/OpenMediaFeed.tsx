@@ -1,12 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Image, Linking, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { PersonLink, targetForPost } from './people';
+import { EventCard, ListingCard, ListingFields } from './ListingCards';
+import { PersonLink, targetForPost, usePeople } from './people';
 import { Text, TextInput } from './Text';
 
 import { createClientId } from '../data/openMediaService';
 import { crossPost } from '../data/crossPostService';
-import { PostReportReason, publishPost } from '../data/postService';
+import { interleaveEvents, loadUpcomingEvents } from '../data/eventsService';
+import { PostReportReason, publishListing, publishPost } from '../data/postService';
+import { formatPrice, ListingInput, validateListing } from '../domain/listings';
 import { crossPostVideo, discardPreparedVideo, draftCrossPostVideo, prepareVideo, PreparedVideo, uploadPostVideo, UploadedVideo, VideoError } from '../data/videoUpload';
 import { CrossPostOutcome, CrossPostVideo, destinationSummary, outcomeSummary, prepareCrossPost } from '../domain/crossPosting';
 import { NetworkId, networks, safeHttpsUrl, sourceName } from '../domain/networkPosts';
@@ -50,7 +53,9 @@ export interface FeedViewProps {
 
 export function FeedView({ mode, onModeChange, posts, loading, error, hasMore, onRetry, onLoadMore, sources, loadingMore = false, pendingCount = 0, onShowPending, viewer, composing = false, onComposingChange, onPublished, onDeletePost, onReportPost }: FeedViewProps) {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
-  const ordered = useMemo(() => selectFeed(posts, mode), [posts, mode]);
+  // Upcoming public events sit among posts in the mixed Feed; they never push posts out.
+  const events = useUpcomingEvents(Boolean(sources));
+  const ordered = useMemo(() => interleaveEvents(selectFeed(posts, mode), events), [posts, mode, events]);
   const unreachable = (sources ?? []).filter((item) => item.error);
   const sourceNames = sources ? sources.map((item) => sourceName(item.id)) : ['Open Media'];
   const subtitle = `Public posts from ${listFormat(sourceNames)}.${viewer ? '' : ' No account needed to read.'}`;
@@ -82,6 +87,17 @@ export function FeedView({ mode, onModeChange, posts, loading, error, hasMore, o
   </View>;
 }
 
+function useUpcomingEvents(enabled: boolean): SocialPost[] {
+  const [events, setEvents] = useState<SocialPost[]>([]);
+  useEffect(() => {
+    if (!enabled) return;
+    let active = true;
+    loadUpcomingEvents().then((result) => { if (active) setEvents(result.posts); }).catch(() => undefined);
+    return () => { active = false; };
+  }, [enabled]);
+  return events;
+}
+
 /** Where a post is in publishing. Video posts upload first, then the Open Media post is created. */
 type PublishStage = 'idle' | 'preparing' | 'uploading' | 'publishing' | 'crossPosting';
 
@@ -103,12 +119,14 @@ function Composer({ viewer, open, onOpenChange, onPublished }: { viewer: FeedVie
   // The attached video, already cleaned of location metadata on this device.
   const [video, setVideo] = useState<PreparedVideo>();
   const [progress, setProgress] = useState(0);
+  // Set when this post offers a product or service (ADR 0013).
+  const [offer, setOffer] = useState<ListingInput>();
   const upload = useRef<AbortController>(undefined);
   useEffect(() => { if (open) setTimeout(() => input.current?.focus(), 0); }, [open]);
   useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(''), 6000); return () => clearTimeout(timer); }, [notice]);
   useEffect(() => () => discardPreparedVideo(video), [video]);
   const length = body.trim().length;
-  const ready = !busy && (length > 0 || Boolean(video)) && length <= maxPostLength;
+  const ready = !busy && (length > 0 || Boolean(video) || Boolean(offer?.title.trim())) && length <= maxPostLength;
   const draftVideo = video ? draftCrossPostVideo(video) : undefined;
   const finish = (outcomes: CrossPostOutcome[], text: string, postId: string, sent?: CrossPostVideo) => {
     // Keep the per-network result open when something was skipped, failed, or arrived differently.
@@ -128,6 +146,8 @@ function Composer({ viewer, open, onOpenChange, onPublished }: { viewer: FeedVie
   const publish = async () => {
     setError(''); setRetry(undefined);
     const text = body; const postId = clientId.current; const chosen = destinations; const attached = video;
+    const checked = offer ? validateListing(offer) : undefined;
+    if (checked && 'error' in checked) { setError(checked.error); return; }
     try {
       let uploaded: UploadedVideo | undefined;
       if (attached) {
@@ -136,11 +156,13 @@ function Composer({ viewer, open, onOpenChange, onPublished }: { viewer: FeedVie
         uploaded = await uploadPostVideo(attached, postId, setProgress, upload.current.signal);
       }
       setStage('publishing');
-      const post = await publishPost(text, postId, uploaded?.stored);
+      const post = checked ? await publishListing(text, postId, checked.listing) : await publishPost(text, postId, uploaded?.stored);
+      // Other networks get the listing as plain text: what it is, the price, and the caption.
+      const shared = checked ? [`${checked.listing.title} · ${formatPrice(checked.listing.priceMinor, checked.listing.currency)}`, text.trim()].filter(Boolean).join('\n\n') : text;
       const sent = attached && uploaded ? crossPostVideo(attached, uploaded, post.media?.[0]?.altText ?? 'Video') : undefined;
-      setBody(''); clientId.current = createClientId(); setOverride(undefined); setShowDestinations(false); onPublished(post);
+      setBody(''); setOffer(undefined); clientId.current = createClientId(); setOverride(undefined); setShowDestinations(false); onPublished(post);
       setStage('crossPosting');
-      finish(chosen.length ? await crossPost(text, chosen, postId, sent) : [], text, postId, sent);
+      finish(chosen.length ? await crossPost(shared, chosen, postId, sent) : [], shared, postId, sent);
       setVideo(undefined);
     }
     catch (reason) {
@@ -171,7 +193,8 @@ function Composer({ viewer, open, onOpenChange, onPublished }: { viewer: FeedVie
     : stage === 'crossPosting' ? (video ? 'Sending to your other networks. Videos can take a minute…' : 'Sending to your other networks…')
     : '';
   return <View style={[styles.composer, styles.composerOpen]}>
-    <View style={styles.composerTop}><Avatar initials={viewer.initials} /><TextInput ref={input} accessibilityLabel="Post text" multiline maxLength={maxPostLength + 200} value={body} onChangeText={setBody} placeholder={video ? 'Say something about your video (optional)' : 'What’s on your mind?'} placeholderTextColor={colors.textTertiary} style={styles.composerInput} /></View>
+    <View style={styles.composerTop}><Avatar initials={viewer.initials} /><TextInput ref={input} accessibilityLabel="Post text" multiline maxLength={maxPostLength + 200} value={body} onChangeText={setBody} placeholder={video ? 'Say something about your video (optional)' : offer ? 'Describe it (optional)' : 'What’s on your mind?'} placeholderTextColor={colors.textTertiary} style={styles.composerInput} /></View>
+    {offer ? <ListingFields value={offer} onChange={setOffer} onRemove={() => setOffer(undefined)} disabled={busy} /> : null}
     {video ? <View style={styles.attachment}>
       <FeedVideo uri={video.previewUri} streaming="progressive" posterUrl={undefined} aspectRatio={video.width / video.height} altText="Your video" />
       <View style={styles.attachmentRow}>
@@ -207,7 +230,8 @@ function Composer({ viewer, open, onOpenChange, onPublished }: { viewer: FeedVie
       })}
     </View> : null}
     <View style={styles.composerFooter}>
-      {!video ? <>
+      {!video && !offer ? <Pressable accessibilityRole="button" accessibilityLabel="Offer a product or service" disabled={busy} onPress={() => setOffer({ kind: 'product', title: '', currency: 'USD' })} style={styles.attachButton}><Ionicons name="pricetag-outline" size={20} color={colors.textSecondary} /></Pressable> : null}
+      {!video && !offer ? <>
         <Pressable accessibilityRole="button" accessibilityLabel="Add a video" disabled={busy} onPress={() => attach('library')} style={styles.attachButton}><Ionicons name="film-outline" size={20} color={colors.textSecondary} /></Pressable>
         {canRecordVideo ? <Pressable accessibilityRole="button" accessibilityLabel="Record a video" disabled={busy} onPress={() => attach('camera')} style={styles.attachButton}><Ionicons name="videocam-outline" size={20} color={colors.textSecondary} /></Pressable> : null}
       </> : null}
@@ -240,17 +264,21 @@ export function PostCard({ post, mode, viewer, onDelete, onReport }: { post: Soc
   const native = post.provenance.connectorId === 'open-media';
   const own = Boolean(native && viewer && viewer.id === post.author.id);
   const canAct = native && (own ? Boolean(onDelete) : Boolean(viewer && onReport));
-  const original = native ? undefined : safeHttpsUrl(post.provenance.canonicalURL);
+  // Event cards carry their own link to the official page.
+  const original = native || post.event ? undefined : safeHttpsUrl(post.provenance.canonicalURL);
   const network = networks[post.provenance.connectorId as keyof typeof networks];
   const image = post.media?.[0];
   // External posts can be long; Open Media posts are short enough to show whole.
   const long = !native && !post.title && (post.body.length > 420 || post.body.split('\n').length > 8);
   const [showAll, setShowAll] = useState(false);
+  const people = usePeople();
   return <View style={styles.post}>
-    <View style={styles.postHeader}><PersonLink target={targetForPost(post)} label={`Open ${post.author.displayName}’s profile`} style={styles.authorLink}><View style={styles.authorLinkInner}><Avatar initials={post.author.initials} imageUrl={post.author.avatarUrl} /><View style={styles.author}><View style={styles.nameLine}><Text numberOfLines={1} style={[styles.authorName, styles.nameShrink]}>{post.author.displayName}</Text>{post.author.verified ? <VerifiedTick size={14} /> : null}</View><Text numberOfLines={1} style={styles.meta}>{post.author.handle} · {formatRelativeTime(post.createdAt)} · {sourceName(post.provenance.connectorId)}</Text></View></View></PersonLink>{canAct ? <Pressable accessibilityRole="button" accessibilityLabel="Post options" accessibilityState={{ expanded: menuOpen }} onPress={() => setMenuOpen((value) => !value)} style={styles.menuButton}><Ionicons name={menuOpen ? 'close' : 'ellipsis-horizontal'} size={18} color={colors.textSecondary} /></Pressable> : null}</View>
+    <View style={styles.postHeader}><PersonLink target={targetForPost(post)} label={`Open ${post.author.displayName}’s profile`} style={styles.authorLink}><View style={styles.authorLinkInner}><Avatar initials={post.author.initials} imageUrl={post.author.avatarUrl} /><View style={styles.author}><View style={styles.nameLine}><Text numberOfLines={1} style={[styles.authorName, styles.nameShrink]}>{post.author.displayName}</Text>{post.author.verified ? <VerifiedTick size={14} /> : null}</View><Text numberOfLines={1} style={styles.meta}>{post.event ? `Upcoming event · from ${post.author.handle}` : `${post.author.handle} · ${formatRelativeTime(post.createdAt)} · ${sourceName(post.provenance.connectorId)}`}</Text></View></View></PersonLink>{canAct ? <Pressable accessibilityRole="button" accessibilityLabel="Post options" accessibilityState={{ expanded: menuOpen }} onPress={() => setMenuOpen((value) => !value)} style={styles.menuButton}><Ionicons name={menuOpen ? 'close' : 'ellipsis-horizontal'} size={18} color={colors.textSecondary} /></Pressable> : null}</View>
     {menuOpen ? <PostMenu own={own} onDelete={() => onDelete!(post.id)} onReport={(reason) => onReport!(post.id, reason)} /> : null}
     {post.title ? <Text selectable style={styles.postTitle}>{post.title}</Text> : null}
-    {post.body ? <Text selectable numberOfLines={long && !showAll ? 8 : undefined} style={[styles.body, post.title ? styles.bodyAfterTitle : null]}>{post.body}</Text> : null}
+    {post.body && post.body !== post.listing?.title ? <Text selectable numberOfLines={long && !showAll ? 8 : undefined} style={[styles.body, post.title ? styles.bodyAfterTitle : null]}>{post.body}</Text> : null}
+    {post.listing ? <ListingCard listing={post.listing} onMessage={native && !own && people?.message ? () => people.message!(post.author.handle.replace(/^@/, '')) : undefined} /> : null}
+    {post.event ? <EventCard event={post.event} /> : null}
     {long ? <Pressable accessibilityRole="button" accessibilityState={{ expanded: showAll }} onPress={() => setShowAll((value) => !value)} style={styles.showMore}><Text style={styles.whyText}>{showAll ? 'Show less' : 'Show more'}</Text></Pressable> : null}
     {image?.kind === 'image' && image.url ? <PostImage url={image.url} altText={image.altText} /> : image?.kind === 'video' && image.url ? <FeedVideo uri={image.url} streaming={image.streaming} posterUrl={image.posterUrl} aspectRatio={image.aspectRatio} altText={image.altText} /> : image ? <View accessibilityLabel={image.altText} style={[styles.media, post.kind === 'video' && styles.video]}><Ionicons name={post.kind === 'video' ? 'play' : 'image-outline'} size={30} color="#FFFFFF" /><Text style={styles.alt}>{image.altText}</Text></View> : null}
     <View style={styles.actions}>{post.engagement ? <><Action icon="chatbubble-outline" count={post.engagement.replies} /><Action icon="repeat-outline" count={post.engagement.reposts} /><Action icon="heart-outline" count={post.engagement.likes} /></> : null}{original ? <Pressable accessibilityRole="link" accessibilityLabel={`Open this post on ${sourceName(post.provenance.connectorId)}`} onPress={() => { Linking.openURL(original).catch(() => undefined); }} style={styles.original}><Text style={styles.whyText}>Open on {sourceName(post.provenance.connectorId)}</Text><Ionicons name="open-outline" size={12} color={colors.textSecondary} /></Pressable> : null}<Pressable accessibilityRole="button" accessibilityState={{ expanded }} onPress={() => setExpanded((value) => !value)} style={[styles.why, original ? styles.whyAfterLink : null]}><Text style={styles.whyText}>Why this?</Text></Pressable></View>

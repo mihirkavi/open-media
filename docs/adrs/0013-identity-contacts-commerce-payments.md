@@ -163,13 +163,27 @@ Built:
 
 - **Identity tiers and the blue tick** (`supabase/migrations/20261025120000_identity_visibility_follows.sql`): `identity_verifications` can be written only by the server (`service_role`) and holds no document images or numbers. The tier, the tick and the shown name are computed by the database. A legal name is stored encrypted, and as plain text only while its verified owner chooses to show it; switching away or losing verification removes it. Choosing the legal name before verification is refused.
 - **Private accounts and follows**: `follows` with requests, accept, decline and remove. `app_private.can_view_profile` is the one access rule used by the feed, single posts, profiles, the public API and MCP. Blocks override follows. Making an account public again accepts waiting requests.
-- **Profiles read through functions**: direct reads of `profiles` now return only your own row; search, conversations and agents get names from `open_media_profile_cards` and `open_media_search_profiles`, so a withheld name never leaves the database.
+- **Profiles read through functions**: search, conversations and agents get names from `open_media_profile_cards` and `open_media_search_profiles`, so a withheld name never leaves the database. Direct reads of `profiles` return your own row, public profiles that show a declared name, and people you already talk to (`20261025130000_profile_read_compatibility.sql`), which keeps installed app versions working; private and handle-only profiles are reached only through the functions.
 - **Verification provider** (`services/mail-sync/src/verification.ts`): Stripe Identity hosted checks (document plus live selfie), signed webhooks only, results re-read from Stripe. **Off until the operator sets four Worker secrets** (see the mail-sync README); until then the app says "Not available yet" and no one has a tick.
 - **App**: `VerifiedTick` after names in Feed, Clips, Messages, previews and profiles (verified email senders now use a distinct double-check mark); Follow, Requested and Following on profiles; a locked view for private accounts; "Privacy and identity" and "Followers" on your profile.
 - **Agents**: `/v1/me/identity` (GET, PUT), `/v1/me/verification`, `/v1/me/follows`, `/v1/me/follow-requests/{id}`, `/v1/me/followers/{id}` and matching MCP tools on `/me/mcp`.
 - **Tests**: 21 pgTAP checks (clients cannot verify themselves, tier 4 never leaks the legal name, private posts stay hidden from guests, pending followers and blocked followers), 6 Worker tests (signatures, forged events, encryption of the legal name, age).
 
 Not yet: no real Stripe Identity session has run (no keys); the existing profiles stay public with their declared names (decision 5 below, applied as the default); the relevant feed does not yet rank followed people higher; phones not verified (the development Mac ran out of memory).
+
+Phases 1 and 2 were deployed to production on 2026-10-25 (see `docs/PRODUCTION_READINESS.md`).
+
+### Phase 3 status (2026-10-25)
+
+Built:
+
+- **Products and services** (`supabase/migrations/20261026120000_post_listings.sql`): `post_listings` holds typed details for a public post: product or service, title, price as whole minor units (or "ask for price"), currency, place, remote or ships, availability, and a `listing_group_id` for phase 4 ratings. Listings are written only through `open_media_create_listing_post` (one transaction with the post, idempotent per client id) and changed only by their author through `open_media_update_listing`. Public posts, the public API and agents carry the listing.
+- **Composer and cards** (`src/ui/ListingCards.tsx`): a price-tag button in the existing composer adds listing fields; no new screen or tab. The Feed shows a listing card with the price and place, and "Message seller" or "Ask about this" opens a conversation. Cross-posting sends the title, price and caption as plain text.
+- **Events in the Feed** (`services/mail-sync/src/publicEvents.ts`, `src/data/eventsService.ts`): `GET /v1/events/upcoming` runs the events engine's providers (Luma, Meetup, Eventbrite) and cross-platform de-duplication without reading anyone's preferences, plans or calendar, so it is public. Upcoming events appear as cards after every sixth post in the mixed Feed, with date, place, price, organizer, the platforms that list them, and "Register on …", which opens the official page. "Why this?" says where each event came from. If the service or a provider is unreachable, the Feed shows no events and nothing else changes.
+- **Search**: "events this weekend", "desk for sale" and "hire a designer" are understood as events, products and services, in the app and for agents.
+- **Agents**: `GET /v1/events/upcoming` and the `find_upcoming_events` tool (public); `POST /v1/me/listings`, `PATCH /v1/me/listings/{postId}` and the `publish_listing` and `update_listing` tools on `/me/mcp`.
+
+Not yet: events cover the San Francisco Bay Area only, because the events engine's area list does; Open Media members cannot yet post their own events (event posts come only from public listings); payments for listings arrive in phase 5; "Ask organizer" for organizers on Open Media is not built.
 
 ---
 

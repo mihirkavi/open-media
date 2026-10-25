@@ -22,16 +22,18 @@ import { networkConnectors } from '../../../src/connectors/networkFeeds';
 import { networkSearches } from '../../../src/connectors/networkSearch';
 import { collapseRepeatedPosts, NetworkId, networks } from '../../../src/domain/networkPosts';
 import { explainFeedPost, FeedMode, SocialPost } from '../../../src/domain/posts';
+import { PostListing, validateListing } from '../../../src/domain/listings';
 import { maxPostLength, PublicPostRecord, socialPostFromPublic } from '../../../src/domain/publicPosts';
 import { parseSearchQuery, postMatchesSearch } from '../../../src/domain/searchQuery';
 import { searchSettings, settingIndex } from '../../../src/domain/settings';
 import { availableNetworks, BridgesEnv } from './bridges.js';
 import { contactsKey, ContactsEnv, openCard, sealCard, validCards } from './contactsStore.js';
 import { callRpc, formatPost, formatProfile, openApiDocument, PublicApiEnv, UpstreamPost, UpstreamProfile } from './publicApi.js';
+import { EventsUnavailable, PublicEventsEnv, upcomingEvents } from './publicEvents.js';
 import { authenticate } from './session.js';
 import { discloseLegalName, handleVerificationWebhook, startVerification, VerificationEnv, VerificationError, verificationConfigured } from './verification.js';
 
-export type AgentEnv = PublicApiEnv & BridgesEnv & ContactsEnv & VerificationEnv;
+export type AgentEnv = PublicApiEnv & BridgesEnv & ContactsEnv & VerificationEnv & PublicEventsEnv;
 
 const version = '1.0.0';
 const sources = ['open-media', 'farcaster', 'lens', 'hive', 'deso'] as const;
@@ -57,7 +59,8 @@ export class AgentError extends Error {
 export function isAgentPath(pathname: string, method: string): boolean {
   const path = pathname.replace(/\/+$/, '') || '/';
   if (['/', '/v1', '/v1/openapi.json', '/llms.txt', '/.well-known/mcp.json', '/.well-known/mcp-server', '/open/mcp', '/me/mcp'].includes(path)) return true;
-  if (['/v1/feed', '/v1/search', '/v1/networks', '/v1/settings', '/v1/about'].includes(path)) return true;
+  if (['/v1/feed', '/v1/search', '/v1/networks', '/v1/settings', '/v1/about', '/v1/events/upcoming'].includes(path)) return true;
+  if (method === 'PATCH' && /^\/v1\/me\/listings\/[^/]+$/.test(path)) return true;
   if (path === '/v1/me' || path.startsWith('/v1/me/')) return true;
   if (method === 'GET' && /^\/v1\/people\/[^/]+\/[^/]+$/.test(path)) return true;
   if (method === 'POST' && path === '/v1/verification/stripe/webhook') return true;
@@ -78,6 +81,8 @@ export interface AgentPost {
   media: { type: 'image' | 'video'; url: string; posterUrl: string | null; durationSeconds: number | null; altText: string | null }[];
   engagement: { replies: number; reposts: number; likes: number } | null;
   why: { used: string[]; filters: string[]; notUsed: string[] };
+  /** A product or service on offer, with the price in minor units (cents). */
+  listing?: PostListing;
 }
 
 export function agentPost(post: SocialPost, mode: FeedMode, origin: string): AgentPost {
@@ -94,6 +99,7 @@ export function agentPost(post: SocialPost, mode: FeedMode, origin: string): Age
     media: (post.media ?? []).flatMap((item) => item.url ? [{ type: item.kind, url: item.url, posterUrl: item.posterUrl ?? null, durationSeconds: item.durationSeconds ?? null, altText: item.altText || null }] : []),
     engagement: post.engagement ?? null,
     why: { used: explanation.used, filters: explanation.filters, notUsed: explanation.notUsed },
+    ...(post.listing ? { listing: post.listing } : {}),
   };
 }
 
@@ -144,7 +150,12 @@ export async function feed(env: AgentEnv, origin: string, options: { sources?: S
 export async function search(env: AgentEnv, origin: string, query: string) {
   const parsed = parseSearchQuery(query);
   if (!parsed.raw) throw new AgentError(400, 'bad_request', 'Add a search, for example q=videos about ethereum on lens.');
-  const wanted = networkSearches.filter((network) => !parsed.networks || parsed.networks.includes(network.id));
+  if (parsed.structured === 'event') {
+    const events = await upcomingEvents(env, { query: parsed.text, days: 14, limit: 30 });
+    return { query: parsed.raw, understood: parsed.understood, settings: searchSettings(parsed.raw).slice(0, 5), area: events.area, events: events.data, posts: [], methods: events.providers.map((item) => ({ network: item.provider, method: 'upcoming public events', status: item.status === 'ok' ? 'ok' : 'unavailable', count: events.data.filter((event) => event.sources.some((source) => source.provider === item.provider)).length })) };
+  }
+  // Products and services are Open Media listings; other networks have none.
+  const wanted = parsed.structured ? [] : networkSearches.filter((network) => !parsed.networks || parsed.networks.includes(network.id));
   const [ownPosts, ...networkResults] = await Promise.allSettled([
     callRpc<PublicPostRecord[]>(env, fetch, 'open_media_public_posts', { p_limit: 50, p_before_created_at: null, p_before_id: null, p_author_handle: null, p_media: parsed.media === 'video' ? 'video' : null }),
     ...wanted.map((network) => network.search(parsed)),
@@ -385,6 +396,37 @@ export class Account {
     return { linkedAccounts: clean, note: 'These links are public and declared by you; they are not proof of ownership.' };
   }
 
+  // Products and services (ADR 0013, phase 3).
+  async publishListing(body: Record<string, unknown>) {
+    const checked = validateListing({
+      kind: body.kind === 'service' ? 'service' : 'product', title: String(body.title ?? ''), price: body.price === undefined || body.price === null ? undefined : String(body.price),
+      currency: typeof body.currency === 'string' ? body.currency : undefined, location: typeof body.location === 'string' ? body.location : undefined, remote: body.remote === true,
+    });
+    if ('error' in checked) throw new AgentError(400, 'bad_request', checked.error);
+    if (body.kind !== 'product' && body.kind !== 'service') throw new AgentError(400, 'bad_request', 'kind must be product or service.');
+    const text = typeof body.text === 'string' ? body.text.trim() : '';
+    if (text.length > maxPostLength) throw new AgentError(400, 'bad_request', `Posts can be up to ${maxPostLength} characters.`);
+    const post = await this.rpc<UpstreamPost & { listing?: PostListing }>('open_media_create_listing_post', { p_client_id: crypto.randomUUID(), p_body: text, p_listing: checked.listing });
+    return { ...formatPost(post, this.origin, this.env.SUPABASE_URL), listing: post.listing };
+  }
+
+  async updateListing(postId: string, body: Record<string, unknown>) {
+    if (!uuid.test(postId)) throw new AgentError(404, 'not_found', 'Listing not found.');
+    const changes: Record<string, unknown> = {};
+    if (body.availability !== undefined) {
+      if (!['available', 'limited', 'sold_out'].includes(String(body.availability))) throw new AgentError(400, 'bad_request', 'availability must be available, limited or sold_out.');
+      changes.availability = body.availability;
+    }
+    if (body.priceMinor !== undefined) {
+      if (body.priceMinor !== null && !(Number.isInteger(body.priceMinor) && (body.priceMinor as number) >= 0 && (body.priceMinor as number) <= 100_000_000)) throw new AgentError(400, 'bad_request', 'priceMinor must be a whole number of cents, or null.');
+      changes.priceMinor = body.priceMinor;
+    }
+    if (body.location !== undefined) changes.location = body.location === null ? '' : String(body.location).slice(0, 120);
+    if (body.remote !== undefined) changes.remote = body.remote === true;
+    if (!Object.keys(changes).length) throw new AgentError(400, 'bad_request', 'Send availability, priceMinor, location or remote.');
+    return this.rpc('open_media_update_listing', { p_post_id: postId, p_changes: changes });
+  }
+
   // Identity, privacy and follows (ADR 0013, phase 2). Tier and tick are computed by the database.
   async identity() {
     const identity = await this.rpc<Record<string, unknown>>('open_media_my_identity', {});
@@ -580,6 +622,8 @@ function registerPublicTools(server: McpServer, env: AgentEnv, origin: string) {
   tool(server, 'get_profile', { title: 'Get a profile', description: 'A public Open Media profile by handle, with recent posts.', input: { handle: z.string() }, readOnly: true }, (args) => publicProfile(env, origin, String(args.handle)));
   tool(server, 'get_person_timeline', { title: 'Get a person’s timeline', description: 'One person’s public posts in one timeline. For an Open Media handle: their profile plus posts from the Farcaster, Lens, Hive and DeSo accounts they listed (declared by them, not proven). For an open-network handle: that account’s own posts.', input: { network: z.enum(['open-media', ...authorNetworks] as [string, ...string[]]), handle: z.string(), cursor: z.string().optional() }, readOnly: true },
     (args) => personTimeline(env, origin, String(args.network), String(args.handle), args.cursor as string | undefined));
+  tool(server, 'find_upcoming_events', { title: 'Find upcoming events', description: 'Upcoming public events from Luma, Meetup and Eventbrite in the San Francisco Bay Area (the only area covered so far), with the same event on several platforms shown once. Each has its date, place, price, organizer and the official registration link. Never claim the person is registered; they register on that page.', input: { area: z.string().optional().describe('south bay, peninsula, san francisco, east bay or bay area (default)'), days: z.number().int().min(1).max(14).optional(), query: z.string().max(120).optional().describe('Topic words, e.g. "ai founders" or "hiking"'), limit: z.number().int().min(1).max(50).optional() }, readOnly: true },
+    async (args) => { try { return await upcomingEvents(env, { area: args.area as string | undefined, days: args.days as number | undefined, query: args.query as string | undefined, limit: args.limit as number | undefined }); } catch (error) { throw error instanceof EventsUnavailable ? new AgentError(400, 'bad_request', error.message) : error; } });
   tool(server, 'list_networks', { title: 'List networks and capabilities', description: 'Every network Open Media connects to and exactly what works today: open networks, email, chat bridges running on this server, and networks that cannot be reached.', input: {}, readOnly: true }, () => networksDescription(env));
   tool(server, 'find_setting', { title: 'Find a setting', description: 'Find where a control lives in the Open Media app, e.g. “dark mode”, “stop posting to farcaster”, “export my data”.', input: { query: z.string().min(1).max(120) }, readOnly: true }, (args) => settingsLookup(String(args.query)));
   tool(server, 'about_open_media', { title: 'About Open Media', description: 'The mission, principles, three promises, roadmap and honest status, plus every interface for agents.', input: {}, readOnly: true }, () => aboutOpenMedia(origin));
@@ -603,6 +647,10 @@ function registerAccountTools(server: McpServer, account: Account) {
   tool(server, 'save_contacts', { title: 'Save contacts', description: 'Create or replace contact cards (matched by id; up to 500 per call). Each card: {id (uuid), source: device|manual, name, nicknames[], phones[], emails[], notes, links[{ref, method: auto|confirmed, evidence, linkedAt}], rejected[], updatedAt}. Only link identities the person confirmed or that share an exact email or phone number. Confirm changes with the person first.', input: { cards: z.array(z.record(z.string(), z.unknown())).min(1).max(500) }, readOnly: false }, (args) => account.saveContacts(args.cards));
   tool(server, 'delete_contact', { title: 'Delete a contact', description: 'Delete one of the person’s contact cards. The people themselves are not affected.', input: { id: z.string() }, readOnly: false }, (args) => account.deleteContact(String(args.id)));
   tool(server, 'set_linked_accounts', { title: 'Set my accounts elsewhere', description: 'Replace the list of the person’s own Farcaster, Lens, Hive and DeSo accounts shown on their public profile (up to 8). This list is public. Confirm with the person first.', input: { accounts: z.array(z.object({ network: z.enum(authorNetworks as [string, ...string[]]), handle: z.string() })).max(8) }, readOnly: false }, (args) => account.setLinkedAccounts(args.accounts));
+
+  // Products and services
+  tool(server, 'publish_listing', { title: 'Offer a product or service', description: 'Publish a public post offering a product or service, with a price. Anyone can read it and message the person about it. Confirm the title, price and text with the person first. No payment happens here.', input: { kind: z.enum(['product', 'service']), title: z.string().min(1).max(120), price: z.string().max(20).optional().describe('e.g. "25" or "25.50"; leave out for "ask for price"'), currency: z.string().length(3).optional(), location: z.string().max(120).optional(), remote: z.boolean().optional().describe('Service available remotely, or product can ship'), text: z.string().max(maxPostLength).optional() }, readOnly: false }, (args) => account.publishListing(args));
+  tool(server, 'update_listing', { title: 'Update a listing', description: 'Change the availability (available, limited, sold_out), price (whole cents, or null) or place of one of the person’s listings.', input: { postId: z.string(), availability: z.enum(['available', 'limited', 'sold_out']).optional(), priceMinor: z.number().int().min(0).max(100_000_000).nullable().optional(), location: z.string().max(120).nullable().optional(), remote: z.boolean().optional() }, readOnly: false }, (args) => account.updateListing(String(args.postId), args));
 
   // Identity, privacy and follows
   tool(server, 'get_my_identity', { title: 'My identity and privacy', description: 'The person’s identity tier (2 handle only, 3 declared name, 4 verified, 5 verified with legal name shown), whether they have the blue tick, the name others see, public or private, verification status and how many follow requests wait.', input: {}, readOnly: true }, () => account.identity());
@@ -753,6 +801,7 @@ export function fullOpenApi(origin: string) {
       '/v1/search': { get: { summary: 'Plain-language search across public posts on every network, plus matching settings', parameters: [{ name: 'q', in: 'query', required: true, schema: { type: 'string', maxLength: 200 } }], responses: { 200: ok('Results with what was understood and how each network was searched'), 400: error } } },
       '/v1/networks': { get: { summary: 'Every network and connector, with what works today', responses: { 200: ok('Networks and capabilities') } } },
       '/v1/settings': { get: { summary: 'The searchable settings index', parameters: [{ name: 'q', in: 'query', schema: { type: 'string' } }], responses: { 200: ok('Matching settings') } } },
+      '/v1/events/upcoming': { get: { summary: 'Upcoming public events (Luma, Meetup, Eventbrite) in the San Francisco Bay Area, de-duplicated across platforms, with official registration links', parameters: [{ name: 'area', in: 'query', schema: { type: 'string' } }, { name: 'days', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 14, default: 7 } }, { name: 'q', in: 'query', schema: { type: 'string' } }, { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 } }], responses: { 200: ok('Events, soonest first, with each provider’s status'), 400: error } } },
       '/v1/people/{network}/{handle}': { get: { summary: 'One person’s public posts in one timeline (Open Media profile plus the accounts they listed, or one open-network account)', parameters: [{ name: 'network', in: 'path', required: true, schema: { type: 'string', enum: ['open-media', ...authorNetworks] } }, { name: 'handle', in: 'path', required: true, schema: { type: 'string' } }, { name: 'cursor', in: 'query', schema: { type: 'string' } }], responses: { 200: ok('The person and their posts, newest first'), 400: error, 404: error } } },
       '/v1/about': { get: { summary: 'Mission, principles, promises, roadmap and honest status', responses: { 200: ok('About Open Media') } } },
       '/v1/me': {
@@ -775,6 +824,8 @@ export function fullOpenApi(origin: string) {
       },
       '/v1/me/contacts/{id}': { delete: { summary: 'Delete one of your contact cards', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], responses: { 200: ok('Deleted'), 404: error, 401: error } } },
       '/v1/me/linked-accounts': { put: { summary: 'Set the open-network accounts shown on your public profile (public, up to 8)', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'array', maxItems: 8, items: { type: 'object', required: ['network', 'handle'], properties: { network: { type: 'string', enum: ['farcaster', 'lens', 'hive', 'deso'] }, handle: { type: 'string', pattern: '^[A-Za-z0-9._-]{1,64}$' } } } } } } }, responses: { 200: ok('Saved'), 400: error, 401: error } } },
+      '/v1/me/listings': { post: { summary: 'Offer a product or service as a public post', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['kind', 'title'], properties: { kind: { type: 'string', enum: ['product', 'service'] }, title: { type: 'string', maxLength: 120 }, price: { type: 'string', description: 'e.g. "25.50"; omit for ask-for-price' }, currency: { type: 'string', pattern: '^[A-Z]{3}$' }, location: { type: 'string', maxLength: 120 }, remote: { type: 'boolean' }, text: { type: 'string' } } } } } }, responses: { 201: ok('The post with its listing'), 400: error, 401: error } } },
+      '/v1/me/listings/{postId}': { patch: { summary: 'Change a listing’s availability, price or place', security: bearer, parameters: [{ name: 'postId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { availability: { type: 'string', enum: ['available', 'limited', 'sold_out'] }, priceMinor: { type: ['integer', 'null'] }, location: { type: ['string', 'null'] }, remote: { type: 'boolean' } } } } } }, responses: { 200: ok('The listing'), 400: error, 401: error } } },
       '/v1/me/identity': {
         get: { summary: 'Your identity tier, tick, shown name, privacy and verification status', security: bearer, responses: { 200: ok('Your identity'), 401: error } },
         put: { summary: 'Choose the name others see and whether your account is private', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { nameDisclosure: { type: 'string', enum: ['handle_only', 'declared', 'verified_legal'] }, visibility: { type: 'string', enum: ['public', 'private'] } } } } } }, responses: { 200: ok('Updated identity'), 400: error, 401: error, 409: error } },
@@ -867,6 +918,11 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     if (request.method === 'GET' && path === '/v1/networks') return json(networksDescription(env), 300);
     if (request.method === 'GET' && path === '/v1/settings') return json(settingsLookup(url.searchParams.get('q')), 3600);
     if (request.method === 'GET' && path === '/v1/about') return json(aboutOpenMedia(origin), 3600);
+    if (request.method === 'GET' && path === '/v1/events/upcoming') {
+      try {
+        return json(await upcomingEvents(env, { area: url.searchParams.get('area') ?? undefined, days: Number(url.searchParams.get('days') ?? 7), query: url.searchParams.get('q') ?? undefined, limit: Number(url.searchParams.get('limit') ?? 20) }), 300);
+      } catch (error) { throw error instanceof EventsUnavailable ? new AgentError(400, 'bad_request', error.message) : error; }
+    }
     const personPath = path.match(/^\/v1\/people\/([^/]+)\/([^/]+)$/);
     if (request.method === 'GET' && personPath) return json(await personTimeline(env, origin, decodeURIComponent(personPath[1]), decodeURIComponent(personPath[2]), url.searchParams.get('cursor') ?? undefined), 60);
 
@@ -877,7 +933,7 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
 
     // Account routes: every one needs the person's own token.
     const account = await Account.fromRequest(request, env, origin, internal);
-    const raw = ['POST', 'PUT', 'DELETE'].includes(request.method) ? await request.json().catch(() => ({})) as unknown : {};
+    const raw = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method) ? await request.json().catch(() => ({})) as unknown : {};
     const body = (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
     if (request.method === 'GET' && path === '/v1/me') return json(await account.me(), 0);
     if (request.method === 'POST' && path === '/v1/me/posts') return json(await account.publish(body.body ?? body.text), 0, 201);
@@ -900,6 +956,9 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     const contactMatch = path.match(/^\/v1\/me\/contacts\/([^/]+)$/);
     if (request.method === 'DELETE' && contactMatch) return json(await account.deleteContact(decodeURIComponent(contactMatch[1])), 0);
     if (request.method === 'PUT' && path === '/v1/me/linked-accounts') return json(await account.setLinkedAccounts(Array.isArray(raw) ? raw : body.accounts), 0);
+    if (request.method === 'POST' && path === '/v1/me/listings') return json(await account.publishListing(body), 0, 201);
+    const listingMatch = path.match(/^\/v1\/me\/listings\/([^/]+)$/);
+    if (request.method === 'PATCH' && listingMatch) return json(await account.updateListing(decodeURIComponent(listingMatch[1]), body) as object, 0);
     if (request.method === 'GET' && path === '/v1/me/identity') return json(await account.identity(), 0);
     if (request.method === 'PUT' && path === '/v1/me/identity') return json(await account.setIdentity(body), 0);
     if (request.method === 'POST' && path === '/v1/me/verification') return json(await account.startVerification(), 0, 201);

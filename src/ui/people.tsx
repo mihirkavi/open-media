@@ -31,7 +31,12 @@ export interface ContactsState {
   importFromDevice: () => Promise<number>;
 }
 
-interface PeopleValue { open: (target: PersonTarget) => void; contacts?: ContactsState }
+interface PeopleValue {
+  open: (target: PersonTarget) => void;
+  contacts?: ContactsState;
+  /** Opens a conversation with an Open Media handle, when the viewer can message. */
+  message?: (handle: string) => void;
+}
 
 const PeopleContext = createContext<PeopleValue | null>(null);
 
@@ -121,7 +126,8 @@ export function PersonLink({ target, children, style, label }: PropsWithChildren
   const anchor = useRef<View>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const [preview, setPreview] = useState<{ x: number; y: number }>();
-  if (!people) return <View style={style}>{children}</View>;
+  // Event organizers and other sources without profiles are shown, not linked.
+  if (!people || (target.ref.kind === 'network' && !(target.ref.network in networks))) return <View style={style}>{children}</View>;
   const hoverable = Platform.OS === 'web';
   const show = () => {
     clearTimeout(timer.current);

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { networkSearches } from '../connectors/networkSearch';
+import { loadUpcomingEvents } from '../data/eventsService';
 import { Conversation } from '../domain/models';
 import { NetworkId, sourceName } from '../domain/networkPosts';
 import { SocialPost } from '../domain/posts';
@@ -34,7 +35,7 @@ export function useUniversalSearch(query: string, loadedPosts: SocialPost[], con
     const text = [conversationTitle(conversation), conversation.preview, ...conversation.messages.map((message) => message.body)].join(' ').toLocaleLowerCase();
     return parsed.keywords.every((keyword) => text.includes(keyword));
   }).slice(0, 6) : []), [parsed, conversations, searchable]);
-  const localPosts = useMemo(() => (searchable && parsed.keywords.length ? loadedPosts.filter((post) => postMatchesSearch(post, parsed)) : []), [parsed, loadedPosts, searchable]);
+  const localPosts = useMemo(() => (searchable && (parsed.keywords.length || parsed.structured) ? loadedPosts.filter((post) => postMatchesSearch(post, parsed)) : []), [parsed, loadedPosts, searchable]);
 
   const [remote, setRemote] = useState<SocialPost[]>([]);
   const [sources, setSources] = useState<SourceSearchState[]>([]);
@@ -44,7 +45,16 @@ export function useUniversalSearch(query: string, loadedPosts: SocialPost[], con
   useEffect(() => {
     const current = ++generation.current;
     setRemote([]); setAi({ status: 'idle' });
-    if (!parsed.text) { setSources([]); return; }
+    // Upcoming public events are searched by the Open Media service; posts on other networks aren't events.
+    if (parsed.structured === 'event') {
+      setSources([]);
+      loadUpcomingEvents({ query: parsed.text, days: 14, limit: 20 })
+        .then((result) => { if (current === generation.current) setRemote(result.posts.filter((post) => postMatchesSearch(post, parsed))); })
+        .catch(() => undefined);
+      return;
+    }
+    // Products and services are Open Media listings, matched among loaded posts above.
+    if (!parsed.text || parsed.structured) { setSources([]); return; }
     const chosen = networkSearches.filter((network) => !parsed.networks || parsed.networks.includes(network.id));
     setSources(networkSearches.map((network) => ({ id: network.id, status: chosen.includes(network) ? 'searching' : 'skipped', count: 0, method: network.method(parsed) })));
     let found: SocialPost[] = [];
@@ -88,7 +98,10 @@ export function useUniversalSearch(query: string, loadedPosts: SocialPost[], con
     }
   }
 
-  const posts = useMemo(() => newestFirst(dedupe([...localPosts, ...remote])), [localPosts, remote]);
+  // Events are listed soonest first; everything else newest first.
+  const posts = useMemo(() => parsed.structured === 'event'
+    ? dedupe([...localPosts, ...remote]).sort((a, b) => Date.parse(a.event?.startsAt ?? a.createdAt) - Date.parse(b.event?.startsAt ?? b.createdAt))
+    : newestFirst(dedupe([...localPosts, ...remote])), [localPosts, remote, parsed.structured]);
   return { parsed, settings, messages, posts, sources, ai, searching: sources.some((source) => source.status === 'searching') };
 }
 

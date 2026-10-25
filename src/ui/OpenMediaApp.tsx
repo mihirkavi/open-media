@@ -340,7 +340,11 @@ export function OpenMediaApp({
     setOpenConversationId(id);
     navigate("messages");
   };
-  const people = useMemo(() => ({ open: openPerson, contacts: messageMode === "open_media" ? contacts : undefined }), [openPerson, contacts, messageMode]);
+  const people = useMemo(() => ({
+    open: openPerson,
+    contacts: messageMode === "open_media" ? contacts : undefined,
+    message: messageMode === "open_media" ? (handle: string) => { messagePerson(handle).catch(() => undefined); } : undefined,
+  }), [openPerson, contacts, messageMode]);
 
   // Create opens the writing box at the top of Feed; no pop-up.
   const startPost = () => {

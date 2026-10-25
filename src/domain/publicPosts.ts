@@ -1,5 +1,6 @@
 import { SocialPost } from './posts';
 import { isStoredPostVideo, postVideoPublicUrl, StoredPostVideo } from './postVideo';
+import { isListing, PostListing } from './listings';
 
 /** Shape returned by the open_media_public_* database functions and the public API. */
 export interface PublicPostRecord {
@@ -9,6 +10,8 @@ export interface PublicPostRecord {
   author: { id: string; handle: string; displayName: string; avatarUrl: string | null; verified?: boolean };
   /** One short video, when the post has one (ADR 0009). */
   video?: StoredPostVideo | null;
+  /** A product or service the author offers (ADR 0013). */
+  listing?: PostListing | null;
 }
 
 export interface PublicProfileRecord {
@@ -53,7 +56,8 @@ export function socialPostFromPublic(record: PublicPostRecord, supabaseUrl?: str
         sha256: video.sha256,
       }],
     } : {}),
-    topics: [],
+    ...(isListing(record.listing) ? { listing: record.listing } : {}),
+    topics: record.listing ? [record.listing.kind === 'product' ? 'products' : 'services'] : [],
     provenance: { connectorId: 'open-media', externalId: record.id },
     relevance: { followsAuthor: false, selectedInterestMatches: [] },
   };

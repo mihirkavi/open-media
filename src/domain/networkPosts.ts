@@ -45,7 +45,7 @@ export const networks: Record<NetworkId, NetworkInfo> = {
   },
 };
 
-const sourceNames: Record<string, string> = { 'open-media': 'Open Media', ...Object.fromEntries(Object.values(networks).map((network) => [network.id, network.displayName])) };
+const sourceNames: Record<string, string> = { 'open-media': 'Open Media', events: 'Events', ...Object.fromEntries(Object.values(networks).map((network) => [network.id, network.displayName])) };
 
 /** Human name for a post's source connector, e.g. `farcaster` → `Farcaster`. */
 export function sourceName(connectorId: string): string {

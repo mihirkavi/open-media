@@ -31,6 +31,7 @@ export interface UpstreamPost {
   createdAt: string;
   author: { handle: string; displayName: string; avatarUrl: string | null; verified?: boolean };
   video?: UpstreamVideo | null;
+  listing?: Record<string, unknown> | null;
 }
 
 export interface UpstreamProfile {
@@ -160,6 +161,7 @@ export function formatPost(post: UpstreamPost, origin: string, supabaseUrl: stri
     text: post.body,
     createdAt: post.createdAt,
     video: post.video ? formatVideo(post.video, supabaseUrl) : null,
+    ...(post.listing ? { listing: post.listing } : {}),
     url: `${origin}/v1/posts/${post.id}`,
     author: {
       handle: post.author.handle,

@@ -1,5 +1,6 @@
 import { getSupabaseClient } from '../auth/supabase';
 import { deletePostVideoFiles } from './videoUpload';
+import { PostListing } from '../domain/listings';
 import { SocialPost } from '../domain/posts';
 import { StoredPostVideo } from '../domain/postVideo';
 import { isPublicPostRecord, maxPostLength, PublicPostRecord, socialPostFromPublic } from '../domain/publicPosts';
@@ -53,6 +54,23 @@ export async function publishPost(body: string, clientId: string, video?: Stored
   if (error) throw error;
   if (!isPublicPostRecord(data)) throw new Error('Open Media returned an unexpected post.');
   return fromRecord(data);
+}
+
+/** Publishes a product or service as a public post; the caption defaults to the title. */
+export async function publishListing(body: string, clientId: string, listing: PostListing): Promise<SocialPost> {
+  const text = body.trim();
+  if (text.length > maxPostLength) throw new Error(`Posts can be up to ${maxPostLength} characters.`);
+  const { data, error } = await requireClient().rpc('open_media_create_listing_post', { p_client_id: clientId, p_body: text, p_listing: listing });
+  if (error) throw error;
+  if (!isPublicPostRecord(data)) throw new Error('Open Media returned an unexpected post.');
+  return fromRecord(data);
+}
+
+/** Changes the price, place or availability of one of your listings. */
+export async function updateListing(postId: string, changes: Partial<Pick<PostListing, 'priceMinor' | 'location' | 'remote' | 'availability'>>): Promise<PostListing> {
+  const { data, error } = await requireClient().rpc('open_media_update_listing', { p_post_id: postId, p_changes: changes });
+  if (error) throw error;
+  return data as PostListing;
 }
 
 /** Deletes the post, then its video files (authors can read their own post rows for the paths). */

@@ -100,6 +100,7 @@ export const agentInterfaces = {
     { method: 'GET', path: '/v1/posts/{id}', description: 'One public post.' },
     { method: 'GET', path: '/v1/profiles/{handle}', description: 'A public profile.' },
     { method: 'GET', path: '/v1/profiles/{handle}/posts', description: 'A profile’s public posts.' },
+    { method: 'GET', path: '/v1/events/upcoming', description: 'Upcoming public events from Luma, Meetup and Eventbrite in the San Francisco Bay Area, shown once even when listed on several platforms, with official registration links.' },
     { method: 'GET', path: '/v1/people/{network}/{handle}', description: 'One person’s posts in one timeline: an Open Media profile plus the accounts they listed, or one Farcaster, Lens, Hive or DeSo account.' },
     { method: 'GET', path: '/v1/networks', description: 'Every network and connector, with exactly which capabilities work today.' },
     { method: 'GET', path: '/v1/settings?q=', description: 'The searchable settings index, so an agent can tell a person where any control lives.' },
@@ -121,6 +122,8 @@ export const agentInterfaces = {
     { method: 'PUT', path: '/v1/me/contacts', description: 'Create or replace contact cards by id.' },
     { method: 'DELETE', path: '/v1/me/contacts/{id}', description: 'Delete a contact card.' },
     { method: 'PUT', path: '/v1/me/linked-accounts', description: 'Set the open-network accounts shown on your public profile.' },
+    { method: 'POST', path: '/v1/me/listings', description: 'Offer a product or service as a public post, with a price.' },
+    { method: 'PATCH', path: '/v1/me/listings/{postId}', description: 'Change a listing’s availability, price or place.' },
     { method: 'GET', path: '/v1/me/identity', description: 'Your identity tier, blue tick, the name others see, public or private, and verification status.' },
     { method: 'PUT', path: '/v1/me/identity', description: 'Choose the name others see and whether your account is private.' },
     { method: 'POST', path: '/v1/me/verification', description: 'Start identity verification with Stripe Identity (a link you open yourself).' },
@@ -144,8 +147,8 @@ export const agentInterfaces = {
     { method: 'POST', path: '/v1/search/assist', description: 'A short AI summary, with citations, of public posts you pass in. No account needed.' },
   ],
   mcp: [
-    { path: '/open/mcp', auth: 'none', description: 'Public tools: feed, search, posts, profiles, person timelines, networks, settings and the mission.' },
-    { path: '/me/mcp', auth: 'Open Media access token', description: 'Your account: posts, messages, contacts, linked accounts, identity and privacy, follows, email, chat networks, cross-posting status, blocking, reports, export and account deletion.' },
+    { path: '/open/mcp', auth: 'none', description: 'Public tools: feed, search, posts, profiles, person timelines, upcoming events, networks, settings and the mission.' },
+    { path: '/me/mcp', auth: 'Open Media access token', description: 'Your account: posts, listings, messages, contacts, linked accounts, identity and privacy, follows, email, chat networks, cross-posting status, blocking, reports, export and account deletion.' },
     { path: '/mcp', auth: 'OAuth 2.1', description: 'Open Media Events: find events, check your calendar and plan your week.' },
   ],
 };
