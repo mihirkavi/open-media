@@ -18,7 +18,7 @@ The same Worker also serves the mixed feed, cross-network search, person timelin
 | GET | `/v1/openapi.json` | OpenAPI 3.1 document |
 | GET | `/v1/posts?limit=&cursor=&media=` | Public posts, newest first; `media=video` lists only video posts |
 | GET | `/v1/posts/{id}` | One public post |
-| GET | `/v1/profiles/{handle}` | One public profile, including the open-network accounts its owner chose to list (`linkedAccounts`; declared by them, not proven) |
+| GET | `/v1/profiles/{handle}` | One public profile (a private account returns only its handle, shown name, photo and tick), including the open-network accounts its owner chose to list (`linkedAccounts`; declared by them, not proven) |
 | GET | `/v1/profiles/{handle}/posts?limit=&cursor=` | A profile's public posts, newest first |
 | GET | `/robots.txt` | Allows all crawlers |
 

@@ -35,6 +35,8 @@ export interface Person {
   favorite?: boolean;
   /** True only when the person and phone number are saved in the device contacts. */
   isPhoneContact?: boolean;
+  /** An Open Media identity verified by the identity provider (the blue tick, ADR 0013). */
+  verified?: boolean;
   /** Set when mail from this sender passed DMARC and carries a BIMI mark certificate. */
   verifiedDomain?: string;
   /** Pictures to try in order (verified BIMI logo, then company icon); initials if none load. */

@@ -18,7 +18,7 @@ Why Node.js locally: inside the Workers runtime, the IMAP library stalls on some
 
 ## Cloudflare Worker production
 
-The production entry point is `src/worker.ts`, configured by `wrangler.jsonc`. It uses Cloudflare's outbound TCP/TLS support for IMAP, POP, and SMTP, validates the Supabase JWT itself, and calls authenticated PostgREST RPCs. Those RPCs run as the caller and enforce ownership again; the Worker never receives a database password or service-role key.
+The production entry point is `src/worker.ts`, configured by `wrangler.jsonc`. It uses Cloudflare's outbound TCP/TLS support for IMAP, POP, and SMTP, validates the Supabase JWT itself, and calls authenticated PostgREST RPCs. Those RPCs run as the caller and enforce ownership again. The Worker never receives a database password, and it holds a Supabase secret key only when identity verification is turned on (below), where the key can call just the two verification functions granted to `service_role`.
 
 Worker secrets:
 
@@ -36,6 +36,17 @@ FARCASTER_APP_MNEMONIC   that account's custody mnemonic (dedicated to Open Medi
 ```
 
 Until both are set, `/v1/cross-posting/status` reports Farcaster as off and the app shows it as "Coming soon".
+
+Optional, for identity verification with Stripe Identity (ADR 0013; all four or none):
+
+```text
+STRIPE_SECRET_KEY               Stripe key with Identity enabled (use a test-mode key until live use is approved)
+STRIPE_IDENTITY_WEBHOOK_SECRET  signing secret of the webhook pointed at /v1/verification/stripe/webhook
+SUPABASE_SECRET_KEY             used only to record verification results
+VERIFICATION_RETURN_URL         where Stripe sends people afterwards, e.g. the app's #profile page
+```
+
+Subscribe the webhook to `identity.verification_session.verified`, `.requires_input`, `.canceled` and `.redacted`. Until all are set, the app says verification is "Not available yet" and nobody has a blue tick. Legal names are encrypted with `IDENTITY_KEY`, or a key derived from `MAIL_CREDENTIALS_KEY`.
 
 `MAIL_CREDENTIALS_KEY` must be a base64-encoded 32-byte key and must never be placed in Expo configuration. Generate Worker types and validate the bundle with `npm run worker:types` and `npm run worker:check`. Deploy with `npm run worker:deploy`, after applying the repository's Supabase migrations to production.
 

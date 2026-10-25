@@ -9,6 +9,7 @@ import { explainFeedPost, selectFeed, SocialPost } from '../domain/posts';
 import { formatRelativeTime } from '../domain/publicPosts';
 import { ClipVideo } from './ClipVideo';
 import { useMixedFeed } from './useMixedFeed';
+import { VerifiedTick } from './VerifiedTick';
 
 /**
  * Clips: the same canonical posts as Feed, shown as an immersive vertical stream of short videos
@@ -98,7 +99,7 @@ function Clip({ post, height, active, mounted, muted, onToggleMute, onFailed }: 
     </Pressable>
     <Pressable accessibilityRole="button" accessibilityLabel={muted ? 'Turn sound on' : 'Mute'} onPress={onToggleMute} style={styles.mute}><Ionicons name={muted ? 'volume-mute' : 'volume-high'} size={20} color="#FFFFFF" /></Pressable>
     <View pointerEvents="box-none" style={styles.overlay}>
-      <PersonLink target={targetForPost(post)} label={`Open ${post.author.displayName}’s profile`} style={styles.authorLink}><Text style={styles.author}>{post.author.displayName} <Text style={styles.handle}>{post.author.handle} · {formatRelativeTime(post.createdAt)}</Text></Text></PersonLink>
+      <PersonLink target={targetForPost(post)} label={`Open ${post.author.displayName}’s profile`} style={styles.authorLink}><Text style={styles.author}>{post.author.displayName}{post.author.verified ? <> <VerifiedTick size={14} /></> : null} <Text style={styles.handle}>{post.author.handle} · {formatRelativeTime(post.createdAt)}</Text></Text></PersonLink>
       {post.title || post.body ? <Text numberOfLines={3} style={styles.body}>{post.title ?? post.body}</Text> : null}
       <View style={styles.meta}>
         <Text style={styles.source}>{network}{media.durationSeconds ? ` · ${Math.round(media.durationSeconds)}s` : ''}</Text>

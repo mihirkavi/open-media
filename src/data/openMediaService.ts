@@ -22,6 +22,14 @@ interface ProfileRow {
   bio: string;
   avatar_url: string | null;
 }
+/** What anyone may see about another person (open_media_profile_cards): never a withheld name. */
+interface ProfileCard {
+  id: string;
+  handle: string;
+  displayName: string;
+  avatarUrl: string | null;
+  verified: boolean;
+}
 interface ConversationRow {
   id: string;
   kind: "direct" | "group";
@@ -88,49 +96,14 @@ export async function saveCurrentProfile(
 
 export async function searchOpenMediaProfiles(
   query: string,
-  currentUserId: string,
+  _currentUserId: string,
 ): Promise<Person[]> {
   const cleaned = query.trim().replace(/^@/, "").slice(0, 40);
   if (cleaned.length < 2) return [];
-  const pattern = `%${cleaned.replace(/[\\%_]/g, (character) => `\\${character}`)}%`;
-  const client = requireClient();
-  const [{ data: blocks, error: blockError }, handles, names] =
-    await Promise.all([
-      client
-        .from("user_blocks")
-        .select("blocked_id")
-        .eq("blocker_id", currentUserId),
-      client
-        .from("profiles")
-        .select("id, handle, display_name, bio, avatar_url")
-        .neq("id", currentUserId)
-        .ilike("handle", pattern)
-        .limit(20),
-      client
-        .from("profiles")
-        .select("id, handle, display_name, bio, avatar_url")
-        .neq("id", currentUserId)
-        .ilike("display_name", pattern)
-        .limit(20),
-    ]);
-  if (blockError) throw blockError;
-  if (handles.error) throw handles.error;
-  if (names.error) throw names.error;
-  const unique = new Map(
-    [...(handles.data ?? []), ...(names.data ?? [])].map((row) => [
-      (row as ProfileRow).id,
-      row as ProfileRow,
-    ]),
-  );
-  const blocked = new Set(
-    ((blocks ?? []) as Array<{ blocked_id: string }>).map(
-      (row) => row.blocked_id,
-    ),
-  );
-  return [...unique.values()]
-    .filter((row) => !blocked.has(row.id))
-    .slice(0, 20)
-    .map(personFromProfile);
+  // The server applies blocks and returns only the name each person chose to show.
+  const { data, error } = await requireClient().rpc("open_media_search_profiles", { p_query: cleaned });
+  if (error) throw error;
+  return ((data ?? []) as ProfileCard[]).map(personFromCard);
 }
 
 export async function listBlockedUserIds(): Promise<string[]> {
@@ -266,13 +239,12 @@ export async function loadOpenMediaConversations(
 
   const rows = (membersResult.data ?? []) as MembershipRow[];
   const userIds = [...new Set(rows.map((row) => row.user_id))];
-  const { data: profileData, error: profileError } = await client
-    .from("profiles")
-    .select("id, handle, display_name, bio, avatar_url")
-    .in("id", userIds);
+  const { data: profileData, error: profileError } = userIds.length
+    ? await client.rpc("open_media_profile_cards", { p_ids: userIds })
+    : { data: [], error: null };
   if (profileError) throw profileError;
   const profiles = new Map(
-    ((profileData ?? []) as ProfileRow[]).map((row) => [row.id, row]),
+    ((profileData ?? []) as ProfileCard[]).map((card) => [card.id, card]),
   );
   const messages = (messagesResult.data ?? []) as MessageRow[];
 
@@ -285,8 +257,8 @@ export async function loadOpenMediaConversations(
       );
       const participants = participantRows
         .map((row) => profiles.get(row.user_id))
-        .filter((row): row is ProfileRow => Boolean(row))
-        .map(personFromProfile);
+        .filter((card): card is ProfileCard => Boolean(card))
+        .map(personFromCard);
       const conversationMessages = messages
         .filter((message) => message.conversation_id === conversation.id)
         .map((message) => mapMessage(message, currentUserId, participantRows));
@@ -339,6 +311,13 @@ function profileFromRow(row: ProfileRow): OpenMediaProfile {
     displayName: row.display_name,
     bio: row.bio,
     avatarUrl: row.avatar_url ?? undefined,
+  };
+}
+
+function personFromCard(card: ProfileCard): Person {
+  return {
+    ...personFromProfile({ id: card.id, handle: card.handle, display_name: card.displayName, bio: "", avatar_url: card.avatarUrl }),
+    verified: card.verified,
   };
 }
 

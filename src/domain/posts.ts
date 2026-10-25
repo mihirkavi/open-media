@@ -8,6 +8,8 @@ export interface PostAuthor {
   initials: string;
   /** HTTPS image published by the author's network; initials are shown without it. */
   avatarUrl?: string;
+  /** Open Media identity verified by the identity provider. Never set from another network's badge. */
+  verified?: boolean;
 }
 
 export interface PostMedia {

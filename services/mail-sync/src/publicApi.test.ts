@@ -38,7 +38,7 @@ test('lists public posts with a stable, email-free schema', async () => {
     createdAt: '2026-09-27T10:00:00+00:00',
     url: `https://api.openmedia.test/v1/posts/${postId}`,
     video: null,
-    author: { handle: 'maya', displayName: 'Maya', avatarUrl: null, url: 'https://api.openmedia.test/v1/profiles/maya' },
+    author: { handle: 'maya', displayName: 'Maya', avatarUrl: null, verified: false, url: 'https://api.openmedia.test/v1/profiles/maya' },
   });
   assert.equal(json.pagination.nextCursor, null);
   assert.equal(calls[0].url, 'https://db.example.test/rest/v1/rpc/open_media_public_posts');

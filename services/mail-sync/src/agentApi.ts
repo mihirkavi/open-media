@@ -29,8 +29,9 @@ import { availableNetworks, BridgesEnv } from './bridges.js';
 import { contactsKey, ContactsEnv, openCard, sealCard, validCards } from './contactsStore.js';
 import { callRpc, formatPost, formatProfile, openApiDocument, PublicApiEnv, UpstreamPost, UpstreamProfile } from './publicApi.js';
 import { authenticate } from './session.js';
+import { discloseLegalName, handleVerificationWebhook, startVerification, VerificationEnv, VerificationError, verificationConfigured } from './verification.js';
 
-export type AgentEnv = PublicApiEnv & BridgesEnv & ContactsEnv;
+export type AgentEnv = PublicApiEnv & BridgesEnv & ContactsEnv & VerificationEnv;
 
 const version = '1.0.0';
 const sources = ['open-media', 'farcaster', 'lens', 'hive', 'deso'] as const;
@@ -59,6 +60,7 @@ export function isAgentPath(pathname: string, method: string): boolean {
   if (['/v1/feed', '/v1/search', '/v1/networks', '/v1/settings', '/v1/about'].includes(path)) return true;
   if (path === '/v1/me' || path.startsWith('/v1/me/')) return true;
   if (method === 'GET' && /^\/v1\/people\/[^/]+\/[^/]+$/.test(path)) return true;
+  if (method === 'POST' && path === '/v1/verification/stripe/webhook') return true;
   return method !== 'GET' && /^\/v1\/posts\/[^/]+\/report$/.test(path);
 }
 
@@ -310,9 +312,10 @@ export class Account {
       this.rest<{ id: string; conversation_id: string; sender_id: string; body: string; created_at: string }[]>('GET', `/rest/v1/messages?conversation_id=in.${list}&select=id,conversation_id,sender_id,body,created_at&order=created_at.desc&limit=${Math.min(500, ids.length * limitMessages)}`),
     ]);
     const people = [...new Set(members.map((row) => row.user_id))];
-    const profiles = people.length ? await this.rest<{ id: string; handle: string; display_name: string }[]>('GET', `/rest/v1/profiles?id=in.(${people.join(',')})&select=id,handle,display_name`) : [];
-    const byId = new Map(profiles.map((row) => [row.id, row]));
-    const name = (id: string) => byId.get(id)?.display_name || byId.get(id)?.handle || 'Someone';
+    // Shown names come from the server, so a name someone withheld never reaches an agent.
+    const profiles = people.length ? await this.rpc<{ id: string; handle: string; displayName: string }[]>('open_media_profile_cards', { p_ids: people }) : [];
+    const byId = new Map((profiles ?? []).map((row) => [row.id, row]));
+    const name = (id: string) => byId.get(id)?.displayName || byId.get(id)?.handle || 'Someone';
     return {
       data: conversations.map((conversation) => ({
         id: conversation.id,
@@ -329,7 +332,7 @@ export class Account {
   async startConversation(handle: unknown) {
     const clean = typeof handle === 'string' ? handle.replace(/^@/, '').toLowerCase() : '';
     if (!handlePattern.test(clean)) throw new AgentError(400, 'bad_request', 'Give the Open Media handle of the person to message.');
-    const [person] = await this.rest<{ id: string }[]>('GET', `/rest/v1/profiles?handle=eq.${clean}&select=id`);
+    const person = await this.rpc<{ id: string } | null>('open_media_public_profile', { p_handle: clean });
     if (!person) throw new AgentError(404, 'not_found', `No one is called @${clean} on Open Media.`);
     if (person.id === this.userId) throw new AgentError(400, 'bad_request', 'That’s you.');
     const id = await this.rpc<string>('open_media_start_direct_conversation', { p_other_user_id: person.id });
@@ -380,6 +383,58 @@ export class Account {
     const clean = accounts.map((item) => ({ network: (item as { network: string }).network, handle: String((item as { handle: string }).handle).replace(/^@/, '') }));
     await this.rest('PATCH', `/rest/v1/profiles?id=eq.${this.userId}`, { linked_accounts: clean });
     return { linkedAccounts: clean, note: 'These links are public and declared by you; they are not proof of ownership.' };
+  }
+
+  // Identity, privacy and follows (ADR 0013, phase 2). Tier and tick are computed by the database.
+  async identity() {
+    const identity = await this.rpc<Record<string, unknown>>('open_media_my_identity', {});
+    return { ...identity, verificationAvailable: verificationConfigured(this.env) };
+  }
+
+  async setIdentity(body: Record<string, unknown>) {
+    const change: Record<string, string> = {};
+    if (body.nameDisclosure !== undefined) {
+      if (!['handle_only', 'declared', 'verified_legal'].includes(String(body.nameDisclosure))) throw new AgentError(400, 'bad_request', 'nameDisclosure must be handle_only, declared or verified_legal.');
+      change.name_disclosure = String(body.nameDisclosure);
+    }
+    if (body.visibility !== undefined) {
+      if (!['public', 'private'].includes(String(body.visibility))) throw new AgentError(400, 'bad_request', 'visibility must be public or private.');
+      change.visibility = String(body.visibility);
+    }
+    if (!Object.keys(change).length) throw new AgentError(400, 'bad_request', 'Send nameDisclosure and/or visibility.');
+    await this.rest('PATCH', `/rest/v1/profiles?id=eq.${this.userId}`, change);
+    if (change.name_disclosure === 'verified_legal') {
+      const [row] = await this.rest<{ legal_name_ciphertext: string | null }[]>('GET', `/rest/v1/identity_verifications?user_id=eq.${this.userId}&select=legal_name_ciphertext`);
+      try { await discloseLegalName(this.env, this.userId, row?.legal_name_ciphertext ?? null); }
+      catch (error) {
+        await this.rest('PATCH', `/rest/v1/profiles?id=eq.${this.userId}`, { name_disclosure: 'declared' }).catch(() => undefined);
+        throw error instanceof VerificationError ? new AgentError(error.status, error.code, error.message) : error;
+      }
+    }
+    return this.identity();
+  }
+
+  async startVerification() {
+    try { return { ...(await startVerification(this.env, this.userId)), note: 'Open this link to verify with Stripe Identity. Stripe keeps your document and selfie; Open Media keeps only the result.' }; }
+    catch (error) { throw error instanceof VerificationError ? new AgentError(error.status, error.code, error.message) : error; }
+  }
+
+  follows() { return this.rpc('open_media_my_follows', {}); }
+  follow(handle: unknown) { return this.rpc('open_media_follow', { p_handle: this.cleanHandle(handle) }); }
+  unfollow(handle: unknown) { return this.rpc('open_media_unfollow', { p_handle: this.cleanHandle(handle) }); }
+  answerFollowRequest(followerId: string, accept: unknown) {
+    if (!uuid.test(followerId)) throw new AgentError(404, 'not_found', 'Request not found.');
+    return this.rpc('open_media_answer_follow_request', { p_follower: followerId, p_accept: accept === true });
+  }
+  removeFollower(followerId: string) {
+    if (!uuid.test(followerId)) throw new AgentError(404, 'not_found', 'Follower not found.');
+    return this.rpc('open_media_remove_follower', { p_follower: followerId });
+  }
+
+  private cleanHandle(handle: unknown): string {
+    const clean = typeof handle === 'string' ? handle.replace(/^@/, '').toLowerCase() : '';
+    if (!handlePattern.test(clean)) throw new AgentError(400, 'bad_request', 'Give an Open Media handle.');
+    return clean;
   }
 
   // Email: stored mail is read from the database; mailbox actions go through the mail routes.
@@ -445,7 +500,7 @@ export class Account {
   private async personByHandle(handle: unknown): Promise<string> {
     const clean = typeof handle === 'string' ? handle.replace(/^@/, '').toLowerCase() : '';
     if (!handlePattern.test(clean)) throw new AgentError(400, 'bad_request', 'Give an Open Media handle.');
-    const [person] = await this.rest<{ id: string }[]>('GET', `/rest/v1/profiles?handle=eq.${clean}&select=id`);
+    const person = await this.rpc<{ id: string } | null>('open_media_public_profile', { p_handle: clean });
     if (!person) throw new AgentError(404, 'not_found', `No one is called @${clean} on Open Media.`);
     return person.id;
   }
@@ -548,6 +603,16 @@ function registerAccountTools(server: McpServer, account: Account) {
   tool(server, 'save_contacts', { title: 'Save contacts', description: 'Create or replace contact cards (matched by id; up to 500 per call). Each card: {id (uuid), source: device|manual, name, nicknames[], phones[], emails[], notes, links[{ref, method: auto|confirmed, evidence, linkedAt}], rejected[], updatedAt}. Only link identities the person confirmed or that share an exact email or phone number. Confirm changes with the person first.', input: { cards: z.array(z.record(z.string(), z.unknown())).min(1).max(500) }, readOnly: false }, (args) => account.saveContacts(args.cards));
   tool(server, 'delete_contact', { title: 'Delete a contact', description: 'Delete one of the person’s contact cards. The people themselves are not affected.', input: { id: z.string() }, readOnly: false }, (args) => account.deleteContact(String(args.id)));
   tool(server, 'set_linked_accounts', { title: 'Set my accounts elsewhere', description: 'Replace the list of the person’s own Farcaster, Lens, Hive and DeSo accounts shown on their public profile (up to 8). This list is public. Confirm with the person first.', input: { accounts: z.array(z.object({ network: z.enum(authorNetworks as [string, ...string[]]), handle: z.string() })).max(8) }, readOnly: false }, (args) => account.setLinkedAccounts(args.accounts));
+
+  // Identity, privacy and follows
+  tool(server, 'get_my_identity', { title: 'My identity and privacy', description: 'The person’s identity tier (2 handle only, 3 declared name, 4 verified, 5 verified with legal name shown), whether they have the blue tick, the name others see, public or private, verification status and how many follow requests wait.', input: {}, readOnly: true }, () => account.identity());
+  tool(server, 'set_my_privacy', { title: 'Set name and privacy', description: 'Change which name others see (handle_only, declared, or verified_legal once verified) and whether the account is public or private. Confirm with the person first; private hides posts from everyone but accepted followers.', input: { nameDisclosure: z.enum(['handle_only', 'declared', 'verified_legal']).optional(), visibility: z.enum(['public', 'private']).optional() }, readOnly: false }, (args) => account.setIdentity(args));
+  tool(server, 'start_identity_verification', { title: 'Start identity verification', description: 'Returns a Stripe Identity link for the person to open themselves (document plus selfie). Never ask the person for document details yourself. Says so when verification is not available on this server.', input: {}, readOnly: false }, () => account.startVerification());
+  tool(server, 'list_my_follows', { title: 'Follows and requests', description: 'Who the person follows (with pending requests), their followers, and follow requests waiting for them.', input: {}, readOnly: true }, () => account.follows());
+  tool(server, 'follow', { title: 'Follow someone', description: 'Follow an Open Media account by handle. Private accounts get a request they must accept.', input: { handle: z.string() }, readOnly: false }, (args) => account.follow(args.handle));
+  tool(server, 'unfollow', { title: 'Unfollow someone', description: 'Stop following an account, or withdraw a pending request.', input: { handle: z.string() }, readOnly: false }, (args) => account.unfollow(args.handle));
+  tool(server, 'answer_follow_request', { title: 'Accept or decline a follow request', description: 'Accept or decline a request to follow the person (by the requester’s id from list_my_follows). Confirm with the person first.', input: { followerId: z.string(), accept: z.boolean() }, readOnly: false }, (args) => account.answerFollowRequest(String(args.followerId), args.accept));
+  tool(server, 'remove_follower', { title: 'Remove a follower', description: 'Remove someone from the person’s followers. They are not told.', input: { followerId: z.string() }, readOnly: false }, (args) => account.removeFollower(String(args.followerId)));
 
   // Email
   tool(server, 'list_email', { title: 'Read my email', description: 'The person’s stored email from connected mailboxes (inbound and sent), newest first. Run sync_mailbox first for the latest.', input: { limit: z.number().int().min(1).max(500).optional() }, readOnly: true }, (args) => account.email(Number(args.limit ?? 50)));
@@ -710,6 +775,19 @@ export function fullOpenApi(origin: string) {
       },
       '/v1/me/contacts/{id}': { delete: { summary: 'Delete one of your contact cards', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], responses: { 200: ok('Deleted'), 404: error, 401: error } } },
       '/v1/me/linked-accounts': { put: { summary: 'Set the open-network accounts shown on your public profile (public, up to 8)', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'array', maxItems: 8, items: { type: 'object', required: ['network', 'handle'], properties: { network: { type: 'string', enum: ['farcaster', 'lens', 'hive', 'deso'] }, handle: { type: 'string', pattern: '^[A-Za-z0-9._-]{1,64}$' } } } } } } }, responses: { 200: ok('Saved'), 400: error, 401: error } } },
+      '/v1/me/identity': {
+        get: { summary: 'Your identity tier, tick, shown name, privacy and verification status', security: bearer, responses: { 200: ok('Your identity'), 401: error } },
+        put: { summary: 'Choose the name others see and whether your account is private', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { nameDisclosure: { type: 'string', enum: ['handle_only', 'declared', 'verified_legal'] }, visibility: { type: 'string', enum: ['public', 'private'] } } } } } }, responses: { 200: ok('Updated identity'), 400: error, 401: error, 409: error } },
+      },
+      '/v1/me/verification': { post: { summary: 'Start identity verification with Stripe Identity (returns a link to open)', security: bearer, responses: { 201: ok('Verification link'), 401: error, 503: error } } },
+      '/v1/me/follows': {
+        get: { summary: 'Who you follow, your followers and requests waiting for you', security: bearer, responses: { 200: ok('Follows'), 401: error } },
+        post: { summary: 'Follow someone (private accounts get a request)', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['handle'], properties: { handle: { type: 'string' } } } } } }, responses: { 201: ok('Following or requested'), 400: error, 401: error } },
+      },
+      '/v1/me/follows/{handle}': { delete: { summary: 'Unfollow, or withdraw a request', security: bearer, parameters: [{ name: 'handle', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: ok('Done'), 401: error } } },
+      '/v1/me/follow-requests/{id}': { post: { summary: 'Accept or decline a follow request', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['accept'], properties: { accept: { type: 'boolean' } } } } } }, responses: { 200: ok('Done'), 401: error } } },
+      '/v1/me/followers/{id}': { delete: { summary: 'Remove a follower', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], responses: { 200: ok('Done'), 401: error } } },
+      '/v1/verification/stripe/webhook': { post: { summary: 'Stripe Identity webhook (signed by Stripe; not for clients)', responses: { 200: ok('Received'), 400: error, 503: error } } },
       '/v1/me/blocks': { post: { summary: 'Block or unblock someone', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['handle'], properties: { handle: { type: 'string' }, blocked: { type: 'boolean', default: true } } } } } }, responses: { 200: ok('Done'), 404: error, 401: error } } },
       '/v1/me/conversations/{id}/report': { post: { summary: 'Report unwanted contact', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['handle'], properties: { handle: { type: 'string' }, messageId: { type: 'string', format: 'uuid' } } } } } }, responses: { 200: ok('Reported'), 401: error } } },
       '/v1/mail-accounts': {
@@ -792,6 +870,11 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     const personPath = path.match(/^\/v1\/people\/([^/]+)\/([^/]+)$/);
     if (request.method === 'GET' && personPath) return json(await personTimeline(env, origin, decodeURIComponent(personPath[1]), decodeURIComponent(personPath[2]), url.searchParams.get('cursor') ?? undefined), 60);
 
+    if (request.method === 'POST' && path === '/v1/verification/stripe/webhook') {
+      try { return json(await handleVerificationWebhook(env, await request.text(), request.headers.get('stripe-signature')), 0); }
+      catch (error) { throw error instanceof VerificationError ? new AgentError(error.status, error.code, error.message) : error; }
+    }
+
     // Account routes: every one needs the person's own token.
     const account = await Account.fromRequest(request, env, origin, internal);
     const raw = ['POST', 'PUT', 'DELETE'].includes(request.method) ? await request.json().catch(() => ({})) as unknown : {};
@@ -817,6 +900,17 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     const contactMatch = path.match(/^\/v1\/me\/contacts\/([^/]+)$/);
     if (request.method === 'DELETE' && contactMatch) return json(await account.deleteContact(decodeURIComponent(contactMatch[1])), 0);
     if (request.method === 'PUT' && path === '/v1/me/linked-accounts') return json(await account.setLinkedAccounts(Array.isArray(raw) ? raw : body.accounts), 0);
+    if (request.method === 'GET' && path === '/v1/me/identity') return json(await account.identity(), 0);
+    if (request.method === 'PUT' && path === '/v1/me/identity') return json(await account.setIdentity(body), 0);
+    if (request.method === 'POST' && path === '/v1/me/verification') return json(await account.startVerification(), 0, 201);
+    if (request.method === 'GET' && path === '/v1/me/follows') return json(await account.follows() as object, 0);
+    if (request.method === 'POST' && path === '/v1/me/follows') return json(await account.follow(body.handle) as object, 0, 201);
+    const followMatch = path.match(/^\/v1\/me\/follows\/([^/]+)$/);
+    if (request.method === 'DELETE' && followMatch) return json(await account.unfollow(decodeURIComponent(followMatch[1])) as object, 0);
+    const requestMatch = path.match(/^\/v1\/me\/follow-requests\/([^/]+)$/);
+    if (request.method === 'POST' && requestMatch) return json(await account.answerFollowRequest(decodeURIComponent(requestMatch[1]), body.accept) as object, 0);
+    const followerMatch = path.match(/^\/v1\/me\/followers\/([^/]+)$/);
+    if (request.method === 'DELETE' && followerMatch) return json(await account.removeFollower(decodeURIComponent(followerMatch[1])) as object, 0);
     throw new AgentError(404, 'not_found', 'No such endpoint. See /v1 or /llms.txt.');
   } catch (error) {
     if (error instanceof AgentError) return json({ error: { code: error.code, message: error.message } }, 0, error.status);

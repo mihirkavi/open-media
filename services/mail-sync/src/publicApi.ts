@@ -29,7 +29,7 @@ export interface UpstreamPost {
   id: string;
   body: string;
   createdAt: string;
-  author: { handle: string; displayName: string; avatarUrl: string | null };
+  author: { handle: string; displayName: string; avatarUrl: string | null; verified?: boolean };
   video?: UpstreamVideo | null;
 }
 
@@ -41,6 +41,9 @@ export interface UpstreamProfile {
   joinedAt: string;
   postCount: number;
   linkedAccounts?: { network: string; handle: string }[];
+  verified?: boolean;
+  visibility?: 'public' | 'private';
+  canView?: boolean;
 }
 
 export interface Cursor { createdAt: string; id: string }
@@ -162,6 +165,7 @@ export function formatPost(post: UpstreamPost, origin: string, supabaseUrl: stri
       handle: post.author.handle,
       displayName: post.author.displayName,
       avatarUrl: post.author.avatarUrl,
+      verified: post.author.verified === true,
       url: `${origin}/v1/profiles/${post.author.handle}`,
     },
   };
@@ -192,6 +196,9 @@ export function formatProfile(profile: UpstreamProfile, origin: string) {
     joinedAt: profile.joinedAt,
     postCount: profile.postCount,
     linkedAccounts: profile.linkedAccounts ?? [],
+    verified: profile.verified === true,
+    visibility: profile.visibility ?? 'public',
+    canView: profile.canView !== false,
     url: `${origin}/v1/profiles/${profile.handle}`,
     postsUrl: `${origin}/v1/profiles/${profile.handle}/posts`,
   };

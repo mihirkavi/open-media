@@ -10,6 +10,7 @@ import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { Portal } from './Portal';
 import { Text } from './Text';
+import { VerifiedTick } from './VerifiedTick';
 
 /**
  * Opening a person from anywhere (ADR 0013): every name and avatar in Feed, Clips, Messages and
@@ -161,7 +162,7 @@ function ProfilePreview({ target, onOpen }: { target: PersonTarget; onOpen: () =
     <View style={styles.cardTop}>
       {avatar ? <Image source={{ uri: avatar }} style={styles.avatar} /> : <View style={[styles.avatar, styles.avatarEmpty]}><Text style={styles.initials}>{(name.replace(/^@/, '')[0] ?? '?').toUpperCase()}</Text></View>}
       <View style={styles.cardCopy}>
-        <Text numberOfLines={1} style={styles.name}>{name}</Text>
+        <View style={styles.nameLine}><Text numberOfLines={1} style={[styles.name, styles.shrink]}>{name}</Text>{person?.verified ? <VerifiedTick size={15} /> : null}</View>
         <Text numberOfLines={1} style={styles.meta}>{[handle, where].filter(Boolean).join(' · ')}</Text>
       </View>
     </View>
@@ -181,6 +182,8 @@ function createStyles(colors: ThemeColors) {
     avatarEmpty: { alignItems: 'center', justifyContent: 'center' },
     initials: { color: colors.text, fontSize: 16, fontWeight: '600' },
     name: { color: colors.text, fontSize: 16, fontWeight: '700' },
+    nameLine: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+    shrink: { flexShrink: 1 },
     meta: { marginTop: 2, color: colors.textTertiary, fontSize: 13 },
     bio: { color: colors.textSecondary, fontSize: 14, lineHeight: 20 },
     open: { alignSelf: 'flex-start', minHeight: 34, paddingHorizontal: 14, justifyContent: 'center', borderRadius: 17, backgroundColor: colors.text },

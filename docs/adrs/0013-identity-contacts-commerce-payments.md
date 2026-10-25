@@ -157,6 +157,20 @@ Built:
 
 Not yet: listed accounts are declared by their owner and not proven (proof of ownership arrives with Phase 2 verification); reconciliation does not yet use the phone numbers and emails that bridged networks other than WhatsApp hold; device import has no in-app review step before upload; the people screens were checked on web (desktop and 375 px, light and dark, signed in and out), but not yet on the iOS Simulator or Android emulator: the development Mac ran out of memory and the simulator would not boot. The native code paths are shared React Native components plus `readDeviceContacts`, which existed before this phase.
 
+### Phase 2 status (2026-10-25)
+
+Built:
+
+- **Identity tiers and the blue tick** (`supabase/migrations/20261025120000_identity_visibility_follows.sql`): `identity_verifications` can be written only by the server (`service_role`) and holds no document images or numbers. The tier, the tick and the shown name are computed by the database. A legal name is stored encrypted, and as plain text only while its verified owner chooses to show it; switching away or losing verification removes it. Choosing the legal name before verification is refused.
+- **Private accounts and follows**: `follows` with requests, accept, decline and remove. `app_private.can_view_profile` is the one access rule used by the feed, single posts, profiles, the public API and MCP. Blocks override follows. Making an account public again accepts waiting requests.
+- **Profiles read through functions**: direct reads of `profiles` now return only your own row; search, conversations and agents get names from `open_media_profile_cards` and `open_media_search_profiles`, so a withheld name never leaves the database.
+- **Verification provider** (`services/mail-sync/src/verification.ts`): Stripe Identity hosted checks (document plus live selfie), signed webhooks only, results re-read from Stripe. **Off until the operator sets four Worker secrets** (see the mail-sync README); until then the app says "Not available yet" and no one has a tick.
+- **App**: `VerifiedTick` after names in Feed, Clips, Messages, previews and profiles (verified email senders now use a distinct double-check mark); Follow, Requested and Following on profiles; a locked view for private accounts; "Privacy and identity" and "Followers" on your profile.
+- **Agents**: `/v1/me/identity` (GET, PUT), `/v1/me/verification`, `/v1/me/follows`, `/v1/me/follow-requests/{id}`, `/v1/me/followers/{id}` and matching MCP tools on `/me/mcp`.
+- **Tests**: 21 pgTAP checks (clients cannot verify themselves, tier 4 never leaks the legal name, private posts stay hidden from guests, pending followers and blocked followers), 6 Worker tests (signatures, forged events, encryption of the legal name, age).
+
+Not yet: no real Stripe Identity session has run (no keys); the existing profiles stay public with their declared names (decision 5 below, applied as the default); the relevant feed does not yet rank followed people higher; phones not verified (the development Mac ran out of memory).
+
 ---
 
 ## 5. Owner decisions (2026-10-24)
@@ -165,7 +179,7 @@ Not yet: listed accounts are declared by their owner and not proven (proof of ow
 2. **Fiat payments provider.** **Decided: Stripe Connect (Express)**. P2P money transfers stay "not available" on this rail.
 3. **Crypto rail.** **Decided: external wallets, USDC on Base**, testnet first.
 4. **Where private contact details live.** **Decided: encrypted server sync** (owner chose it over device-only), with owner-only access as described in 2.4.
-5. **Existing profiles.** Proposed (not yet confirmed): all stay **public**; current display names become `declared` (tier 3). Private is opt-in.
+5. **Existing profiles.** Applied as the default in phase 2 (not yet confirmed by the owner): all stay **public**; current display names are `declared` (tier 3). Private is opt-in.
 6. **Platform fee for creators/commerce.** Proposed (not yet confirmed): **0 % for now**, configurable later.
 
 Nothing in phases 1–7 will create live charges, real verifications or production schema changes without your explicit go-ahead for that step.

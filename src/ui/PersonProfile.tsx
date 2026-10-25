@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Image, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { loadPublicPerson, loadTimeline, PublicPerson, sourcesFor, TimelineSource } from '../data/peopleService';
+import { FollowStatus, followPerson, loadPublicPerson, loadTimeline, PublicPerson, sourcesFor, TimelineSource, unfollowPerson } from '../data/peopleService';
 import { networks } from '../domain/networkPosts';
 import { cardFor, ContactCard, IdentityRef, linkedIdentities, refKey, shownName } from '../domain/people';
 import { SocialPost } from '../domain/posts';
@@ -11,6 +11,7 @@ import { useOpenMediaTheme } from '../themeContext';
 import { PostCard } from './OpenMediaFeed';
 import { newId, PersonTarget, usePeople } from './people';
 import { Text } from './Text';
+import { VerifiedTick } from './VerifiedTick';
 
 /**
  * The unified profile (ADR 0013): one view of a person, built for the viewer. The top shows what
@@ -28,6 +29,8 @@ export function PersonProfile({ target, viewerId, onBack, onMessage }: { target:
   const [failed, setFailed] = useState<TimelineSource[]>([]);
   const [filter, setFilter] = useState('all');
   const [busy, setBusy] = useState('');
+  const [follow, setFollow] = useState<FollowStatus>(null);
+  const [followError, setFollowError] = useState('');
 
   const handle = target.ref.kind === 'open_media' || target.ref.kind === 'network' ? target.ref.handle.replace(/^@/, '') : undefined;
   const card = contacts ? cardFor(contacts.cards, target.ref) : undefined;
@@ -38,7 +41,7 @@ export function PersonProfile({ target, viewerId, onBack, onMessage }: { target:
     let active = true;
     setPerson(undefined);
     if (!omHandle) { setPerson(null); return; }
-    loadPublicPerson(omHandle).then((value) => { if (active) setPerson(value ?? null); }).catch(() => { if (active) setPerson(null); });
+    loadPublicPerson(omHandle).then((value) => { if (active) { setPerson(value ?? null); setFollow(value?.followStatus ?? null); } }).catch(() => { if (active) setPerson(null); });
     return () => { active = false; };
   }, [omHandle]);
 
@@ -63,6 +66,22 @@ export function PersonProfile({ target, viewerId, onBack, onMessage }: { target:
   const suggestions = contacts?.suggestions.filter((item) => refKey(item.ref) === refKey(target.ref)) ?? [];
   const external = target.ref.kind === 'network' ? posts?.find((post) => post.provenance.canonicalURL)?.provenance.canonicalURL : undefined;
   const self = Boolean(viewerId && person?.id === viewerId);
+  const locked = Boolean(person && !person.canView);
+
+  const toggleFollow = async () => {
+    if (!person) return;
+    setFollowError('');
+    const before = follow;
+    setFollow(before ? null : person.visibility === 'private' ? 'pending' : 'accepted');
+    try {
+      if (before) await unfollowPerson(person.handle);
+      else setFollow(await followPerson(person.handle));
+      if (before === 'accepted' && person.visibility === 'private') setPerson(await loadPublicPerson(person.handle) ?? null);
+    } catch (reason) {
+      setFollow(before);
+      setFollowError(reason instanceof Error ? reason.message : 'That didn’t work. Try again.');
+    }
+  };
 
   const act = async (label: string, action: () => Promise<unknown>) => {
     setBusy(label);
@@ -74,14 +93,18 @@ export function PersonProfile({ target, viewerId, onBack, onMessage }: { target:
 
     <View style={styles.header}>
       {avatar ? <Image accessibilityIgnoresInvertColors source={{ uri: avatar }} style={styles.avatar} /> : <View style={[styles.avatar, styles.avatarEmpty]}><Text style={styles.initials}>{(name.replace(/^@/, '')[0] ?? '?').toUpperCase()}</Text></View>}
-      <Text accessibilityRole="header" style={styles.name}>{name}</Text>
+      <View style={styles.nameLine}><Text accessibilityRole="header" style={styles.name}>{name}</Text>{person?.verified ? <VerifiedTick size={20} /> : null}</View>
       <Text style={styles.meta}>{[handle ? `@${handle}` : undefined, where].filter(Boolean).join(' · ')}</Text>
       {person?.bio ? <Text style={styles.bio}>{person.bio}</Text> : null}
-      {person ? <Text style={styles.small}>{`Joined ${new Date(person.joinedAt).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })} · ${person.postCount} ${person.postCount === 1 ? 'post' : 'posts'}`}</Text> : null}
+      {person?.joinedAt ? <Text style={styles.small}>{`Joined ${new Date(person.joinedAt).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })} · ${person.postCount ?? 0} ${person.postCount === 1 ? 'post' : 'posts'}`}</Text> : null}
       <View style={styles.actions}>
+        {person && viewerId && !self ? <Pressable accessibilityRole="button" accessibilityState={{ selected: Boolean(follow) }} onPress={toggleFollow} style={[styles.button, !follow && styles.primary]}>
+          <Text style={follow ? styles.buttonText : styles.primaryText}>{follow === 'accepted' ? 'Following' : follow === 'pending' ? 'Requested' : 'Follow'}</Text>
+        </Pressable> : null}
         {person && onMessage && !self ? <Pressable accessibilityRole="button" onPress={() => onMessage(person.handle)} style={[styles.button, styles.primary]}><Ionicons name="chatbubble-outline" size={16} color={colors.surface} /><Text style={styles.primaryText}>Message</Text></Pressable> : null}
         {external ? <Pressable accessibilityRole="link" onPress={() => { Linking.openURL(external).catch(() => undefined); }} style={styles.button}><Text style={styles.buttonText}>Open on {where}</Text><Ionicons name="open-outline" size={14} color={colors.text} /></Pressable> : null}
       </View>
+      {followError ? <Text accessibilityRole="alert" style={styles.error}>{followError}</Text> : null}
       {person?.linkedAccounts.length ? <Text style={styles.small}>Also on {person.linkedAccounts.map((account) => `${networks[account.network]?.displayName ?? account.network} @${account.handle}`).join(' · ')} <Text style={styles.faint}>(listed by {person.handle})</Text></Text> : null}
     </View>
 
@@ -111,13 +134,19 @@ export function PersonProfile({ target, viewerId, onBack, onMessage }: { target:
       {busy ? <ActivityIndicator color={colors.text} /> : null}
     </View> : null}
 
-    <View style={styles.timeline}>
+    {locked ? <View style={styles.lockedBox}>
+      <Ionicons name="lock-closed-outline" size={22} color={colors.text} />
+      <Text style={styles.lockedTitle}>This account is private</Text>
+      <Text style={styles.lockedCopy}>{follow === 'pending' ? 'Your request is waiting. You’ll see their posts once they accept.' : viewerId ? 'Follow to ask to see their posts.' : 'Sign in and follow to ask to see their posts.'}</Text>
+    </View> : null}
+
+    {locked ? null : <View style={styles.timeline}>
       {filters.length > 2 ? <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filters}>
         {filters.map((item) => <Pressable key={item} accessibilityRole="tab" accessibilityState={{ selected: filter === item }} onPress={() => setFilter(item)} style={[styles.filter, filter === item && styles.filterActive]}><Text style={[styles.filterText, filter === item && styles.filterTextActive]}>{item === 'all' ? 'All' : item === 'open-media' ? 'Open Media' : networks[item as keyof typeof networks].displayName}</Text></Pressable>)}
       </ScrollView> : null}
       {failed.length ? <Text style={styles.small}>{failed.map(sourceLabel).join(', ')} {failed.length === 1 ? 'isn’t' : 'aren’t'} loading right now.</Text> : null}
       {posts === undefined ? <ActivityIndicator style={styles.loading} color={colors.text} /> : visible.length === 0 ? <Text style={styles.empty}>{sources.length ? 'No public posts to show.' : 'This person has no public posts here.'}</Text> : visible.map((post) => <PostCard key={post.id} post={post} mode="raw" />)}
-    </View>
+    </View>}
   </ScrollView>;
 }
 
@@ -146,6 +175,11 @@ function createStyles(colors: ThemeColors) {
     content: { width: '100%', maxWidth: 680, alignSelf: 'center', paddingBottom: 48 },
     bar: { paddingHorizontal: 8, paddingTop: 8 },
     barSpace: { height: 16 },
+    nameLine: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    error: { color: colors.danger, fontSize: 13, textAlign: 'center' },
+    lockedBox: { alignItems: 'center', gap: 8, marginHorizontal: 16, paddingVertical: 32, paddingHorizontal: 24, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+    lockedTitle: { color: colors.text, fontSize: 16, fontWeight: '700' },
+    lockedCopy: { maxWidth: 320, color: colors.textSecondary, fontSize: 14, lineHeight: 20, textAlign: 'center' },
     back: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
     header: { alignItems: 'center', paddingHorizontal: 24, paddingTop: 8, paddingBottom: 24, gap: 6 },
     avatar: { width: 88, height: 88, borderRadius: 44, backgroundColor: colors.chrome, marginBottom: 8 },

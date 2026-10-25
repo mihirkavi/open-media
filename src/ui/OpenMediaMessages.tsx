@@ -15,6 +15,7 @@ import { ThemeColors } from "../theme";
 import { useOpenMediaTheme } from "../themeContext";
 import { SourceMarker, sourceLabel } from "./SourceMarker";
 import type { MessageMode } from "./OpenMediaApp";
+import { VerifiedTick } from "./VerifiedTick";
 
 interface Props {
   conversations: Conversation[];
@@ -215,6 +216,7 @@ export function OpenMediaMessages({
                       {conversationTitle(conversation)}
                     </Text>
                     {conversation.participants[0]?.verifiedDomain ? <VerifiedBadge domain={conversation.participants[0].verifiedDomain} /> : null}
+                    {!conversation.groupTitle && conversation.participants[0]?.verified ? <VerifiedTick /> : null}
                     {conversation.unreadCount ? (
                       <View style={styles.unread} />
                     ) : null}
@@ -379,6 +381,7 @@ function MessageThread({
               {conversationTitle(conversation)}
             </Text>
             {otherPerson?.verifiedDomain ? <VerifiedBadge domain={otherPerson.verifiedDomain} /> : null}
+            {otherPerson?.verified ? <VerifiedTick /> : null}
           </View>
           <Text numberOfLines={1} style={styles.threadMeta}>
             {blocked
@@ -817,12 +820,12 @@ function Avatar({ initials, imageUrls = [], size = 40 }: { initials: string; ima
   );
 }
 
-/** Blue check for senders that passed DMARC and publish a BIMI mark certificate. */
+/** Double check for senders that passed DMARC and publish a BIMI mark certificate (people get VerifiedTick). */
 function VerifiedBadge({ domain }: { domain: string }) {
   return (
     <Ionicons
       accessibilityLabel={`Verified sender: ${domain}`}
-      name="checkmark-circle"
+      name="checkmark-done-circle"
       size={16}
       color="#1D9BF0"
     />

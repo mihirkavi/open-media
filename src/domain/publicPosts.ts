@@ -6,7 +6,7 @@ export interface PublicPostRecord {
   id: string;
   body: string;
   createdAt: string;
-  author: { id: string; handle: string; displayName: string; avatarUrl: string | null };
+  author: { id: string; handle: string; displayName: string; avatarUrl: string | null; verified?: boolean };
   /** One short video, when the post has one (ADR 0009). */
   video?: StoredPostVideo | null;
 }
@@ -36,6 +36,7 @@ export function socialPostFromPublic(record: PublicPostRecord, supabaseUrl?: str
       displayName: record.author.displayName,
       handle: `@${record.author.handle}`,
       initials: initialsFor(record.author.displayName),
+      ...(record.author.verified === true ? { verified: true } : {}),
     },
     body: record.body,
     kind: video ? 'video' : 'text',

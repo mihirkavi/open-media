@@ -121,6 +121,14 @@ export const agentInterfaces = {
     { method: 'PUT', path: '/v1/me/contacts', description: 'Create or replace contact cards by id.' },
     { method: 'DELETE', path: '/v1/me/contacts/{id}', description: 'Delete a contact card.' },
     { method: 'PUT', path: '/v1/me/linked-accounts', description: 'Set the open-network accounts shown on your public profile.' },
+    { method: 'GET', path: '/v1/me/identity', description: 'Your identity tier, blue tick, the name others see, public or private, and verification status.' },
+    { method: 'PUT', path: '/v1/me/identity', description: 'Choose the name others see and whether your account is private.' },
+    { method: 'POST', path: '/v1/me/verification', description: 'Start identity verification with Stripe Identity (a link you open yourself).' },
+    { method: 'GET', path: '/v1/me/follows', description: 'Who you follow, your followers, and follow requests waiting for you.' },
+    { method: 'POST', path: '/v1/me/follows', description: 'Follow someone; private accounts get a request.' },
+    { method: 'DELETE', path: '/v1/me/follows/{handle}', description: 'Unfollow, or withdraw a request.' },
+    { method: 'POST', path: '/v1/me/follow-requests/{id}', description: 'Accept or decline a follow request.' },
+    { method: 'DELETE', path: '/v1/me/followers/{id}', description: 'Remove a follower.' },
     { method: 'GET', path: '/v1/me/email', description: 'Your stored email from every connected mailbox, newest first.' },
     { method: 'GET', path: '/v1/mail-accounts', description: 'Your connected mailboxes.' },
     { method: 'POST', path: '/v1/mail-accounts', description: 'Connect an IMAP or POP3 mailbox, with SMTP for sending.' },
@@ -137,7 +145,7 @@ export const agentInterfaces = {
   ],
   mcp: [
     { path: '/open/mcp', auth: 'none', description: 'Public tools: feed, search, posts, profiles, person timelines, networks, settings and the mission.' },
-    { path: '/me/mcp', auth: 'Open Media access token', description: 'Your account: posts, messages, contacts, linked accounts, email, chat networks, cross-posting status, blocking, reports, export and account deletion.' },
+    { path: '/me/mcp', auth: 'Open Media access token', description: 'Your account: posts, messages, contacts, linked accounts, identity and privacy, follows, email, chat networks, cross-posting status, blocking, reports, export and account deletion.' },
     { path: '/mcp', auth: 'OAuth 2.1', description: 'Open Media Events: find events, check your calendar and plan your week.' },
   ],
 };

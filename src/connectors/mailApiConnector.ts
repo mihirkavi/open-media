@@ -137,8 +137,9 @@ export async function request<T = unknown>(path: string, init: { method?: string
   } catch {
     throw new Error(`Can’t reach the Open Media mail service at ${getAPIURL()}. If you’re running locally, start everything with \`npm run local\`.`);
   }
-  const payload = await response.json().catch(() => ({})) as T & { error?: string };
-  if (!response.ok) throw new Error(payload.error ?? fallbackError);
+  const payload = await response.json().catch(() => ({})) as T & { error?: string | { message?: string } };
+  // Mail routes send { error: "…" }; agent routes send { error: { code, message } }.
+  if (!response.ok) throw new Error((typeof payload.error === 'string' ? payload.error : payload.error?.message) ?? fallbackError);
   return payload;
 }
 
