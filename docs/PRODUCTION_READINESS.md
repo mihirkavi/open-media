@@ -24,6 +24,8 @@ This checklist defines “production ready” for the current onboarding private
 - [x] Live probes: the homepage in HTML, Markdown and JSON, every discovery file, `/docs/mcp`, the RFC 9728 metadata with scopes, Markdown 404s and 401 challenges; `/v1/feed` and `/health` unchanged.
 - [x] Ora agent-readiness score for the Worker origin: 49/100 (C) before, 86 (A) after the first deploy, 89/100 (A) after the second.
 - [x] The plugin installs from GitHub in Claude Code (public and docs servers connect) and Codex.
+- [x] Later the same day (owner said "Yes, deploy"): Worker `8f79712a-1de5-4a02-b7e9-129aeba12e32` added agent self-registration, NLWeb `/ask`, `/schemamap.xml` and `/feeds/posts.jsonl`; `d71b78c4-a204-4f91-bc8d-e4b5f2cbb533` put `/ask` on a time budget (it had taken up to 24 seconds); a third deploy linked the repository from `llms.txt`. Rollback target: `85f46fd7-4c50-4a6a-8023-ebae37b2cee2`. Live probes: registration, the JWT-bearer exchange, `agent_auth` metadata, `/ask` as JSON and SSE (1 to 2 seconds), the schema map and feed. Ora: 90/100 (A), with both NLWeb checks passing.
+- [ ] Owner steps for the remaining Ora points: publish `packages/sdk`, `packages/cli` (npm) and `packages/python` (PyPI); a custom domain (Ora reads the brand as "workers" from the workers.dev host, which sinks brand search, Wikipedia and repository discovery); a ChatGPT app listing; an Organization address and contact email.
 
 ## Phase 5: payments (built 2026-10-25; deployed in test mode the same day)
 

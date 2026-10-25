@@ -730,9 +730,9 @@ Open Media is a free, open-source social app (iPhone, Android, web) with one fee
 
 ## Plugin and source
 
-- Claude Code and Codex plugin: ${sourceRepository}/tree/main/agent-plugin
-- TypeScript SDK, CLI and Python client (build from source; not yet on npm or PyPI): ${sourceRepository}/tree/main/packages
-- Source code (MIT), including AGENTS.md for coding agents: ${sourceRepository}
+- [Claude Code and Codex plugin](${sourceRepository}/tree/main/agent-plugin)
+- [TypeScript SDK, CLI and Python client](${sourceRepository}/tree/main/packages) (build from source; not yet on npm or PyPI)
+- [Source code (MIT)](${sourceRepository}) and [AGENTS.md for coding agents](${sourceRepository}/blob/main/AGENTS.md)
 
 ## Rules
 
