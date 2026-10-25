@@ -19,5 +19,5 @@ Open Media already had a public API, an OpenAPI document, `llms.txt` and MCP ser
 ## Consequences
 
 - Both CLIs validate and install the plugin (`claude plugin validate`, Codex's plugin validator, isolated installs on 2026-10-25), and Claude Code connects to the public server.
-- A live Ora score needs this Worker deployed; a local tunnel audit was not permitted in the development session.
+- Deployed 2026-10-25: Ora scored the Worker origin 89/100 (A), up from 49 (C). MCP Apps (a `ui://open-media/posts` view on `get_feed` and `search`), a 202 async pattern for unsettled USDC checks, a `/sandbox` page and FAQ markup were added after the first scan.
 - Some Ora checks are outside the code and stay open: a Wikipedia entry, npm SDK and CLI packages, skills.sh and MCP registry listings, a ChatGPT app listing, an Organization address and contact email, and Web Bot Auth keys.

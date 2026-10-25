@@ -17,11 +17,19 @@ This checklist defines “production ready” for the current onboarding private
 - [x] Local browser flow: magic-link onboarding, callback cleanup, profile creation, profile search, direct conversation, send, realtime receive, account export, and responsive layout.
 - [x] Latest signed iOS Store build finished successfully: build 9, EAS `f5916bd3-c316-487a-bbed-f6085bc38fcc`.
 
-## Phase 5: payments (built 2026-10-25, not deployed)
+## Production deploy of 2026-10-25 (Phases 5 to 7 and agent readiness)
+
+- [x] Applied `20261027120000_payments.sql` and `20261027130000_creator_payments.sql` with `npx supabase db push --linked` after a dry run; all 11 database suites (193 checks) passed locally first.
+- [x] Deployed the Worker as `9f670295-8d9f-4684-a31c-c37544ee5c85`, then `85f46fd7-4c50-4a6a-8023-ebae37b2cee2` (MCP Apps view, async payment checks). Rollback target: `f116956c-cc11-487e-89b0-7c3cb6b39dd8`. Payments stay in test mode (`PAYMENTS_LIVE` unset).
+- [x] Live probes: the homepage in HTML, Markdown and JSON, every discovery file, `/docs/mcp`, the RFC 9728 metadata with scopes, Markdown 404s and 401 challenges; `/v1/feed` and `/health` unchanged.
+- [x] Ora agent-readiness score for the Worker origin: 49/100 (C) before, 86 (A) after the first deploy, 89/100 (A) after the second.
+- [x] The plugin installs from GitHub in Claude Code (public and docs servers connect) and Codex.
+
+## Phase 5: payments (built 2026-10-25; deployed in test mode the same day)
 
 - [x] `20261027120000_payments.sql`: 22 pgTAP checks and a clean lint locally; Worker and domain tests; on-chain checks verified against a real Base Sepolia USDC transfer; web flow checked locally (wallet linking, confirmation sheet, a test transaction left unconfirmed).
 - [x] Phase 6 (`20261027130000_creator_payments.sql`): tips and paid posts, 17 more pgTAP checks; web flow checked locally (tips switch, paid post composer, locked and unlocked views, tip and unlock sheets; the public API never returns the paid part).
-- [ ] Owner: approve the migrations and Worker deploy.
+- [x] Owner approved the migrations and Worker deploy (test mode).
 - [ ] Owner: Stripe test mode. Enable Connect (Express), then set `STRIPE_SECRET_KEY` (an `sk_test_` key), `STRIPE_PAYMENTS_WEBHOOK_SECRET` (endpoint `/v1/payments/stripe/webhook` with `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`, `checkout.session.expired`, `charge.refunded`), optionally `STRIPE_CONNECT_WEBHOOK_SECRET` (a Connect endpoint with `account.updated`), and `PAYMENTS_RETURN_URL`.
 - [ ] Acceptance: one test-mode card payment, one test-mode tip and one Base Sepolia USDC payment confirmed end to end (needs a funded test wallet).
 - [ ] Live money: only after the owner approves live Stripe keys and Base mainnet, set `PAYMENTS_LIVE=1`.
