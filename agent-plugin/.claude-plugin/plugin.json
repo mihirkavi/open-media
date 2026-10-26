@@ -7,7 +7,7 @@
     "name": "Open Media",
     "url": "https://github.com/mihirkavi/open-media"
   },
-  "homepage": "https://convo-mail-sync.convo-mail-sync.workers.dev/agents",
+  "homepage": "https://api.openmedia.site/agents",
   "repository": "https://github.com/mihirkavi/open-media",
   "license": "MIT",
   "keywords": [
@@ -25,5 +25,5 @@
     "./skills/"
   ],
   "mcpServers": "./.mcp.json",
-  "privacyPolicyUrl": "https://convo-mail-sync.convo-mail-sync.workers.dev/privacy"
+  "privacyPolicyUrl": "https://api.openmedia.site/privacy"
 }

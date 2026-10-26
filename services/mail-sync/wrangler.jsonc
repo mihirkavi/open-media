@@ -19,6 +19,10 @@
     { "pattern": "api.openmedia.site", "custom_domain": true }
   ],
   "workers_dev": true,
+  // Open Media's sign-in emails, sent from security@openmedia.site (authEmail.ts).
+  "send_email": [
+    { "name": "EMAIL", "allowed_sender_addresses": ["security@openmedia.site"] }
+  ],
   // The web app's static files. The Worker runs first and decides, by host and path, whether a
   // request is for the web app or for the API and agent site.
   "assets": {

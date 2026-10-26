@@ -48,3 +48,15 @@ class ClientTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SignInTest(unittest.TestCase):
+    def test_signing_in_with_a_code_makes_the_client_act_as_the_person(self):
+        seen = []
+        session = {"access_token": "at1", "token_type": "Bearer", "expires_in": 3600, "refresh_token": "rt1", "user": {"id": "u1"}}
+        om = OpenMedia(base_url="https://api.test", opener=opener([(200, {"sent": True}, {}), (200, session, {}), (200, {"handle": "ada"}, {})], seen))
+        om.request_sign_in_code("ada@example.test")
+        self.assertEqual(om.sign_in_with_code("ada@example.test", "12345678")["refresh_token"], "rt1")
+        om.me()
+        self.assertEqual(seen[1].full_url, "https://api.test/v1/auth/verify")
+        self.assertEqual(seen[2].get_header("Authorization"), "Bearer at1")

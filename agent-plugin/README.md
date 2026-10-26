@@ -41,4 +41,4 @@ The public and docs servers need nothing. For `open-media-account`, the person c
 
 ## Notes for agents editing this folder
 
-Edit skills in `src/domain/agentSkills.ts`, never the generated `SKILL.md` files, then run `npm run agent-plugin:sync`. Keep the version the same in both manifests. Privacy: https://convo-mail-sync.convo-mail-sync.workers.dev/privacy.
+Edit skills in `src/domain/agentSkills.ts`, never the generated `SKILL.md` files, then run `npm run agent-plugin:sync`. Keep the version the same in both manifests. Privacy: https://api.openmedia.site/privacy.

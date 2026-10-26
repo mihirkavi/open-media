@@ -6,7 +6,7 @@
  * Run with `npm run build:web`.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -20,6 +20,8 @@ const env = {
   EXPO_PUBLIC_OPEN_MEDIA_API_URL: process.env.OPEN_MEDIA_API_URL ?? 'https://api.openmedia.site',
   EXPO_PUBLIC_SUPABASE_URL: process.env.EXPO_PUBLIC_SUPABASE_URL ?? fromFile('EXPO_PUBLIC_SUPABASE_URL'),
   EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? fromFile('EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY'),
+  // Open Media's own sign-in emails (services/mail-sync/src/authEmail.ts) carry a code as well as the link.
+  EXPO_PUBLIC_SIGN_IN_EMAIL_CODES: '1',
 };
 if (!env.EXPO_PUBLIC_SUPABASE_URL?.startsWith('https://') || !env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY) {
   throw new Error('Set EXPO_PUBLIC_SUPABASE_URL (https) and EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY, or keep them in .env.local.');
@@ -29,4 +31,7 @@ const result = spawnSync('npx', ['expo', 'export', '--platform', 'web', '--outpu
   cwd: root, stdio: 'inherit', env: { ...process.env, ...env, NODE_ENV: 'production', EXPO_PUBLIC_LOCAL_AUTO_SIGN_IN: '' },
 });
 if (result.status !== 0) process.exit(result.status ?? 1);
+// The logos the sign-in emails show, served from openmedia.site/brand/.
+mkdirSync(join(root, '.web-dist', 'brand'), { recursive: true });
+for (const file of ['logo-light.png', 'logo-dark.png']) copyFileSync(join(root, 'assets', 'brand', file), join(root, '.web-dist', 'brand', file));
 console.log(`Built .web-dist for ${env.EXPO_PUBLIC_OPEN_MEDIA_API_URL}`);

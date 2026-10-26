@@ -1,10 +1,10 @@
 {
   "mcpServers": {
-    "open-media": { "type": "http", "url": "https://convo-mail-sync.convo-mail-sync.workers.dev/open/mcp" },
-    "open-media-docs": { "type": "http", "url": "https://convo-mail-sync.convo-mail-sync.workers.dev/docs/mcp" },
+    "open-media": { "type": "http", "url": "https://api.openmedia.site/open/mcp" },
+    "open-media-docs": { "type": "http", "url": "https://api.openmedia.site/docs/mcp" },
     "open-media-account": {
       "type": "http",
-      "url": "https://convo-mail-sync.convo-mail-sync.workers.dev/me/mcp",
+      "url": "https://api.openmedia.site/me/mcp",
       "headers": { "Authorization": "Bearer ${OPEN_MEDIA_TOKEN}" },
       "bearer_token_env_var": "OPEN_MEDIA_TOKEN"
     }

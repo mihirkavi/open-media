@@ -25,6 +25,10 @@
 </p>
 
 <p align="center">
+  <a href="https://openmedia.site"><strong>openmedia.site</strong></a> · <a href="https://api.openmedia.site/docs">API docs</a> · <a href="https://api.openmedia.site/agents">For agents</a>
+</p>
+
+<p align="center">
   <a href="#the-idea">The idea</a> ·
   <a href="#a-tour-of-the-app">Tour</a> ·
   <a href="#what-works-today">What works today</a> ·
@@ -190,7 +194,7 @@ Everything Open Media does for people, it also offers to programs and AI assista
 | Discovery | No | `/llms.txt`, `/agents.md`, `/auth.md`, `/docs`, `/v1/openapi.json`, `/sitemap.xml`, `/.well-known/ard.json`, `/.well-known/agent-skills/index.json`, `/.well-known/agent-card.json`, `/.well-known/api-catalog`, `/schemamap.xml`, `/feeds/posts.jsonl` and MCP server cards; every page also answers in Markdown (`Accept: text/markdown` or `.md`) |
 
 ```json
-{ "mcpServers": { "open-media": { "url": "https://<open-media-api>/open/mcp" } } }
+{ "mcpServers": { "open-media": { "url": "https://api.openmedia.site/open/mcp" } } }
 ```
 
 ### SDK, command line and Python client
@@ -209,7 +213,7 @@ The [agent-plugin](agent-plugin) folder bundles the three MCP servers and two sk
 codex plugin marketplace add mihirkavi/open-media && codex plugin add open-media@open-media
 ```
 
-Set `OPEN_MEDIA_TOKEN` to use your own account from the plugin. Your access token comes from **Settings → Developers and agents** in the app and expires after about an hour. Every account call acts only as you; the database refuses anything else. See [ADR 0012](docs/adrs/0012-agent-interfaces-and-design-system.md) and the [public API guide](services/mail-sync/PUBLIC_API.md).
+To act as you, an agent signs you in the same way the app does: it asks for your email, Open Media emails you a code from security@openmedia.site, and you tell the agent the code (`POST /v1/auth/email-code`, then `POST /v1/auth/verify`, or the `request_sign_in_code` and `sign_in_with_code` MCP tools). From a terminal, `open-media login you@example.com` does the same, and `export OPEN_MEDIA_TOKEN=$(open-media token)` hands the session to the plugin. You can also copy a token from **Settings → Developers and agents**. Tokens expire after about an hour and renew with the refresh token. Every account call acts only as you; the database refuses anything else. See [ADR 0012](docs/adrs/0012-agent-interfaces-and-design-system.md) and the [public API guide](services/mail-sync/PUBLIC_API.md).
 
 ## Why now
 

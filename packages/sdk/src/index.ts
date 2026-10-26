@@ -5,10 +5,10 @@
  * no key. Account calls need the person's own access token, copied from the app (Settings, then
  * Developers and agents), and act only as that person.
  *
- * Docs: https://convo-mail-sync.convo-mail-sync.workers.dev/docs
+ * Docs: https://api.openmedia.site/docs
  */
 
-export const defaultBaseUrl = 'https://convo-mail-sync.convo-mail-sync.workers.dev';
+export const defaultBaseUrl = 'https://api.openmedia.site';
 
 export type Network = 'open-media' | 'farcaster' | 'lens' | 'hive' | 'deso';
 export type FeedMode = 'raw' | 'relevant';
@@ -25,6 +25,15 @@ export interface Post {
   engagement: { replies: number; reposts: number; likes: number } | null;
   why: { used: string[]; filters: string[]; notUsed: string[] };
   listing?: Record<string, unknown>;
+}
+
+/** A person's session from signing in with an email code. Keep both tokens private. */
+export interface Session {
+  access_token: string;
+  token_type: 'Bearer';
+  expires_in: number;
+  refresh_token: string;
+  user: { id: string; email?: string };
 }
 
 export interface FeedPage { data: Post[]; unavailable: string[]; nextCursor: string | null; next: string | null }
@@ -54,7 +63,7 @@ type Query = Record<string, string | number | undefined | null>;
 
 export class OpenMedia {
   private readonly baseUrl: string;
-  private readonly token?: string;
+  private token?: string;
   private readonly fetchImpl: typeof fetch;
   private readonly maxRetries: number;
   private readonly userAgent: string;
@@ -109,7 +118,38 @@ export class OpenMedia {
     return this.get('/v1/about');
   }
 
+  // ─── Signing a person in ───────────────────────────────────────────────────
+
+  /** Step 1: Open Media emails the person a sign-in code (and creates an account for a new email). */
+  requestSignInCode(email: string): Promise<{ sent: boolean; email: string; expires_in: number }> {
+    return this.send('POST', '/v1/auth/email-code', { email });
+  }
+
+  /** Step 2: the code the person read from their email. The client then acts as them. */
+  async signInWithCode(email: string, code: string): Promise<Session> {
+    const session = await this.send<Session>('POST', '/v1/auth/verify', { email, code });
+    this.token = session.access_token;
+    return session;
+  }
+
+  /** Renews the session before expires_in runs out. */
+  async refreshSession(refreshToken: string): Promise<Session> {
+    const session = await this.send<Session>('POST', '/v1/auth/refresh', { refresh_token: refreshToken });
+    this.token = session.access_token;
+    return session;
+  }
+
+  async signOut(): Promise<void> {
+    await this.send('POST', '/v1/auth/sign-out');
+    this.token = undefined;
+  }
+
   // ─── The person's account: needs their token ───────────────────────────────
+
+  /** For a new account: the name and @handle the person chose. */
+  setUpProfile(displayName: string, handle: string): Promise<Record<string, unknown>> {
+    return this.send('PUT', '/v1/me/profile', { displayName, handle });
+  }
 
   me(): Promise<Record<string, unknown>> {
     return this.get('/v1/me');

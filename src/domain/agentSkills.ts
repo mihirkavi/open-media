@@ -10,7 +10,7 @@ export interface AgentSkill {
   body: string;
 }
 
-export const defaultApiOrigin = 'https://convo-mail-sync.convo-mail-sync.workers.dev';
+export const defaultApiOrigin = 'https://api.openmedia.site';
 
 export function agentSkills(origin = defaultApiOrigin): AgentSkill[] {
   return [
@@ -32,8 +32,15 @@ Open Media is one open app for a person's social world: one feed across Open Med
 
 Prefer MCP. Public tools need no account:
 
-- MCP (public, no key): \`${origin}/open/mcp\` - get_feed, search, get_post, get_profile, get_person_timeline, find_upcoming_events, list_networks, find_setting, about_open_media.
-- MCP (the person's account): \`${origin}/me/mcp\` with \`Authorization: Bearer <token>\`. The person copies the token from the app: Settings, then Developers and agents.
+- MCP (public, no key): \`${origin}/open/mcp\` - get_feed, search, get_post, get_profile, get_person_timeline, find_upcoming_events, list_networks, find_setting, about_open_media, and sign-in: request_sign_in_code, sign_in_with_code, refresh_sign_in.
+- MCP (the person's account): \`${origin}/me/mcp\` with \`Authorization: Bearer <token>\`.
+
+## Signing the person in
+
+1. Ask for their email, then call request_sign_in_code (or \`POST ${origin}/v1/auth/email-code\`). Open Media emails them a code from security@openmedia.site.
+2. Ask them for the code and call sign_in_with_code (or \`POST ${origin}/v1/auth/verify\`). Keep the returned access_token and refresh_token private.
+3. New account? If get_me answers no_profile, ask for a name and handle and call set_up_profile.
+4. Renew with refresh_sign_in before expires_in runs out. In a terminal, \`open-media login\` does all of this, and \`open-media token\` prints the token for OPEN_MEDIA_TOKEN.
 - Docs MCP: \`${origin}/docs/mcp\` - search_docs and get_docs_page.
 - REST: \`${origin}/v1\` (index) and \`${origin}/v1/openapi.json\` (OpenAPI 3.1).
 

@@ -13,8 +13,8 @@ keywords = ["open-media", "social", "farcaster", "lens", "hive", "deso", "mcp", 
 classifiers = ["License :: OSI Approved :: MIT License", "Programming Language :: Python :: 3"]
 
 [project.urls]
-Homepage = "https://convo-mail-sync.convo-mail-sync.workers.dev/developers"
-Documentation = "https://convo-mail-sync.convo-mail-sync.workers.dev/docs"
+Homepage = "https://api.openmedia.site/developers"
+Documentation = "https://api.openmedia.site/docs"
 Repository = "https://github.com/mihirkavi/open-media"
 Issues = "https://github.com/mihirkavi/open-media/issues"
 

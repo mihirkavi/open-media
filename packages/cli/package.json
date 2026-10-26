@@ -7,7 +7,7 @@
   "bin": { "open-media": "dist/cli.js" },
   "files": ["dist", "README.md"],
   "engines": { "node": ">=18" },
-  "homepage": "https://convo-mail-sync.convo-mail-sync.workers.dev/developers",
+  "homepage": "https://api.openmedia.site/developers",
   "repository": { "type": "git", "url": "git+https://github.com/mihirkavi/open-media.git", "directory": "packages/cli" },
   "bugs": { "url": "https://github.com/mihirkavi/open-media/issues" },
   "keywords": ["open-media", "cli", "social", "farcaster", "lens", "hive", "deso", "mcp", "agents"],

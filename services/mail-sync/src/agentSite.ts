@@ -188,7 +188,7 @@ Build on Open Media without an account for public data, or act for a person with
 
 1. Read the public feed: \`curl "${origin}/v1/feed"\`. No key, no signup.
 2. Connect an MCP client to \`${origin}/open/mcp\` (Streamable HTTP).
-3. To act for a person, they copy a short-lived access token from the app (Settings, then Developers and agents) and you send it as \`Authorization: Bearer <token>\`.
+3. To act for a person, sign them in: \`POST ${origin}/v1/auth/email-code\` with their email, ask them for the code Open Media emails them, then \`POST ${origin}/v1/auth/verify\` returns their access token ([details](${origin}/auth.md)). Send it as \`Authorization: Bearer <token>\`.
 4. Install the Open Media plugin for Claude Code or Codex from the [repository](${sourceRepository}/tree/main/agent-plugin).
 5. For your agent's own rate limit, register it: \`POST ${origin}/agent/identity\` with \`{"type": "anonymous"}\`, then trade the assertion at \`/oauth/token\` ([how](${origin}/auth.md)).
 
@@ -374,10 +374,32 @@ How an agent gets access to Open Media, and exactly which credentials exist. Thi
 
 - **No credential:** everything public. Start here.
 - **Anonymous agent registration** (\`agent_auth\`, type \`anonymous\`): an agent gets its own identity and an access token with the \`public:read\` scope, so its requests are counted in its own rate-limit bucket instead of sharing one with its IP address. It never grants access to anyone's account.
-- **The person's access token (bearer):** the account API (\`/v1/me/...\`) and the account MCP server (\`/me/mcp\`). The person copies it from the app (Settings, then Developers and agents); it acts only as them.
+- **Sign the person in with an email code (bearer):** for the account API (\`/v1/me/...\`) and the account MCP server (\`/me/mcp\`). Open Media emails the person a code from security@openmedia.site; they tell you the code; you get their access token. See \"Sign a person in\" below. People can also copy a token from the app (Settings, then Developers and agents). Either way it acts only as them.
 - **OAuth 2.1 with PKCE (S256):** Open Media Events at \`${origin}/mcp\`, scopes \`events:read\` and \`events:write\`, with client ID metadata documents or Dynamic Client Registration at \`${origin}/oauth/register\`.
 
-## Register
+## Sign a person in
+
+Works for existing accounts and creates new ones. Nothing happens without the code from the person's inbox.
+
+\`\`\`
+POST ${origin}/v1/auth/email-code
+Content-Type: application/json
+
+{"email": "person@example.com"}
+\`\`\`
+
+Tell the person a code is on its way, ask them for it, then:
+
+\`\`\`
+POST ${origin}/v1/auth/verify
+Content-Type: application/json
+
+{"email": "person@example.com", "code": "12345678"}
+\`\`\`
+
+The response holds \`access_token\` (send it as \`Authorization: Bearer …\`; it lasts \`expires_in\` seconds, an hour), \`refresh_token\` and \`user\`. Renew with \`POST ${origin}/v1/auth/refresh\` and \`{"refresh_token": "…"}\`; end the session with \`POST ${origin}/v1/auth/sign-out\`. A new account has no profile yet (\`GET /v1/me\` answers \`no_profile\`): ask the person for a name and handle and send them to \`PUT ${origin}/v1/me/profile\` as \`{"displayName": "…", "handle": "…"}\`. The same steps are MCP tools on \`${origin}/open/mcp\` (\`request_sign_in_code\`, \`sign_in_with_code\`, \`refresh_sign_in\`) and \`set_up_profile\` on \`/me/mcp\`; the CLI does it with \`open-media login you@example.com\`. Keep both tokens private, as you would a password. Errors: \`invalid_code\` (400, ask for a new code), \`rate_limited\` (429 with \`Retry-After\`).
+
+## Register an agent identity
 
 \`\`\`
 POST ${origin}/agent/identity
@@ -390,7 +412,7 @@ The response holds \`registration_id\`, \`identity_assertion\` (valid for 30 day
 
 ## Claim
 
-There is no claim ceremony and no \`claim_endpoint\`: an anonymous agent identity is never linked to a person. To act for a person, use their own access token instead.
+There is no claim ceremony and no \`claim_endpoint\`: an anonymous agent identity is never linked to a person. To act for a person, sign them in with an email code (above).
 
 ## Exchange
 
@@ -856,7 +878,7 @@ const jsonType = 'application/json; charset=utf-8';
 function agentView(origin: string) {
   return {
     name: 'Open Media', description: `${tagline} ${promise}`, mission,
-    authentication: { public: 'none', account: 'Authorization: Bearer <the person’s access token>', events: 'OAuth 2.1 with PKCE (S256)', docs: `${origin}/auth.md` },
+    authentication: { public: 'none', account: 'Authorization: Bearer <the person’s access token>, from POST /v1/auth/email-code then POST /v1/auth/verify', events: 'OAuth 2.1 with PKCE (S256)', docs: `${origin}/auth.md` },
     mcp: mcpServers(origin).map(({ id, title, url, auth, kind }) => ({ id, title, url, auth, kind })),
     api: { index: `${origin}/v1`, openapi: `${origin}/v1/openapi.json`, docs: `${origin}/docs` },
     capabilities: ['cross-network feed', 'cross-network search', 'person timelines', 'Bay Area events', 'publishing', 'messages and email', 'contacts', 'listings and ratings', 'payments, tips and paid posts'],

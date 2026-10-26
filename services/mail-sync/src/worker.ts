@@ -8,8 +8,9 @@ import { agentFriendlyNotFound } from './agentSite.js';
 import { handleMailRequest, MailEnv } from './mailHandler.js';
 import { handleOndcRequest, isOndcPath, OndcEnv } from './ondc/http.js';
 import { handleWebAppRequest, WebAppEnv } from './webApp.js';
+import { AuthEmailEnv, handleSendEmailHook } from './authEmail.js';
 
-type WorkerEnv = Env & MailEnv & EventsEnv & OndcEnv & WebAppEnv;
+type WorkerEnv = Env & MailEnv & EventsEnv & OndcEnv & WebAppEnv & AuthEmailEnv;
 
 /** Public routes: OAuth owner sign-in, the signed plan calendar, event API docs, then mail sync and the public API. */
 const defaultHandler = {
@@ -62,6 +63,8 @@ async function handleRequest(request: Request, env: WorkerEnv, ctx: ExecutionCon
   const url = new URL(request.url);
   const webApp = await handleWebAppRequest(request, env);
   if (webApp) return webApp;
+  // Supabase Auth hands every sign-in email to this signed hook (authEmail.ts).
+  if (request.method === 'POST' && url.pathname === '/auth/hooks/send-email') return handleSendEmailHook(request, env);
   // ONDC buyer apps and the registry call these directly; they never go through OAuth.
   if (isOndcPath(url.pathname)) {
     const response = await handleOndcRequest(request, env, { waitUntil: (work) => ctx.waitUntil(work) });

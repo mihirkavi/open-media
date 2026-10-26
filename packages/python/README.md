@@ -25,4 +25,4 @@ me = OpenMedia(token=os.environ["OPEN_MEDIA_TOKEN"])
 me.publish("Hello from my agent")
 ```
 
-Writes send an `Idempotency-Key` automatically, a 429 is retried after `Retry-After`, and errors raise `OpenMediaError` with `status`, `code` and `message`. Docs: https://convo-mail-sync.convo-mail-sync.workers.dev/docs · MIT licence.
+Writes send an `Idempotency-Key` automatically, a 429 is retried after `Retry-After`, and errors raise `OpenMediaError` with `status`, `code` and `message`. Docs: https://api.openmedia.site/docs · MIT licence.

@@ -4,7 +4,7 @@ A read-only JSON API over public Open Media posts and profiles. No account or AP
 
 It is served by Open Media's single production Cloudflare Worker (the same Worker as mail sync, `src/worker.ts`). Public paths are routed to `src/publicApi.ts` before any mail authentication; that module only relays the `open_media_public_*` database functions with the Supabase publishable key. Private data (messages, email, contacts, blocks, reports) is not reachable through it, and the authenticated mail routes are unchanged.
 
-Production host: `https://convo-mail-sync.convo-mail-sync.workers.dev` (the hostname is kept for installed-app continuity).
+Production host: `https://api.openmedia.site` (the hostname is kept for installed-app continuity).
 
 ## More for programs and agents
 
@@ -25,7 +25,7 @@ The same Worker also serves the mixed feed, cross-network search, person timelin
 `limit` is 1–50 (default 20). Follow `pagination.next`, or the `Link: rel="next"` header, until it is `null`. Removed posts, and posts hidden after community reports, disappear from every endpoint.
 
 ```bash
-curl "https://convo-mail-sync.convo-mail-sync.workers.dev/v1/posts?limit=2"
+curl "https://api.openmedia.site/v1/posts?limit=2"
 ```
 
 ```json

@@ -50,7 +50,7 @@ Subscribe the webhook to `identity.verification_session.verified`, `.requires_in
 
 `MAIL_CREDENTIALS_KEY` must be a base64-encoded 32-byte key and must never be placed in Expo configuration. Generate Worker types and validate the bundle with `npm run worker:types` and `npm run worker:check`. Deploy with `npm run worker:deploy`, after applying the repository's Supabase migrations to production.
 
-The production health endpoint is `https://convo-mail-sync.convo-mail-sync.workers.dev/health`.
+The production health endpoint is `https://api.openmedia.site/health`.
 
 ## Endpoints
 

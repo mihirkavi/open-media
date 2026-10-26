@@ -32,8 +32,8 @@ Payments (`startPayment`) never move money by themselves: card payments return a
 
 ## Links
 
-- [API documentation](https://convo-mail-sync.convo-mail-sync.workers.dev/docs) and [OpenAPI](https://convo-mail-sync.convo-mail-sync.workers.dev/v1/openapi.json)
-- [Developer portal](https://convo-mail-sync.convo-mail-sync.workers.dev/developers) and [sandbox](https://convo-mail-sync.convo-mail-sync.workers.dev/sandbox)
-- MCP: `https://convo-mail-sync.convo-mail-sync.workers.dev/open/mcp` (public) and `https://convo-mail-sync.convo-mail-sync.workers.dev/me/mcp` (account)
+- [API documentation](https://api.openmedia.site/docs) and [OpenAPI](https://api.openmedia.site/v1/openapi.json)
+- [Developer portal](https://api.openmedia.site/developers) and [sandbox](https://api.openmedia.site/sandbox)
+- MCP: `https://api.openmedia.site/open/mcp` (public) and `https://api.openmedia.site/me/mcp` (account)
 
 MIT licence.

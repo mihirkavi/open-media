@@ -36,3 +36,14 @@ test('errors keep the server’s code and message', async () => {
   const net = fake([Response.json({ error: { code: 'unauthorized', message: 'Send your token.' } }, { status: 401 })]);
   await assert.rejects(new OpenMedia({ baseUrl: 'https://api.test', fetch: net.impl }).me(), (error: unknown) => error instanceof OpenMediaError && error.status === 401 && error.code === 'unauthorized' && error.message === 'Send your token.');
 });
+
+test('signing in with an email code makes the client act as that person', async () => {
+  const net = fake([Response.json({ sent: true, email: 'ada@example.test', expires_in: 3600 }), Response.json({ access_token: 'at1', token_type: 'Bearer', expires_in: 3600, refresh_token: 'rt1', user: { id: 'u1' } }), Response.json({ id: 'u1', handle: 'ada' })]);
+  const om = new OpenMedia({ baseUrl: 'https://api.test', fetch: net.impl });
+  await om.requestSignInCode('ada@example.test');
+  const session = await om.signInWithCode('ada@example.test', '12345678');
+  assert.equal(session.refresh_token, 'rt1');
+  await om.me();
+  assert.equal(net.calls[1].url, 'https://api.test/v1/auth/verify');
+  assert.equal((net.calls[2].init.headers as Record<string, string>).authorization, 'Bearer at1');
+});

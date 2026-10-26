@@ -52,3 +52,32 @@ test('mcp-config prints working setups for Claude Code and Codex', async () => {
   assert.match((await capture(['mcp-config', 'codex'])).out, /bearer_token_env_var = "OPEN_MEDIA_TOKEN"/);
   assert.match((await capture(['mcp-config', 'claude'])).out, /"type": "http"/);
 });
+
+test('login saves a private session that account commands then use', async () => {
+  const { mkdtempSync, statSync, existsSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const dir = mkdtempSync(join(tmpdir(), 'open-media-cli-'));
+  const calls: { url: string; auth?: string }[] = [];
+  const fake = (async (url: URL | string, init: RequestInit = {}) => {
+    const path = new URL(String(url)).pathname;
+    calls.push({ url: path, auth: (init.headers as Record<string, string>)?.authorization });
+    if (path === '/v1/auth/email-code') return Response.json({ sent: true });
+    if (path === '/v1/auth/verify') return Response.json({ access_token: 'at1', token_type: 'Bearer', expires_in: 3600, refresh_token: 'rt1', user: { id: 'u1' } });
+    if (path === '/v1/me') return Response.json({ handle: 'ada' });
+    return Response.json({ signedOut: true });
+  }) as typeof fetch;
+  const env = { OPEN_MEDIA_CONFIG_DIR: dir, OPEN_MEDIA_BASE_URL: 'https://api.test' };
+  const asked = await capture(['login', 'ada@example.test'], env, fake);
+  assert.equal(asked.code, 0);
+  assert.match(asked.out, /--code <code>/, 'without a terminal it explains the second step');
+  const done = await capture(['login', 'ada@example.test', '--code', '12345678'], env, fake);
+  assert.match(done.out, /Signed in as @ada/);
+  const file = join(dir, 'session.json');
+  assert.equal(statSync(file).mode & 0o777, 0o600);
+  assert.equal((await capture(['token'], env, fake)).out, 'at1');
+  await capture(['me', '--json'], env, fake);
+  assert.equal(calls.at(-1)!.auth, 'Bearer at1');
+  await capture(['logout'], env, fake);
+  assert.equal(existsSync(file), false);
+});

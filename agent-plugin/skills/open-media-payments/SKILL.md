@@ -13,7 +13,7 @@ Open Media never holds money. Cards go through Stripe straight to the seller's S
 
 ## Steps
 
-1. Call `get_payment_options` on `https://convo-mail-sync.convo-mail-sync.workers.dev/me/mcp` with the post id and contextType (listing, tip or paid_post).
+1. Call `get_payment_options` on `https://api.openmedia.site/me/mcp` with the post id and contextType (listing, tip or paid_post).
 2. Call `start_payment` without `confirm`. It starts nothing and returns a preview: the recipient, the amount and every fee.
 3. Show that preview to the person in plain words. For a tip, ask them for the amount; never choose it.
 4. Only if they agree, call `start_payment` again with `confirm: true` and `expectedAmountMinor` set to the previewed amount.

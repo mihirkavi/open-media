@@ -3,10 +3,16 @@
  * open-media: the Open Media command line, for people and agents.
  *
  * Human-readable by default; --json prints the API's JSON for scripts and agents. Reads need no
- * key. Account commands read OPEN_MEDIA_TOKEN. Publishing needs --yes, so nothing is posted by
- * accident. Exit codes: 0 done, 1 the API refused or failed, 2 the command was wrong.
+ * key. Account commands use OPEN_MEDIA_TOKEN, or the session `open-media login` saved (renewed
+ * automatically). Publishing needs --yes, so nothing is posted by accident. Exit codes: 0 done,
+ * 1 the API refused or failed, 2 the command was wrong.
  */
-import { defaultBaseUrl, Network, OpenMedia, OpenMediaError, Post } from '../../sdk/src/index';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { createInterface } from 'node:readline/promises';
+
+import { defaultBaseUrl, Network, OpenMedia, OpenMediaError, Post, Session } from '../../sdk/src/index';
 
 const version = '0.1.0';
 const networks: Network[] = ['open-media', 'farcaster', 'lens', 'hive', 'deso'];
@@ -22,7 +28,13 @@ Read (no account needed)
   profile <handle>                                                 An Open Media profile
   timeline <network> <handle>                                      One person's posts
 
-Your account (set OPEN_MEDIA_TOKEN; copy it in the app: Settings, Developers and agents)
+Sign in (Open Media emails you a code; agents ask the person for it)
+  login <email> [--code <code>]                                    Sign in or create an account
+  logout                                                           Sign out and forget the session
+  set-up-profile --name <name> --handle <handle>                   Name a new account
+  token                                                            Print your access token (export OPEN_MEDIA_TOKEN=$(open-media token))
+
+Your account (after login, or set OPEN_MEDIA_TOKEN)
   me                                                               Your profile
   post <text…> --yes                                               Publish a public post
   payments                                                         Your payments
@@ -47,7 +59,7 @@ function parse(argv: string[]) {
     else if (arg === '-v') flags.version = true;
     else if (arg.startsWith('--')) {
       const [key, inline] = arg.slice(2).split('=', 2);
-      const takesValue = ['sources', 'mode', 'query', 'days', 'base-url'].includes(key);
+      const takesValue = ['sources', 'mode', 'query', 'days', 'base-url', 'code', 'name', 'handle'].includes(key);
       flags[key] = inline ?? (takesValue ? argv[++index] ?? '' : true);
     } else positional.push(arg);
   }
@@ -78,15 +90,56 @@ function mcpConfig(target: string | undefined, baseUrl: string) {
   }, null, 2) + '\n\n// Or install the plugin: /plugin install open-media --marketplace mihirkavi/open-media';
 }
 
-export async function run(argv: string[], env: Record<string, string | undefined> = process.env): Promise<number> {
+// ─── The saved session (~/.config/open-media/session.json, readable only by you) ───
+
+interface Saved extends Session { expires_at: number; base_url: string }
+
+function sessionFile(env: Record<string, string | undefined>) {
+  const dir = env.OPEN_MEDIA_CONFIG_DIR ?? join(env.XDG_CONFIG_HOME ?? join(homedir(), '.config'), 'open-media');
+  return { dir, file: join(dir, 'session.json') };
+}
+
+function saveSession(env: Record<string, string | undefined>, session: Session, baseUrl: string) {
+  const { dir, file } = sessionFile(env);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  writeFileSync(file, JSON.stringify({ ...session, expires_at: Math.floor(Date.now() / 1000) + session.expires_in, base_url: baseUrl }), { mode: 0o600 });
+  chmodSync(file, 0o600);
+}
+
+function loadSession(env: Record<string, string | undefined>, baseUrl: string): Saved | undefined {
+  const { file } = sessionFile(env);
+  if (!existsSync(file)) return undefined;
+  try { const saved = JSON.parse(readFileSync(file, 'utf8')) as Saved; return saved.base_url === baseUrl ? saved : undefined; } catch { return undefined; }
+}
+
+/** OPEN_MEDIA_TOKEN wins; otherwise the saved session, renewed when it has under a minute left. */
+async function accessToken(env: Record<string, string | undefined>, baseUrl: string): Promise<string | undefined> {
+  if (env.OPEN_MEDIA_TOKEN) return env.OPEN_MEDIA_TOKEN;
+  const saved = loadSession(env, baseUrl);
+  if (!saved) return undefined;
+  if (saved.expires_at - 60 > Date.now() / 1000) return saved.access_token;
+  const renewed = await new OpenMedia({ baseUrl }).refreshSession(saved.refresh_token).catch(() => undefined);
+  if (!renewed) return undefined;
+  saveSession(env, renewed, baseUrl);
+  return renewed.access_token;
+}
+
+async function askForCode(): Promise<string> {
+  const prompt = createInterface({ input: process.stdin, output: process.stdout });
+  try { return (await prompt.question('Code from the email: ')).trim(); } finally { prompt.close(); }
+}
+
+export async function run(argv: string[], env: Record<string, string | undefined> = process.env, input: { interactive?: boolean; ask?: () => Promise<string> } = {}): Promise<number> {
   const { flags, positional } = parse(argv);
   const [command, ...rest] = positional;
   if (flags.version) { console.log(version); return 0; }
   if (flags.help || !command) { console.log(help); return command || flags.help ? 0 : 2; }
   const baseUrl = String(flags['base-url'] || env.OPEN_MEDIA_BASE_URL || defaultBaseUrl).replace(/\/+$/, '');
-  const client = new OpenMedia({ baseUrl, token: env.OPEN_MEDIA_TOKEN, userAgent: `open-media-cli/${version}` });
+  const signedIn = ['me', 'post', 'payments', 'set-up-profile', 'logout', 'token'].includes(command);
+  const token = signedIn ? await accessToken(env, baseUrl) : env.OPEN_MEDIA_TOKEN;
+  const client = new OpenMedia({ baseUrl, token, userAgent: `open-media-cli/${version}` });
   const out = (value: unknown, human: () => void) => { if (flags.json) console.log(JSON.stringify(value, null, 2)); else human(); };
-  const needToken = () => { if (!env.OPEN_MEDIA_TOKEN) throw new UsageError('Set OPEN_MEDIA_TOKEN to your access token (in the app: Settings, Developers and agents).'); };
+  const needToken = () => { if (!token) throw new UsageError('Sign in first: open-media login you@example.com (or set OPEN_MEDIA_TOKEN).'); };
 
   try {
     switch (command) {
@@ -145,6 +198,46 @@ export async function run(argv: string[], env: Record<string, string | undefined
         needToken();
         const result = await client.payments();
         out(result, () => console.log(JSON.stringify(result, null, 2)));
+        return 0;
+      }
+      case 'login': {
+        const email = rest[0];
+        if (!email || !email.includes('@')) throw new UsageError('login needs your email, e.g. open-media login you@example.com');
+        let code = typeof flags.code === 'string' ? flags.code : '';
+        if (!code) {
+          await client.requestSignInCode(email);
+          const interactive = input.interactive ?? Boolean(process.stdin.isTTY);
+          if (!interactive) {
+            out({ sent: true, email, next: `open-media login ${email} --code <code>` }, () => console.log(`Open Media emailed a sign-in code to ${email}.\nRun: open-media login ${email} --code <code>`));
+            return 0;
+          }
+          console.log(`Open Media emailed a sign-in code to ${email}.`);
+          code = await (input.ask ?? askForCode)();
+        }
+        const session = await client.signInWithCode(email, code);
+        saveSession(env, session, baseUrl);
+        const profile = await client.me().catch((error) => (error instanceof OpenMediaError && error.code === 'no_profile' ? undefined : Promise.reject(error)));
+        out({ signedIn: true, user: session.user, profile: profile ?? null }, () => console.log(profile
+          ? `Signed in as @${(profile as { handle: string }).handle}.`
+          : `Signed in. This is a new account: open-media set-up-profile --name "Your name" --handle yourhandle`));
+        return 0;
+      }
+      case 'token': {
+        needToken();
+        console.log(token);
+        return 0;
+      }
+      case 'logout': {
+        if (token) await client.signOut().catch(() => undefined);
+        rmSync(sessionFile(env).file, { force: true });
+        out({ signedOut: true }, () => console.log('Signed out.'));
+        return 0;
+      }
+      case 'set-up-profile': {
+        needToken();
+        if (typeof flags.name !== 'string' || typeof flags.handle !== 'string') throw new UsageError('set-up-profile --name "Your name" --handle yourhandle');
+        const profile = await client.setUpProfile(flags.name, flags.handle);
+        out(profile, () => console.log(`Profile ready: @${(profile as { handle: string }).handle}`));
         return 0;
       }
       case 'mcp-config': {

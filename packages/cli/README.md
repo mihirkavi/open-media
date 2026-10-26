@@ -16,4 +16,4 @@ Install globally to get the `open-media` command: `npm install -g open-media-cli
 - `post` publishes only with `--yes`.
 - Exit codes: 0 done, 1 the API refused or failed, 2 the command was wrong.
 
-Docs: https://convo-mail-sync.convo-mail-sync.workers.dev/docs · MIT licence.
+Docs: https://api.openmedia.site/docs · MIT licence.

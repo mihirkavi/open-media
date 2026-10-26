@@ -6,7 +6,7 @@
     "name": "Open Media",
     "url": "https://github.com/mihirkavi/open-media"
   },
-  "homepage": "https://convo-mail-sync.convo-mail-sync.workers.dev/agents",
+  "homepage": "https://api.openmedia.site/agents",
   "repository": "https://github.com/mihirkavi/open-media",
   "license": "MIT",
   "keywords": [
@@ -28,8 +28,8 @@
       "Read",
       "Write"
     ],
-    "websiteURL": "https://convo-mail-sync.convo-mail-sync.workers.dev/",
-    "privacyPolicyURL": "https://convo-mail-sync.convo-mail-sync.workers.dev/privacy",
+    "websiteURL": "https://openmedia.site/",
+    "privacyPolicyURL": "https://api.openmedia.site/privacy",
     "defaultPrompt": [
       "What are people saying about ethereum on Lens and Farcaster today?"
     ],

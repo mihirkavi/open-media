@@ -36,6 +36,7 @@ import {
 } from './payments.js';
 import { EventsUnavailable, PublicEventsEnv, upcomingEvents } from './publicEvents.js';
 import { AgentAuthEnv, AgentAuthError, agentFromRequest, registerAgent } from './agentAuth.js';
+import { refreshSignIn, requestSignInCode, SignInError, signOut, verifySignInCode } from './personSignIn.js';
 import { handleSiteRequest, isSitePath, llmsTxt as siteLlmsTxt, searchDocs } from './agentSite.js';
 import { mcpAppMimeType, postsViewHtml, postsViewUri } from './mcpAppView.js';
 import { authenticate } from './session.js';
@@ -73,7 +74,7 @@ async function paymentsCall<T>(run: () => Promise<T>): Promise<T> {
 /** Paths served here. They are matched before the read-only public API and the mail routes. */
 export function isAgentPath(pathname: string, method: string): boolean {
   const path = pathname.replace(/\/+$/, '') || '/';
-  if (isSitePath(path) || path === '/agent/identity' || path === '/ask' || path === '/feeds/posts.jsonl') return true;
+  if (isSitePath(path) || path === '/agent/identity' || path === '/ask' || path === '/feeds/posts.jsonl' || path.startsWith('/v1/auth/')) return true;
   if (['/', '/v1', '/v1/openapi.json', '/llms.txt', '/.well-known/mcp.json', '/.well-known/mcp-server', '/open/mcp', '/me/mcp'].includes(path)) return true;
   if (['/v1/feed', '/v1/search', '/v1/networks', '/v1/settings', '/v1/about', '/v1/events/upcoming'].includes(path)) return true;
   if (method === 'PATCH' && /^\/v1\/me\/listings\/[^/]+$/.test(path)) return true;
@@ -295,13 +296,29 @@ export class Account {
       const { token, userId } = await authenticate(request, env.SUPABASE_URL.replace(/\/$/, ''));
       return new Account(env, token, userId, origin, internal);
     } catch {
-      throw new AgentError(401, 'unauthorized', 'Send your Open Media access token as “Authorization: Bearer …”. Get one in the app: Settings → Developers and agents.');
+      throw new AgentError(401, 'unauthorized', 'Send your Open Media access token as “Authorization: Bearer …”. Sign in with POST /v1/auth/email-code and /v1/auth/verify, or copy one in the app: Settings → Developers and agents.');
     }
+  }
+
+  /** A new account picks its name and handle, as the app's “Create your profile” screen does. */
+  async setUpProfile(body: unknown) {
+    const input = (body && typeof body === 'object' ? body : {}) as { displayName?: unknown; handle?: unknown };
+    const displayName = typeof input.displayName === 'string' ? input.displayName.trim() : '';
+    const handle = typeof input.handle === 'string' ? input.handle.trim().toLowerCase().replace(/^@/, '') : '';
+    if (!displayName || displayName.length > 80) throw new AgentError(400, 'bad_request', 'Send displayName (1 to 80 characters).');
+    if (!/^[a-z0-9_]{3,24}$/.test(handle)) throw new AgentError(400, 'bad_request', 'Send handle: 3 to 24 lowercase letters, numbers or underscores.');
+    try {
+      await this.rest('POST', '/rest/v1/profiles?on_conflict=id', { id: this.userId, display_name: displayName, handle }, 'resolution=merge-duplicates,return=minimal');
+    } catch (error) {
+      if (error instanceof AgentError && /duplicate|unique|already/i.test(error.message)) throw new AgentError(409, 'handle_taken', 'That handle is already taken. Try another.');
+      throw error;
+    }
+    return this.me();
   }
 
   async me() {
     const [profile] = await this.rest<{ id: string; handle: string; display_name: string; bio: string; avatar_url: string | null }[]>('GET', `/rest/v1/profiles?id=eq.${this.userId}&select=id,handle,display_name,bio,avatar_url`);
-    if (!profile) throw new AgentError(404, 'no_profile', 'Finish setting up your profile in the app first.');
+    if (!profile) throw new AgentError(404, 'no_profile', 'This account has no profile yet. Choose a name and handle with PUT /v1/me/profile (or the set_up_profile tool), or in the app.');
     return { id: profile.id, handle: profile.handle, displayName: profile.display_name, bio: profile.bio, avatarUrl: profile.avatar_url, url: `${this.origin}/v1/profiles/${profile.handle}` };
   }
 
@@ -819,6 +836,9 @@ function tool(server: McpServer, name: string, config: { title: string; descript
 }
 
 function registerPublicTools(server: McpServer, env: AgentEnv, origin: string) {
+  tool(server, 'request_sign_in_code', { title: 'Email the person a sign-in code', description: 'Starts signing the person in to their own Open Media account (or creating one): Open Media emails them a sign-in code from security@openmedia.site. Ask the person for their email first and tell them a code is coming. Then ask them for the code and call sign_in_with_code. Never guess or reuse codes.', input: { email: z.string().email() }, readOnly: false }, (args) => requestSignInCode(env, origin, args));
+  tool(server, 'sign_in_with_code', { title: 'Finish signing in with the code', description: 'Exchanges the code the person read from their email for their session. Returns access_token (send it as “Authorization: Bearer …” to /v1/me and /me/mcp), refresh_token and expires_in. Treat both tokens as the person’s password: keep them private and never post them.', input: { email: z.string().email(), code: z.string().describe('The digits from the email') }, readOnly: false }, (args) => verifySignInCode(env, origin, args));
+  tool(server, 'refresh_sign_in', { title: 'Renew a sign-in', description: 'Exchanges a refresh_token for a fresh access_token when the old one is about to expire.', input: { refresh_token: z.string() }, readOnly: false }, (args) => refreshSignIn(env, origin, args));
   server.registerResource('posts-view', postsViewUri, { title: 'Open Media posts', description: 'Shows posts from get_feed and search as a readable list with source links.', mimeType: mcpAppMimeType },
     async (uri) => ({ contents: [{ uri: uri.href, mimeType: mcpAppMimeType, text: postsViewHtml, _meta: { ui: { prefersBorder: true } } }] }));
   const sourceEnum = z.enum(sources);
@@ -875,6 +895,7 @@ function registerAccountTools(server: McpServer, account: Account) {
   tool(server, 'submit_payment_transaction', { title: 'Report a USDC transaction', description: 'After the person’s wallet sent the USDC transfer, pass its transaction hash. Open Media then checks it on the network; it is not paid until that check passes.', input: { paymentId: z.string(), txHash: z.string() }, readOnly: false }, (args) => account.submitTransaction(String(args.paymentId), args.txHash));
   tool(server, 'check_payment', { title: 'Check a payment again', description: 'Re-check a USDC payment on the network, or read a card payment’s status after the person paid on Stripe.', input: { paymentId: z.string() }, readOnly: false }, (args) => account.checkPayment(String(args.paymentId)));
   tool(server, 'start_payout_setup', { title: 'Set up getting paid by card', description: 'Returns a Stripe link for the person to open themselves to set up payouts. Stripe collects bank and tax details; never ask the person for them.', input: {}, readOnly: false }, () => account.startPayouts());
+  tool(server, 'set_up_profile', { title: 'Set up a new profile', description: 'For a new account only (get_me answers no_profile): saves the name and @handle the person chose. Ask the person for both; handles are 3 to 24 lowercase letters, numbers or underscores.', input: { displayName: z.string().max(80), handle: z.string().max(25) }, readOnly: false }, (args) => account.setUpProfile(args));
   tool(server, 'get_ondc_store', { title: 'Get the ONDC store', description: 'The person’s ONDC store for selling to ONDC buyer apps in India (store details, whether it is on, how many INR products are offered). Null when they have none.', input: {}, readOnly: true }, () => account.ondcStore());
   tool(server, 'set_ondc_store', { title: 'Save the ONDC store', description: 'Saves the person’s ONDC store. Turning it on (enabled: true) needs every field and declarationAccepted: true, which only the person can confirm; their phone, email and address are then shown to ONDC buyers. Confirm with the person first. Orders through ONDC are not accepted yet.', input: {
     enabled: z.boolean(), storeName: z.string().max(80), category: z.enum(['ONDC:RET12', 'ONDC:RET13', 'ONDC:RET14', 'ONDC:RET15', 'ONDC:RET16']), building: z.string().max(120), locality: z.string().max(120),
@@ -954,7 +975,7 @@ export function serverCard(origin: string) {
     documentation: `${origin}/llms.txt`,
     servers: [
       { name: 'open-media', title: 'Open Media', url: `${origin}/open/mcp`, transport: 'streamable-http', authentication: { type: 'none' }, tools: ['get_feed', 'search', 'get_post', 'get_profile', 'list_networks', 'find_setting', 'about_open_media'] },
-      { name: 'open-media-account', title: 'Open Media (your account)', url: `${origin}/me/mcp`, transport: 'streamable-http', authentication: { type: 'bearer', description: 'The person’s Open Media access token, copied from Settings → Developers and agents. It expires after about an hour.' }, tools: ['get_me', 'publish_post', 'delete_post', 'report_post', 'list_conversations', 'start_conversation', 'send_message', 'export_my_data', 'block_person', 'report_conversation', 'delete_my_account', 'list_email', 'list_mailboxes', 'connect_mailbox', 'sync_mailbox', 'send_email', 'remove_mailbox', 'list_chat_networks', 'list_bridged_chats', 'send_bridged_message', 'chat_network_sign_in_options', 'start_chat_network_sign_in', 'continue_chat_network_sign_in', 'disconnect_chat_network', 'cross_posting_status', 'plus every public tool'] },
+      { name: 'open-media-account', title: 'Open Media (your account)', url: `${origin}/me/mcp`, transport: 'streamable-http', authentication: { type: 'bearer', description: 'The person’s Open Media access token: sign in with request_sign_in_code and sign_in_with_code on the public server (or POST /v1/auth/email-code then /v1/auth/verify), or copy it from Settings → Developers and agents. It expires after about an hour; renew it with refresh_sign_in.' }, tools: ['get_me', 'set_up_profile', 'publish_post', 'delete_post', 'report_post', 'list_conversations', 'start_conversation', 'send_message', 'export_my_data', 'block_person', 'report_conversation', 'delete_my_account', 'list_email', 'list_mailboxes', 'connect_mailbox', 'sync_mailbox', 'send_email', 'remove_mailbox', 'list_chat_networks', 'list_bridged_chats', 'send_bridged_message', 'chat_network_sign_in_options', 'start_chat_network_sign_in', 'continue_chat_network_sign_in', 'disconnect_chat_network', 'cross_posting_status', 'plus every public tool'] },
       { name: 'open-media-events', title: 'Open Media Events', url: `${origin}/mcp`, transport: 'streamable-http', authentication: { type: 'oauth2', metadata: `${origin}/.well-known/oauth-authorization-server` } },
     ],
   };
@@ -1009,6 +1030,11 @@ function baseOpenApi(origin: string) {
       '/v1/events/upcoming': { get: { summary: 'Upcoming public events (Luma, Meetup, Eventbrite) in the San Francisco Bay Area, de-duplicated across platforms, with official registration links', parameters: [{ name: 'area', in: 'query', schema: { type: 'string' } }, { name: 'days', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 14, default: 7 } }, { name: 'q', in: 'query', schema: { type: 'string' } }, { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 } }], responses: { 200: ok('Events, soonest first, with each provider’s status'), 400: error } } },
       '/v1/people/{network}/{handle}': { get: { summary: 'One person’s public posts in one timeline (Open Media profile plus the accounts they listed, or one open-network account)', parameters: [{ name: 'network', in: 'path', required: true, schema: { type: 'string', enum: ['open-media', ...authorNetworks] } }, { name: 'handle', in: 'path', required: true, schema: { type: 'string' } }, { name: 'cursor', in: 'query', schema: { type: 'string' } }], responses: { 200: ok('The person and their posts, newest first'), 400: error, 404: error } } },
       '/v1/about': { get: { summary: 'Mission, principles, promises, roadmap and honest status', responses: { 200: ok('About Open Media') } } },
+      '/v1/auth/email-code': { post: { summary: 'Email a person a sign-in code (step 1 of signing in from an agent; also creates new accounts)', requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['email'], properties: { email: { type: 'string', format: 'email' } } } } } }, responses: { 200: ok('Code sent'), 400: error, 429: error } } },
+      '/v1/auth/verify': { post: { summary: 'Exchange the emailed code for the person’s session (access_token, refresh_token)', requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['email', 'code'], properties: { email: { type: 'string', format: 'email' }, code: { type: 'string', pattern: '^[0-9 ]{6,12}$' } } } } } }, responses: { 200: ok('Session'), 400: error, 429: error } } },
+      '/v1/auth/refresh': { post: { summary: 'Renew a session with its refresh_token', requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['refresh_token'], properties: { refresh_token: { type: 'string' } } } } } }, responses: { 200: ok('Session'), 400: error, 401: error } } },
+      '/v1/auth/sign-out': { post: { summary: 'End this session', security: bearer, responses: { 200: ok('Signed out'), 401: error } } },
+      '/v1/me/profile': { put: { summary: 'Choose the name and handle of a new account', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['displayName', 'handle'], properties: { displayName: { type: 'string', maxLength: 80 }, handle: { type: 'string', pattern: '^[a-z0-9_]{3,24}$' } } } } } }, responses: { 200: ok('Profile'), 400: error, 401: error, 409: error } } },
       '/v1/me': {
         get: { summary: 'Your profile', security: bearer, responses: { 200: ok('Profile'), 401: error } },
         delete: { summary: 'Delete your account (irreversible)', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['confirmation'], properties: { confirmation: { type: 'string', const: 'delete my account' } } } } } }, responses: { 200: ok('Deleted'), 400: error, 401: error } },
@@ -1183,6 +1209,21 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
         throw error;
       }
     }
+    // A person signs in from an agent with the code Open Media emails them (personSignIn.ts).
+    if (request.method === 'POST' && path.startsWith('/v1/auth/')) {
+      const body = await request.json().catch(() => ({}));
+      try {
+        if (path === '/v1/auth/email-code') return json(await requestSignInCode(env, origin, body), 0);
+        if (path === '/v1/auth/verify') return json(await verifySignInCode(env, origin, body), 0);
+        if (path === '/v1/auth/refresh') return json(await refreshSignIn(env, origin, body), 0);
+        if (path === '/v1/auth/sign-out') return json(await signOut(env, request.headers.get('authorization')?.replace(/^Bearer\s+/i, '')), 0);
+      } catch (error) {
+        if (!(error instanceof SignInError)) throw error;
+        const response = json({ error: { code: error.code, message: error.message } }, 0, error.status);
+        if (error.retryAfterSeconds) response.headers.set('retry-after', String(error.retryAfterSeconds));
+        return response;
+      }
+    }
     // Pages, Markdown and discovery documents for people and agents.
     const site = await handleSiteRequest(request);
     if (site) return site;
@@ -1236,6 +1277,7 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     const idempotencyKey = request.headers.get('idempotency-key')?.trim();
     if (idempotencyKey !== undefined && !uuid.test(idempotencyKey)) throw new AgentError(400, 'bad_request', 'Idempotency-Key must be a UUID.');
     if (request.method === 'GET' && path === '/v1/me') return json(await account.me(), 0);
+    if (request.method === 'PUT' && path === '/v1/me/profile') return json(await account.setUpProfile(body), 0);
     if (request.method === 'POST' && path === '/v1/me/posts') return json(await account.publish(body.body ?? body.text, idempotencyKey), 0, 201);
     const postMatch = path.match(/^\/v1\/me\/posts\/([^/]+)$/);
     if (request.method === 'DELETE' && postMatch) return json(await account.deletePost(decodeURIComponent(postMatch[1])), 0);

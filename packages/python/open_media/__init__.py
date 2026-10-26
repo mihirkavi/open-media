@@ -17,7 +17,7 @@ from urllib.request import Request, urlopen
 __all__ = ["OpenMedia", "OpenMediaError", "DEFAULT_BASE_URL"]
 __version__ = "0.1.0"
 
-DEFAULT_BASE_URL = "https://convo-mail-sync.convo-mail-sync.workers.dev"
+DEFAULT_BASE_URL = "https://api.openmedia.site"
 NETWORKS = ("open-media", "farcaster", "lens", "hive", "deso")
 
 
@@ -78,6 +78,25 @@ class OpenMedia:
         return self._get("/v1/about")
 
     # The person's account: needs their token
+    def request_sign_in_code(self, email: str) -> Dict[str, Any]:
+        """Step 1 of signing in: Open Media emails the person a code (new emails get a new account)."""
+        return self._send("POST", "/v1/auth/email-code", {"email": email})
+
+    def sign_in_with_code(self, email: str, code: str) -> Dict[str, Any]:
+        """Step 2: the code the person read from their email. The client then acts as them."""
+        session = self._send("POST", "/v1/auth/verify", {"email": email, "code": code})
+        self.token = session["access_token"]
+        return session
+
+    def refresh_session(self, refresh_token: str) -> Dict[str, Any]:
+        session = self._send("POST", "/v1/auth/refresh", {"refresh_token": refresh_token})
+        self.token = session["access_token"]
+        return session
+
+    def set_up_profile(self, display_name: str, handle: str) -> Dict[str, Any]:
+        """For a new account: the name and handle the person chose."""
+        return self._send("PUT", "/v1/me/profile", {"displayName": display_name, "handle": handle})
+
     def me(self) -> Dict[str, Any]:
         return self._get("/v1/me")
 

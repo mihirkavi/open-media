@@ -15,7 +15,7 @@ export interface WebAppEnv {
 }
 
 const appPages = new Set(['/', '/index.html', '/auth']);
-const appFiles = /^\/(?:_expo\/|assets\/|favicon\.ico$|metadata\.json$)/;
+const appFiles = /^\/(?:_expo\/|assets\/|brand\/|favicon\.ico$|metadata\.json$)/;
 
 export async function handleWebAppRequest(request: Request, env: WebAppEnv): Promise<Response | undefined> {
   const url = new URL(request.url);

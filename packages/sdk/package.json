@@ -10,7 +10,7 @@
   "files": ["dist", "README.md"],
   "sideEffects": false,
   "engines": { "node": ">=18" },
-  "homepage": "https://convo-mail-sync.convo-mail-sync.workers.dev/developers",
+  "homepage": "https://api.openmedia.site/developers",
   "repository": { "type": "git", "url": "git+https://github.com/mihirkavi/open-media.git", "directory": "packages/sdk" },
   "bugs": { "url": "https://github.com/mihirkavi/open-media/issues" },
   "keywords": ["open-media", "social", "farcaster", "lens", "hive", "deso", "feed", "search", "mcp", "sdk"],
