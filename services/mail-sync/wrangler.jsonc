@@ -11,6 +11,14 @@
     // Hosts that serve the web app (built by `npm run build:web` at the repository root).
     "WEB_APP_HOSTS": "openmedia.site,www.openmedia.site"
   },
+  // openmedia.site and www serve the web app; api.openmedia.site is the API and agent site. The
+  // workers.dev hostname stays on for installed apps, OAuth grants and existing links.
+  "routes": [
+    { "pattern": "openmedia.site", "custom_domain": true },
+    { "pattern": "www.openmedia.site", "custom_domain": true },
+    { "pattern": "api.openmedia.site", "custom_domain": true }
+  ],
+  "workers_dev": true,
   // The web app's static files. The Worker runs first and decides, by host and path, whether a
   // request is for the web app or for the API and agent site.
   "assets": {
