@@ -20,8 +20,9 @@ const env = {
   EXPO_PUBLIC_OPEN_MEDIA_API_URL: process.env.OPEN_MEDIA_API_URL ?? 'https://api.openmedia.site',
   EXPO_PUBLIC_SUPABASE_URL: process.env.EXPO_PUBLIC_SUPABASE_URL ?? fromFile('EXPO_PUBLIC_SUPABASE_URL'),
   EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? fromFile('EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY'),
-  // Open Media's own sign-in emails (services/mail-sync/src/authEmail.ts) carry a code as well as the link.
-  EXPO_PUBLIC_SIGN_IN_EMAIL_CODES: '1',
+  // Set SIGN_IN_EMAIL_CODES=1 once Supabase's send-email hook is on: Open Media's own emails
+  // (services/mail-sync/src/authEmail.ts) carry a code as well as the link; Supabase's default ones don't.
+  EXPO_PUBLIC_SIGN_IN_EMAIL_CODES: process.env.SIGN_IN_EMAIL_CODES === '1' ? '1' : '0',
 };
 if (!env.EXPO_PUBLIC_SUPABASE_URL?.startsWith('https://') || !env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY) {
   throw new Error('Set EXPO_PUBLIC_SUPABASE_URL (https) and EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY, or keep them in .env.local.');
