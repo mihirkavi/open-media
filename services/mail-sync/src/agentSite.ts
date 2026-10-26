@@ -18,7 +18,7 @@ export const siteVersion = '1.1.0';
 /** When the site's pages last changed (sitemap lastmod and Markdown frontmatter). */
 export const siteUpdated = '2026-10-25';
 const assets = 'https://raw.githubusercontent.com/mihirkavi/open-media/main/assets';
-const iconUrl = `${assets}/brand/logo-light.png`;
+export const iconUrl = `${assets}/brand/logo-light.png`;
 const coverUrl = `${assets}/brand/cover.png`;
 const aiBots = /(GPTBot|ChatGPT-User|OAI-SearchBot|ClaudeBot|Claude-User|Claude-SearchBot|anthropic-ai|PerplexityBot|Perplexity-User|Google-Extended|Applebot-Extended|CCBot|Bytespider|meta-externalagent)/i;
 
@@ -208,6 +208,10 @@ open-media search ethereum on lens --json
 ## Access tokens
 
 There are no API keys to request and no sales process. Public data is free and keyless; account access uses the person's own token, so an integration can never do more than that person can. Tokens expire after about an hour.
+
+## Commerce on ONDC (India)
+
+Open Media is building an ONDC seller app (Beckn, retail 1.2.0), described at [${origin}/ondc](${origin}/ondc). Sellers in India set up their store with \`GET\`/\`PUT ${origin}/v1/me/ondc\` or the \`get_ondc_store\` and \`set_ondc_store\` tools on \`/me/mcp\`. Their public INR products are then offered to ONDC buyer apps through signed \`search\` and \`select\` callbacks. Open Media is not yet registered on the ONDC network, and orders through ONDC come in a later phase.
 
 ## Sandbox and test mode
 

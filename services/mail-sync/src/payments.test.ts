@@ -69,7 +69,7 @@ const completed = JSON.stringify({ id: 'evt_1', type: 'checkout.session.complete
 
 test('a forged webhook is refused before anything is read', async () => {
   const fake = network({});
-  await assert.rejects(handlePaymentsWebhook(env, completed, sign(completed).replace(/v1=./, 'v1=0'), fake.impl), /Signature check failed/);
+  await assert.rejects(handlePaymentsWebhook(env, completed, sign(completed).replace(/v1=(.)/, (_, first: string) => `v1=${first === '0' ? '1' : '0'}`), fake.impl), /Signature check failed/);
   await assert.rejects(handlePaymentsWebhook(env, completed, null, fake.impl), /Signature check failed/);
   assert.equal(fake.calls.length, 0);
 });

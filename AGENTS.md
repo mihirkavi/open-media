@@ -21,3 +21,9 @@ Open Media ships as one app on web, iOS, and Android. A change is not done until
 - Skills live in `src/domain/agentSkills.ts`; run `npm run agent-plugin:sync` after changing them (a test fails if `agent-plugin/skills` drifts). Never edit the generated `SKILL.md` files.
 - Keep the version equal in `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`. Both read `agent-plugin/.mcp.json`: `type: http` and `headers` for Claude Code, `bearer_token_env_var` for Codex. Never add a portable root `plugin.json`; Codex then ignores the plugin's MCP servers.
 - WebMCP tools are data in `src/domain/webMcpTools.ts`, used by both the Worker's pages and the web app. Keep them read-only.
+
+## ONDC seller app
+
+- ADR 0015. Protocol code is in `services/mail-sync/src/ondc/`, store rules are in `src/domain/ondc.ts`, and the database is `supabase/migrations/20261028120000_ondc_stores.sql`.
+- ONDC keys exist only as Worker secrets (`npm run ondc:keys` prints them; never commit or paste them). Keep `crypto.test.ts` passing against ONDC's published signing example.
+- Never accept an ONDC order action until phase 2 is built. Unsupported actions must NACK with 40001. Callbacks go only to the buyer app's registered host.

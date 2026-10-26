@@ -6,8 +6,9 @@ import { SUPPORTED_SCOPES } from './events/tools.js';
 import { AgentAuthError, agentAuthMetadata, exchangeAssertion, jwtBearerGrant } from './agentAuth.js';
 import { agentFriendlyNotFound } from './agentSite.js';
 import { handleMailRequest, MailEnv } from './mailHandler.js';
+import { handleOndcRequest, isOndcPath, OndcEnv } from './ondc/http.js';
 
-type WorkerEnv = Env & MailEnv & EventsEnv;
+type WorkerEnv = Env & MailEnv & EventsEnv & OndcEnv;
 
 /** Public routes: OAuth owner sign-in, the signed plan calendar, event API docs, then mail sync and the public API. */
 const defaultHandler = {
@@ -58,6 +59,11 @@ const oauth = new OAuthProvider<WorkerEnv>({
  */
 async function handleRequest(request: Request, env: WorkerEnv, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
+  // ONDC buyer apps and the registry call these directly; they never go through OAuth.
+  if (isOndcPath(url.pathname)) {
+    const response = await handleOndcRequest(request, env, { waitUntil: (work) => ctx.waitUntil(work) });
+    if (response) return response;
+  }
   if (request.method === 'POST' && url.pathname === '/oauth/token') {
     const form = new URLSearchParams(await request.clone().text().catch(() => ''));
     if (form.get('grant_type') === jwtBearerGrant) {

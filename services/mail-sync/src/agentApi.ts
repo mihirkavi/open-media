@@ -23,6 +23,7 @@ import { networkSearches } from '../../../src/connectors/networkSearch';
 import { collapseRepeatedPosts, NetworkId, networks } from '../../../src/domain/networkPosts';
 import { explainFeedPost, FeedMode, SocialPost } from '../../../src/domain/posts';
 import { PostListing, validateListing } from '../../../src/domain/listings';
+import { validateOndcStore } from '../../../src/domain/ondc';
 import { isPaymentChain, onchainTransfer, Payment, paymentBreakdown, PaymentChain, PaymentRail, previewCharge } from '../../../src/domain/payments';
 import { maxPostLength, PublicPostRecord, socialPostFromPublic } from '../../../src/domain/publicPosts';
 import { parseSearchQuery, postMatchesSearch } from '../../../src/domain/searchQuery';
@@ -560,6 +561,19 @@ export class Account {
     return { payment: await this.payment(created.id), note: 'Approve this USDC transfer in your own wallet, then send its transaction hash. It is confirmed only after Open Media reads it on the network.' };
   }
 
+  // ONDC store (ADR 0015): the details ONDC buyer apps need to show this person's INR products.
+  async ondcStore() {
+    return { store: await this.rpc<object | null>('open_media_get_ondc_store', {}) };
+  }
+
+  async setOndcStore(input: unknown) {
+    if (!input || typeof input !== 'object') throw new AgentError(400, 'bad_request', 'Send the store details as an object.');
+    const { store, errors } = validateOndcStore(input as Record<string, unknown>);
+    const first = Object.values(errors)[0];
+    if (first) throw new AgentError(400, 'bad_request', first);
+    return { store: await this.rpc<object>('open_media_set_ondc_store', { p_store: store }) };
+  }
+
   // Tips and paid posts (ADR 0013, phase 6).
   async setTips(enabled: unknown) {
     if (typeof enabled !== 'boolean') throw new AgentError(400, 'bad_request', 'Send enabled: true or false.');
@@ -861,6 +875,12 @@ function registerAccountTools(server: McpServer, account: Account) {
   tool(server, 'submit_payment_transaction', { title: 'Report a USDC transaction', description: 'After the person’s wallet sent the USDC transfer, pass its transaction hash. Open Media then checks it on the network; it is not paid until that check passes.', input: { paymentId: z.string(), txHash: z.string() }, readOnly: false }, (args) => account.submitTransaction(String(args.paymentId), args.txHash));
   tool(server, 'check_payment', { title: 'Check a payment again', description: 'Re-check a USDC payment on the network, or read a card payment’s status after the person paid on Stripe.', input: { paymentId: z.string() }, readOnly: false }, (args) => account.checkPayment(String(args.paymentId)));
   tool(server, 'start_payout_setup', { title: 'Set up getting paid by card', description: 'Returns a Stripe link for the person to open themselves to set up payouts. Stripe collects bank and tax details; never ask the person for them.', input: {}, readOnly: false }, () => account.startPayouts());
+  tool(server, 'get_ondc_store', { title: 'Get the ONDC store', description: 'The person’s ONDC store for selling to ONDC buyer apps in India (store details, whether it is on, how many INR products are offered). Null when they have none.', input: {}, readOnly: true }, () => account.ondcStore());
+  tool(server, 'set_ondc_store', { title: 'Save the ONDC store', description: 'Saves the person’s ONDC store. Turning it on (enabled: true) needs every field and declarationAccepted: true, which only the person can confirm; their phone, email and address are then shown to ONDC buyers. Confirm with the person first. Orders through ONDC are not accepted yet.', input: {
+    enabled: z.boolean(), storeName: z.string().max(80), category: z.enum(['ONDC:RET12', 'ONDC:RET13', 'ONDC:RET14', 'ONDC:RET15', 'ONDC:RET16']), building: z.string().max(120), locality: z.string().max(120),
+    city: z.string().max(60), state: z.string().max(60), areaCode: z.string(), stdCode: z.string(), gps: z.string(), phone: z.string(), email: z.string(),
+    timeToShip: z.enum(['PT24H', 'P2D', 'P3D', 'P5D', 'P7D']).optional(), returnable: z.boolean().optional(), returnWindow: z.enum(['P7D', 'P10D', 'P15D', 'P30D']).optional(), cancellable: z.boolean().optional(), declarationAccepted: z.boolean(),
+  }, readOnly: false }, (args) => account.setOndcStore(args));
   tool(server, 'set_tips', { title: 'Turn tips on or off', description: 'Whether people can tip the person on their posts. Confirm with the person first.', input: { enabled: z.boolean() }, readOnly: false }, (args) => account.setTips(args.enabled));
   tool(server, 'remove_wallet', { title: 'Remove a linked wallet', description: 'Unlink one of the person’s wallets (by id from get_payment_setup). Linking a wallet needs the person’s own signature in the app.', input: { walletId: z.string() }, readOnly: false }, (args) => account.removeWallet(String(args.walletId)));
   tool(server, 'publish_paid_post', { title: 'Publish a paid post', description: 'Publish a post with a free public preview and a paid part only buyers can read. Confirm the preview, the paid text and the price with the person first.', input: { preview: z.string().min(1).max(maxPostLength), paidText: z.string().min(1).max(10_000), priceMinor: z.number().int().min(50).max(100_000_000), currency: z.string().length(3).optional() }, readOnly: false }, (args) => account.publishPaidPost(args));
@@ -1032,6 +1052,14 @@ function baseOpenApi(origin: string) {
       '/v1/me/payments/setup': { get: { summary: 'Your card payouts, linked wallets, tips setting, fees and what this server supports', security: bearer, responses: { 200: ok('Payment setup'), 401: error } } },
       '/v1/me/payments/payouts': { post: { summary: 'Start or continue Stripe payouts setup (returns a link to open)', security: bearer, responses: { 201: ok('Stripe link'), 401: error, 503: error } } },
       '/v1/me/payments/payouts/refresh': { post: { summary: 'Re-read your Stripe account status', security: bearer, responses: { 200: ok('Payment setup'), 401: error, 404: error } } },
+      '/v1/me/ondc': {
+        get: { summary: 'Your ONDC store (ADR 0015), or null', security: bearer, responses: { 200: ok('ONDC store'), 401: error } },
+        put: { summary: 'Save your ONDC store. Turning it on needs every detail and the declaration; your phone, email and address are then shown to ONDC buyers. Orders through ONDC are not accepted yet.', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['enabled'], properties: {
+          enabled: { type: 'boolean' }, storeName: { type: 'string' }, category: { type: 'string', enum: ['ONDC:RET12', 'ONDC:RET13', 'ONDC:RET14', 'ONDC:RET15', 'ONDC:RET16'] }, building: { type: 'string' }, locality: { type: 'string' }, city: { type: 'string' }, state: { type: 'string' },
+          areaCode: { type: 'string', pattern: '^[1-9][0-9]{5}$' }, stdCode: { type: 'string', examples: ['080'] }, gps: { type: 'string', examples: ['12.9716,77.5946'] }, phone: { type: 'string' }, email: { type: 'string', format: 'email' },
+          timeToShip: { type: 'string', enum: ['PT24H', 'P2D', 'P3D', 'P5D', 'P7D'] }, returnable: { type: 'boolean' }, returnWindow: { type: 'string', enum: ['P7D', 'P10D', 'P15D', 'P30D'] }, cancellable: { type: 'boolean' }, declarationAccepted: { type: 'boolean' },
+        } } } } }, responses: { 200: ok('ONDC store'), 400: error, 401: error } },
+      },
       '/v1/me/payments/tips': { put: { summary: 'Turn tips on or off', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['enabled'], properties: { enabled: { type: 'boolean' } } } } } }, responses: { 200: ok('Tips setting'), 400: error, 401: error } } },
       '/v1/me/payments': {
         get: { summary: 'Payments you sent and received', security: bearer, parameters: [{ name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 200 } }], responses: { 200: ok('Payments'), 401: error } },
@@ -1249,6 +1277,8 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     const checkMatch = path.match(/^\/v1\/me\/payments\/([^/]+)\/check$/);
     if (request.method === 'POST' && checkMatch) return paymentProgress(await account.checkPayment(decodeURIComponent(checkMatch[1])), origin);
     if (request.method === 'PUT' && path === '/v1/me/payments/tips') return json(await account.setTips(body.enabled), 0);
+    if (request.method === 'GET' && path === '/v1/me/ondc') return json(await account.ondcStore(), 0);
+    if (request.method === 'PUT' && path === '/v1/me/ondc') return json(await account.setOndcStore(body), 0);
     if (request.method === 'POST' && path === '/v1/me/paid-posts') return json(await account.publishPaidPost(body, idempotencyKey), 0, 201);
     const postOptionsMatch = path.match(/^\/v1\/me\/posts\/([^/]+)\/payment-options$/);
     if (request.method === 'GET' && postOptionsMatch) return json(await account.postPaymentOptions(decodeURIComponent(postOptionsMatch[1])), 0);

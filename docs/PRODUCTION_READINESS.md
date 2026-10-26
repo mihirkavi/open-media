@@ -17,6 +17,21 @@ This checklist defines “production ready” for the current onboarding private
 - [x] Local browser flow: magic-link onboarding, callback cleanup, profile creation, profile search, direct conversation, send, realtime receive, account export, and responsive layout.
 - [x] Latest signed iOS Store build finished successfully: build 9, EAS `f5916bd3-c316-487a-bbed-f6085bc38fcc`.
 
+## ONDC seller app (ADR 0015; built 2026-10-26, not deployed)
+
+- [x] Signing matches ONDC's published example. on_subscribe decryption matches ONDC's Node reference. 13 pgTAP checks pass. Worker tests pass. `npm run ondc:e2e` against the local database: signed search, then on_search with 1 store and 1 item; select, then a ₹5,000.00 quote; confirm, then NACK.
+- [x] On `wrangler dev`, the derived public keys and the signed site-verification page match, and an unregistered buyer is refused with 10001 after a real pre-production registry lookup.
+- [x] Store screen checked on web (desktop and 375 px, light and dark) and on the iOS Simulator (keyboard, number pad, accessibility labels). Android not run: the Mac has JDK 11, and Android needs 17.
+- [ ] Owner, before production:
+  1. apply `20261028120000_ondc_stores.sql`;
+  2. deploy the Worker;
+  3. give the API a custom domain (the ONDC `subscriber_id`);
+  4. register on portal.ondc.org and request pre-production access;
+  5. run `npm run ondc:keys` and set the secrets;
+  6. submit `npm run ondc:subscribe` to pre-production;
+  7. pass ONDC's log validation and certification flows;
+  8. sign the Network Participant Agreement.
+
 ## Production deploy of 2026-10-25 (Phases 5 to 7 and agent readiness)
 
 - [x] Applied `20261027120000_payments.sql` and `20261027130000_creator_payments.sql` with `npx supabase db push --linked` after a dry run; all 11 database suites (193 checks) passed locally first.
