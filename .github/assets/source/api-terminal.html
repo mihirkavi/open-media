@@ -1,0 +1,39 @@
+<!doctype html>
+<!-- "Why this?" over the public API, as a terminal card. The output is real (2026-10-26), trimmed to two posts;
+     refresh it with the command shown when the API's fields change. Render with render.mjs. -->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: 'Inter'; font-weight: 500; src: url('../../../node_modules/@expo-google-fonts/inter/500Medium/Inter_500Medium.ttf'); }
+  html, body { margin: 0; }
+  body { width: 1600px; height: 760px; background: #F5F4F0; display: flex; align-items: center; justify-content: center; }
+  .win { width: 1360px; border-radius: 18px; background: #111111; box-shadow: 0 30px 80px rgba(0,0,0,.18), 0 0 0 1px rgba(0,0,0,.06); overflow: hidden; }
+  .bar { height: 52px; display: flex; align-items: center; padding: 0 20px; gap: 9px; border-bottom: 1px solid #232321; position: relative; }
+  .bar i { width: 13px; height: 13px; border-radius: 50%; background: #3A3A37; }
+  .bar span { position: absolute; left: 0; right: 0; text-align: center; font: 500 15px Inter, sans-serif; color: #8A8A83; }
+  pre { margin: 0; padding: 30px 38px 36px; font: 20px/1.62 'SF Mono', Menlo, monospace; color: #F2F2EE; white-space: pre; }
+  .p { color: #8A8A83; } .c { color: #F2F2EE; } .k { color: #9CC9FF; } .s { color: #B7E4A8; } .m { color: #6E6E68; }
+</style>
+</head>
+<body>
+<div class="win">
+  <div class="bar"><i></i><i></i><i></i><span>api.openmedia.site · no key needed</span></div>
+<pre><span class="p">$</span> curl -s "https://api.openmedia.site/v1/feed?mode=raw" \
+    | jq '.data[] | {network, why: .why.used, notUsed: .why.notUsed}'
+
+{
+  <span class="k">"network"</span>: <span class="s">"farcaster"</span>,
+  <span class="k">"why"</span>: [<span class="s">"Newest public cast in the /farcaster channel on Farcaster"</span>,
+          <span class="s">"Posted recently"</span>, <span class="s">"Raw chronological order"</span>],
+  <span class="k">"notUsed"</span>: [<span class="s">"Private messages"</span>, <span class="s">"Exact location"</span>, <span class="s">"Sensitive-trait inference"</span>]
+}
+{
+  <span class="k">"network"</span>: <span class="s">"hive"</span>,
+  <span class="k">"why"</span>: [<span class="s">"Newest public post on Hive, in Actifit"</span>, <span class="s">"Posted recently"</span>, <span class="s">"Raw chronological order"</span>],
+  <span class="k">"notUsed"</span>: [<span class="s">"Private messages"</span>, <span class="s">"Exact location"</span>, <span class="s">"Sensitive-trait inference"</span>]
+}
+<span class="m">…</span></pre>
+</div>
+</body>
+</html>

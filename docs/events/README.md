@@ -11,7 +11,7 @@ It is built agent-agnostic. Your events, plans, preferences and feedback live in
 The production endpoint is the single Open Media Worker:
 
 ```
-https://convo-mail-sync.convo-mail-sync.workers.dev/mcp
+https://api.openmedia.site/mcp
 ```
 
 It uses OAuth 2.1. When an assistant connects, a sign-in page asks for the **owner access code**, which is stored in the owner's macOS Keychain:
@@ -22,7 +22,7 @@ security find-generic-password -s open-media-events-owner-code -a owner -w
 
 - **ChatGPT:** Settings → Apps & Connectors → Advanced settings → turn on Developer mode. Then Create, set the MCP server URL above, and choose OAuth authentication. Approve with the access code.
 - **Claude (claude.ai or desktop):** Settings → Connectors → Add custom connector, then paste the URL.
-- **Claude Code:** `claude mcp add --transport http open-media-events https://convo-mail-sync.convo-mail-sync.workers.dev/mcp`
+- **Claude Code:** `claude mcp add --transport http open-media-events https://api.openmedia.site/mcp`
 
 Whether a connector can be used during ChatGPT **voice** conversations depends on ChatGPT's current voice features; this project has not verified it. The tools return a short `voice_summary` for spoken answers either way.
 

@@ -1,44 +1,67 @@
-# Open Media plugin for Claude Code and Codex
+<p align="center">
+  <img alt="Open Media" src="assets/logo.png" width="72">
+</p>
 
-This folder is the Open Media agent plugin: two skills and three MCP servers that let an AI coding or chat agent read and act on [Open Media](https://github.com/mihirkavi/open-media), the open social app.
+<h1 align="center">Open Media for Claude Code and Codex</h1>
 
-## What it adds
+<p align="center">
+  <strong>Give your AI agent the open social web.</strong><br>
+  One install adds three MCP servers and two skills, so an agent can read the feed, search every network, find events and, with your permission, act for you on <a href="https://github.com/mihirkavi/open-media">Open Media</a>.
+</p>
 
-- **MCP servers** (Streamable HTTP)
-  - `open-media`: public feed, cross-network search (Open Media, Farcaster, Lens, Hive, DeSo), profiles, timelines and Bay Area events. No key.
-  - `open-media-docs`: search and read Open Media's API and agent documentation. No key.
-  - `open-media-account`: act for the person with their own token: posts, messages, contacts, listings, privacy, payments (always previewed and confirmed first).
-- **Skills**
-  - `open-media`: when and how to use Open Media, and the rules for acting for a person.
-  - `open-media-payments`: paying, tipping and unlocking safely.
+<p align="center">
+  <a href="https://api.openmedia.site/agents">For agents</a> ·
+  <a href="https://api.openmedia.site/docs">API docs</a> ·
+  <a href="https://api.openmedia.site/privacy">Privacy</a>
+</p>
 
 ## Install
 
-Claude Code:
+**Claude Code**
 
-```
+```text
 /plugin install open-media --marketplace mihirkavi/open-media
 ```
 
-Codex:
+**Codex**
 
-```
+```bash
 codex plugin marketplace add mihirkavi/open-media
 codex plugin add open-media@open-media
 ```
 
-## The account server
+Then just ask: *"What's new on Farcaster and Lens today?"*, *"Find AI founder events this week"*, or *"Post this to Open Media."*
 
-The public and docs servers need nothing. For `open-media-account`, the person copies an access token from the Open Media app (Settings, then Developers and agents) and sets it as `OPEN_MEDIA_TOKEN` in the environment the agent runs in. Tokens expire after about an hour. Without one, the account tools answer 401 and everything else keeps working.
+## What it adds
 
-## Files
+| | Name | What it does | Key |
+| --- | --- | --- | :---: |
+| 🔌 MCP | `open-media` | Public feed, cross-network search (Open Media, Farcaster, Lens, Hive, DeSo), profiles, timelines and Bay Area events | None |
+| 🔌 MCP | `open-media-docs` | Search and read Open Media's API and agent documentation | None |
+| 🔌 MCP | `open-media-account` | Act as the person: posts, messages, contacts, listings, privacy and payments | Your token |
+| 📘 Skill | `open-media` | When and how to use Open Media, and the rules for acting for a person | — |
+| 📘 Skill | `open-media-payments` | Paying, tipping and unlocking safely | — |
 
-- `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`: the Claude Code and Codex manifests. (Those two folders hold only their manifest, as both tools require.)
+## Acting as you
+
+The public and docs servers need nothing. For `open-media-account`, the agent needs your access token in `OPEN_MEDIA_TOKEN`. Any of these works:
+
+1. **Email code.** The agent asks for your email, Open Media sends you a code, and you tell the agent the code (`request_sign_in_code`, then `sign_in_with_code`).
+2. **Command line.** `open-media login you@example.com`, then `export OPEN_MEDIA_TOKEN=$(open-media token)` (see [packages/cli](../packages/cli)).
+3. **The app.** Copy a token from **Settings → Developers and agents**.
+
+Tokens expire after about an hour. Without one, the account tools answer 401 and everything else keeps working. Money-moving tools always preview the recipient, amount and fees and need your explicit confirmation.
+
+<details>
+<summary><strong>Files, and notes for agents editing this folder</strong></summary>
+<br>
+
+- `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`: the Claude Code and Codex manifests. Each folder holds only its manifest, as both tools require. Keep the version the same in both.
 - `.mcp.json`: the MCP servers, read by both. The account server carries the token two ways: `headers` with `${OPEN_MEDIA_TOKEN}` for Claude Code, and `bearer_token_env_var` for Codex.
 - There is deliberately no portable root `plugin.json`: when one is present, Codex ignores the servers in `.codex-plugin/plugin.json`.
-- `skills/`: generated from `src/domain/agentSkills.ts` with `npm run agent-plugin:sync`; the Worker serves the same files at `/.well-known/agent-skills/`.
+- `skills/`: generated from `src/domain/agentSkills.ts` with `npm run agent-plugin:sync`. Edit the source, never the generated `SKILL.md` files. The Worker serves the same files at `/.well-known/agent-skills/`.
 - `assets/`: the logo.
 
-## Notes for agents editing this folder
+</details>
 
-Edit skills in `src/domain/agentSkills.ts`, never the generated `SKILL.md` files, then run `npm run agent-plugin:sync`. Keep the version the same in both manifests. Privacy: https://api.openmedia.site/privacy.
+<sub>Part of <a href="https://github.com/mihirkavi/open-media">Open Media</a> · MIT licence</sub>

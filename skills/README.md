@@ -1,5 +1,7 @@
 # Open Media agent skills
 
+> Teach any agent to plan your week with [Open Media Events](../docs/events/README.md): find events, check your calendar, hold time and hand off registration, without ever pretending you are registered.
+
 These are reusable instructions for agents that use the Open Media Events MCP server (`/mcp` on the production Worker). Each skill covers one job, so an agent can load discovery without the registration rules.
 
 | Skill | Use it for |

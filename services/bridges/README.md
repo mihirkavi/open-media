@@ -1,5 +1,7 @@
 # Open Media chat bridges
 
+> **Bring WhatsApp, Signal, Instagram, Slack, Discord and more into Open Media's Messages** through open-source mautrix bridges. 🧪 Local setup only for now; production is an owner step that has not been done.
+
 WhatsApp and other chat apps join Open Media's Messages through [mautrix](https://docs.mau.fi/bridges/) bridges on a private Matrix homeserver (ADR 0011). This folder holds the Docker Compose stack; `scripts/bridges.ts` generates its configuration.
 
 ## How it fits together

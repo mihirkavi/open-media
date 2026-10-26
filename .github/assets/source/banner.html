@@ -1,0 +1,42 @@
+<!doctype html>
+<!-- README banner. Render with .github/assets/source/render.mjs; ?theme=dark gives the dark version. -->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: 'Instrument Serif'; src: url('../../../node_modules/@expo-google-fonts/instrument-serif/400Regular/InstrumentSerif_400Regular.ttf'); }
+  @font-face { font-family: 'Instrument Serif'; font-style: italic; src: url('../../../node_modules/@expo-google-fonts/instrument-serif/400Regular_Italic/InstrumentSerif_400Regular_Italic.ttf'); }
+  @font-face { font-family: 'Inter'; font-weight: 400; src: url('../../../node_modules/@expo-google-fonts/inter/400Regular/Inter_400Regular.ttf'); }
+  @font-face { font-family: 'Inter'; font-weight: 500; src: url('../../../node_modules/@expo-google-fonts/inter/500Medium/Inter_500Medium.ttf'); }
+  @font-face { font-family: 'Inter'; font-weight: 600; src: url('../../../node_modules/@expo-google-fonts/inter/600SemiBold/Inter_600SemiBold.ttf'); }
+  :root { --bg: #F5F4F0; --card: #FFFFFF; --text: #111111; --muted: #5C5C57; --faint: #7E7E78; --line: #E6E6E1; --dot: #2F9E5B; }
+  :root.dark { --bg: #0A0A0A; --card: #141413; --text: #F6F6F2; --muted: #B4B4AD; --faint: #8A8A83; --line: #272725; --dot: #4CC27A; }
+  html, body { margin: 0; }
+  body { width: 1600px; height: 600px; background: var(--bg); color: var(--text); font-family: Inter, sans-serif;
+         display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+  .brand { display: flex; align-items: center; gap: 12px; font-weight: 600; font-size: 22px; letter-spacing: -0.2px; }
+  .brand img { width: 30px; height: 30px; }
+  .pill { margin-top: 30px; display: inline-flex; align-items: center; gap: 9px; padding: 7px 16px; border: 1px solid var(--line);
+          background: var(--card); border-radius: 999px; font-size: 16px; font-weight: 500; color: var(--muted); }
+  .pill i { width: 7px; height: 7px; border-radius: 50%; background: var(--dot); }
+  h1 { margin: 22px 0 0; font-family: 'Instrument Serif', serif; font-weight: 400; font-size: 118px; line-height: 1; letter-spacing: -3px; }
+  h1 em { font-style: italic; }
+  p { margin: 26px 0 0; font-size: 25px; line-height: 1.45; color: var(--muted); }
+  .nets { margin-top: 34px; display: flex; gap: 10px; }
+  .nets span { padding: 8px 16px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); font-size: 16px; font-weight: 500; color: var(--muted); }
+</style>
+</head>
+<body>
+  <div class="brand"><img id="logo" src="../logo-light.png" alt="">Open Media</div>
+  <div class="pill"><i></i>Open source · Public beta</div>
+  <h1>Your social world, <em>together.</em></h1>
+  <p>One feed, one inbox, one post to every network. You decide what you see.</p>
+  <div class="nets"><span>Farcaster</span><span>Lens</span><span>Hive</span><span>DeSo</span><span>Email</span><span>Open Media</span></div>
+  <script>
+    if (new URLSearchParams(location.search).get('theme') === 'dark') {
+      document.documentElement.classList.add('dark');
+      document.getElementById('logo').src = '../logo-dark.png';
+    }
+  </script>
+</body>
+</html>

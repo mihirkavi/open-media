@@ -1,5 +1,14 @@
 # Open Media mail-sync service
 
+> **The one Cloudflare Worker behind Open Media:** email (IMAP, POP and SMTP), the public and account API, MCP servers, cross-posting, chat-bridge control and Open Media Events. Live at `https://api.openmedia.site` ([health](https://api.openmedia.site/health)).
+
+| Start here | |
+| --- | --- |
+| Run it locally | `npm run local` from the repository root |
+| Deploy | `npm run worker:deploy`, after applying Supabase migrations |
+| Public API | [PUBLIC_API.md](PUBLIC_API.md) |
+| Events | [docs/events](../../docs/events/README.md) |
+
 This Cloudflare Worker is the only component allowed to handle reusable mailbox credentials. The mobile/web client sends a mailbox configuration over HTTPS; the Worker validates it against the real IMAP or POP server (and the SMTP server, when sending is enabled), encrypts the password with AES-256-GCM, imports recent mail, and sends replies. The same Worker also serves the public read API ([PUBLIC_API.md](PUBLIC_API.md)) and Open Media Events.
 
 ## Local run
