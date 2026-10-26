@@ -66,6 +66,8 @@
     "test": "node --import tsx --test src/**/*.test.ts src/connectors/publishing/*.test.ts plugins/*.test.ts",
     "test:db": "supabase test db",
     "export:web": "expo export --platform web --output-dir .expo-dist",
+    "build:web": "node --import tsx scripts/build-web-production.ts",
+    "deploy": "npm run build:web && npm run worker:deploy --prefix services/mail-sync",
     "check": "npm run typecheck && npm test && npm run typecheck --prefix services/mail-sync && npm test --prefix services/mail-sync && npm run export:web && npm run packages:test",
     "mail:check": "npm run check-mailbox --prefix services/mail-sync",
     "agent-plugin:sync": "node --import tsx scripts/sync-agent-plugin.ts",

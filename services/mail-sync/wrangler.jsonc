@@ -7,7 +7,16 @@
   "vars": {
     "CONVO_APP_ORIGIN": "*",
     "EVENTS_OWNER_USER_ID": "owner",
-    "EVENTS_PUBLIC_ORIGIN": "https://convo-mail-sync.convo-mail-sync.workers.dev"
+    "EVENTS_PUBLIC_ORIGIN": "https://convo-mail-sync.convo-mail-sync.workers.dev",
+    // Hosts that serve the web app (built by `npm run build:web` at the repository root).
+    "WEB_APP_HOSTS": "openmedia.site,www.openmedia.site"
+  },
+  // The web app's static files. The Worker runs first and decides, by host and path, whether a
+  // request is for the web app or for the API and agent site.
+  "assets": {
+    "directory": "../../.web-dist",
+    "binding": "ASSETS",
+    "run_worker_first": true
   },
   // Open Media Events (Layer 1): canonical events, plans and preferences.
   "d1_databases": [

@@ -7,8 +7,9 @@ import { AgentAuthError, agentAuthMetadata, exchangeAssertion, jwtBearerGrant } 
 import { agentFriendlyNotFound } from './agentSite.js';
 import { handleMailRequest, MailEnv } from './mailHandler.js';
 import { handleOndcRequest, isOndcPath, OndcEnv } from './ondc/http.js';
+import { handleWebAppRequest, WebAppEnv } from './webApp.js';
 
-type WorkerEnv = Env & MailEnv & EventsEnv & OndcEnv;
+type WorkerEnv = Env & MailEnv & EventsEnv & OndcEnv & WebAppEnv;
 
 /** Public routes: OAuth owner sign-in, the signed plan calendar, event API docs, then mail sync and the public API. */
 const defaultHandler = {
@@ -59,6 +60,8 @@ const oauth = new OAuthProvider<WorkerEnv>({
  */
 async function handleRequest(request: Request, env: WorkerEnv, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
+  const webApp = await handleWebAppRequest(request, env);
+  if (webApp) return webApp;
   // ONDC buyer apps and the registry call these directly; they never go through OAuth.
   if (isOndcPath(url.pathname)) {
     const response = await handleOndcRequest(request, env, { waitUntil: (work) => ctx.waitUntil(work) });
