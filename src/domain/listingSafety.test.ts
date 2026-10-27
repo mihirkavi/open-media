@@ -17,6 +17,8 @@ test('prohibited categories are held and regulated ones get a closer look', () =
   assert.equal(stateFor(ruleReasons({ ...base, title: 'Rolex replica', body: 'AAA quality' })), 'held');
   assert.equal(stateFor(ruleReasons({ ...base, title: 'Glock pistol' })), 'held');
   assert.equal(stateFor(ruleReasons({ ...base, title: 'Guaranteed returns on crypto signals' })), 'held');
+  assert.equal(stateFor(ruleReasons({ ...base, title: 'Account access', body: 'I will get into anyone’s Instagram account for you' })), 'held');
+  assert.equal(stateFor(ruleReasons({ ...base, title: 'Account access', body: 'I will get into anyone\'s Instagram account for you' })), 'held');
   assert.equal(stateFor(ruleReasons({ ...base, title: 'Craft whiskey tasting' })), 'review');
   assert.equal(stateFor(ruleReasons({ ...base, kind: 'event', title: 'Summer camp for kids ages 6-10' })), 'review');
 });

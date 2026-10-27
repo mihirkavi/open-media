@@ -249,9 +249,15 @@ Where the build differs from the decision above:
   - exporting listing checks in a person's data export.
 - **Nobody can verify listings in production yet,** because identity verification (Stripe Identity) is not configured. Until it is, `review` listings wait for the operator.
 
+The minute job was run in `wrangler dev` against the real Workers AI model and the local database. Llama Guard flagged an account-hijacking offer as "non-violent crime such as fraud"; the listing went for a closer look, not hidden, and the seller got a message. Google Web Risk has not been called yet: it needs the owner's key.
+
 Verified locally on the web, signed in as a seller and as a second person:
 - a held listing, its card line and the statement of reasons in Messages;
 - an appeal by reply, and the operator queue and decision through the API;
 - repost-to-fix replacing the held listing, and the event form and card;
 - the listing report reasons;
 - phone width.
+
+iOS (iPhone 17 simulator, development build against the local stack): sign-in, the listing form, the event-time preview ("Event · Tue, Oct 27 · 6:30 PM") and the "Online" toggle. This found that the Feed didn't move focused listing fields above the keyboard, which is now fixed.
+
+Android (a Pixel 7 emulator on API 36, built with JDK 17): the development build compiles, installs and shows listing cards from the local stack. The signed-in composer was not driven on Android, because Expo's development menu button covers the Sign in button and opening it froze the emulator. A release build has no such button.
