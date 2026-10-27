@@ -9,6 +9,8 @@ values
 insert into public.profiles (id, handle, display_name, bio)
 values ('a1000000-0000-0000-0000-0000000000e1', 'ashaweaves', 'Asha', ''), ('b2000000-0000-0000-0000-0000000000e2', 'quietseller', 'Quiet', '');
 update public.profiles set visibility = 'private' where id = 'b2000000-0000-0000-0000-0000000000e2';
+-- An established seller: new accounts are limited to three listings in their first week (ADR 0016).
+update public.profiles set created_at = now() - interval '30 days' where id = 'a1000000-0000-0000-0000-0000000000e1';
 
 set local role authenticated;
 select set_config('request.jwt.claim.sub', 'a1000000-0000-0000-0000-0000000000e1', true);

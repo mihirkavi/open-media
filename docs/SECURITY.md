@@ -17,6 +17,7 @@ Please report vulnerabilities privately through [GitHub security advisories](htt
   - Server pages allow only their own inline scripts, by SHA-256 hash.
 - **Abuse limits.** Each IP is limited to about 120 API requests a minute; an agent identity adds its own bucket but never lifts the IP limit. Sign-in is limited to 10 requests a minute per IP and 3 code emails or checks a minute per address. Agent registration is limited to 5 a minute per IP. Request bodies over 256 KB are refused. Messages are capped at 60 a minute and 1,000 a day per person.
 - **Outbound connections.** Mailbox setup accepts only public addresses on standard mail ports, so it cannot be used to probe internal networks.
+- **Listings.** Every listing is checked in the background against the published [listing rules](https://api.openmedia.site/policies/listings): fixed rules, link reputation (Google Web Risk, when configured) and a content model that can only ask for a closer look. Held listings are seen only by their author, who gets the reason in Messages. Pages that verifiers cite are fetched only over https from public addresses, following checked redirects, with size and time limits. Agents that sign requests with Web Bot Auth are recognised; a signature never grants account access.
 
 ## Review of 2026-10-26
 
@@ -39,7 +40,7 @@ Two independent reviews covered the Worker and the database. Fixed:
 
 - **Messages are not end-to-end encrypted.** They are protected by database rules, so the operator could technically read them.
 - **Uploaded videos sit in a public storage bucket.** Anyone with a video's exact URL can fetch it, even after the post is removed or the profile is made private. The fix is signed URLs or a private bucket served through the Worker.
-- **Community moderation can be gamed.** Three reports hide a post, and sockpuppet accounts could hide someone's post.
+- **Community moderation is young.** Reports are weighted (verified people, track record, account age and coordination), but the thresholds are starting values to be tuned with real data, and identity verification isn't configured yet, so every account counts as unverified ([ADR 0016](adrs/0016-marketplace-trust-and-community-verification.md)).
 - **Sign-in emails** come from Supabase's shared sender, limited to about 2 an hour, until Open Media's own sender (`security@openmedia.site`) is turned on.
 - **Remaining dependency advisories** are in build tooling or in code paths the app does not call:
   - Expo's CLI (`node-forge`, Zod 3);

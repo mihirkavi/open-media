@@ -115,7 +115,8 @@ select public.open_media_report_post((public.open_media_public_posts(1, null, nu
 select is(jsonb_array_length(public.open_media_public_posts(20, null, null, 'alice')), 2, 'two distinct reports do not hide a post');
 select set_config('request.jwt.claim.sub', '50000000-0000-0000-0000-000000000005', true);
 select public.open_media_report_post((public.open_media_public_posts(1, null, null, 'alice')->0->>'id')::uuid, 'spam', '');
-select is(jsonb_array_length(public.open_media_public_posts(20, null, null, 'alice')), 1, 'the third distinct report hides the post from everyone');
+-- Reports are weighted signals (ADR 0016): three reports from brand-new accounts that joined together don't hide a post.
+select is(jsonb_array_length(public.open_media_public_posts(20, null, null, 'alice')), 2, 'three reports from brand-new accounts do not hide a post');
 
 -- Blocks hide authors from a signed-in viewer's feed
 select public.open_media_set_user_blocked('10000000-0000-0000-0000-000000000001', true);

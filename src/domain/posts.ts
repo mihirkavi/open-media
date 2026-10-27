@@ -73,6 +73,8 @@ export interface FeedExplanation {
   /** Published filters applied to the post's source before ranking. */
   filters: string[];
   notUsed: string[];
+  /** What verified people checked on a listing, when they did. */
+  checks?: string[];
 }
 
 const forbiddenSignals = ['Private messages', 'Exact location', 'Sensitive-trait inference'];
@@ -94,7 +96,9 @@ export function explainFeedPost(post: SocialPost, mode: FeedMode): FeedExplanati
         'Posted recently',
         'Selected by Relevant',
       ];
-  return { postId: post.id, mode, used, filters: post.eligibility?.filters ?? [], notUsed: forbiddenSignals };
+  // What verified people checked on a listing (ADR 0016). Not a ranking signal: shown so people can judge it.
+  const checks = post.listing?.checkedBy ? [`Checked by ${post.listing.checkedBy} verified ${post.listing.checkedBy === 1 ? 'person' : 'people'} against public pages they cited`] : [];
+  return { postId: post.id, mode, used, filters: post.eligibility?.filters ?? [], notUsed: forbiddenSignals, ...(checks.length ? { checks } : {}) };
 }
 
 /** Clips are short videos: at most this long when the source reports a duration. */

@@ -50,9 +50,10 @@
   "ai": {
     "binding": "AI"
   },
-  // Re-read upcoming planned events so changes (time, venue, cancellation) surface.
+  // Every four hours: re-read upcoming planned events so changes (time, venue, cancellation) surface.
+  // Every minute: marketplace checks, Open Media's notices and seller confirmations (ADR 0016).
   "triggers": {
-    "crons": ["17 */4 * * *"]
+    "crons": ["17 */4 * * *", "* * * * *"]
   },
   "ratelimits": [
     {

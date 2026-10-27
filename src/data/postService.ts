@@ -1,11 +1,12 @@
 import { getSupabaseClient } from '../auth/supabase';
+import type { ReportReason } from '../domain/listingSafety';
 import { deletePostVideoFiles } from './videoUpload';
 import { ListingRating, PostListing } from '../domain/listings';
 import { SocialPost } from '../domain/posts';
 import { StoredPostVideo } from '../domain/postVideo';
 import { isPublicPostRecord, maxPostLength, PublicPostRecord, socialPostFromPublic } from '../domain/publicPosts';
 
-export type PostReportReason = 'spam' | 'harassment' | 'other';
+export type PostReportReason = ReportReason;
 
 export interface PostPage {
   posts: SocialPost[];

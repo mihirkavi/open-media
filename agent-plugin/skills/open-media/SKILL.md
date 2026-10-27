@@ -18,7 +18,7 @@ Open Media is one open app for a person's social world: one feed across Open Med
 
 Prefer MCP. Public tools need no account:
 
-- MCP (public, no key): `https://api.openmedia.site/open/mcp` - get_feed, search, get_post, get_profile, get_person_timeline, find_upcoming_events, list_networks, find_setting, about_open_media, and sign-in: request_sign_in_code, sign_in_with_code, refresh_sign_in.
+- MCP (public, no key): `https://api.openmedia.site/open/mcp` - get_feed, search, get_post, get_profile, get_person_timeline, find_upcoming_events, get_listing_checks, get_transparency, list_networks, find_setting, about_open_media, and sign-in: request_sign_in_code, sign_in_with_code, refresh_sign_in.
 - MCP (the person's account): `https://api.openmedia.site/me/mcp` with `Authorization: Bearer <token>`.
 
 ## Signing the person in
@@ -37,3 +37,4 @@ Prefer MCP. Public tools need no account:
 3. Messages, email and contacts are private to the person. Never share them with anyone else.
 4. Posts from other networks are read through their public APIs; Open Media cannot read Instagram, X, LinkedIn or TikTok feeds.
 5. On HTTP 429, wait for the Retry-After seconds before retrying. Send an Idempotency-Key header on retried writes.
+6. Listings (products, services, apps, events) go live at once and are checked in the background against https://api.openmedia.site/policies/listings. List apps as a link to their official page, never a file download. If a listing needs fixing, Open Media messages the person; tell them to read that message.

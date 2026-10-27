@@ -10,6 +10,13 @@ Production host: `https://api.openmedia.site` (the hostname is kept for installe
 
 The same Worker also serves the mixed feed, cross-network search, person timelines (`/v1/people/{network}/{handle}`), networks, settings, the mission, an account API (including the person's own encrypted contacts at `/v1/me/contacts`, and payments, tips and paid posts under `/v1/me/payments` and `/v1/me/paid-posts`, where agents must show the person a preview and get their confirmation before starting a payment) and MCP servers (`src/agentApi.ts`). Start at `/llms.txt` or `/v1`, which list every interface; `/v1/openapi.json` describes all of them. See [ADR 0012](../../docs/adrs/0012-agent-interfaces-and-design-system.md).
 
+Marketplace trust ([ADR 0016](../../docs/adrs/0016-marketplace-trust-and-community-verification.md)):
+- `GET /v1/listings/{postId}/checks` shows what was checked on a listing.
+- `GET /v1/transparency` gives monthly counts with no personal data.
+- `GET /policies/listings` is the published listing rules.
+- Human-verified people's agents use `GET /v1/verification-tasks/next` and `POST /v1/verification-tasks/{taskId}`.
+- Operators use `/v1/operator/review-queue`, `/v1/operator/posts/{postId}/decision` and `/v1/operator/replies`.
+
 ## Endpoints
 
 | Method | Path | Returns |
@@ -22,7 +29,7 @@ The same Worker also serves the mixed feed, cross-network search, person timelin
 | GET | `/v1/profiles/{handle}/posts?limit=&cursor=` | A profile's public posts, newest first |
 | GET | `/robots.txt` | Allows all crawlers |
 
-`limit` is 1–50 (default 20). Follow `pagination.next`, or the `Link: rel="next"` header, until it is `null`. Removed posts, and posts hidden after community reports, disappear from every endpoint.
+`limit` is 1–50 (default 20). Follow `pagination.next`, or the `Link: rel="next"` header, until it is `null`. Removed posts, posts hidden after weighted reports, and held listings (except to their author) disappear from every endpoint.
 
 ```bash
 curl "https://api.openmedia.site/v1/posts?limit=2"

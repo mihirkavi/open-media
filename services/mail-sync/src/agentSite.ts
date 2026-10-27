@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { agentInterfaces, honestStatus, mission, philosophy, promise, promises, sourceRepository, surfaces, tagline } from '../../../src/domain/about';
 import { agentSkills, skillMarkdown } from '../../../src/domain/agentSkills';
 import { webMcpTools } from '../../../src/domain/webMcpTools';
+import { listingPolicyMarkdown } from '../../../src/domain/listingSafety';
 
 export const siteVersion = '1.1.0';
 /** When the site's pages last changed (sitemap lastmod and Markdown frontmatter). */
@@ -332,6 +333,11 @@ Public API requests are rate limited per IP address. Account requests act only a
 
 Questions: see [contact](${origin}/contact).
 `,
+  },
+  {
+    path: '/policies/listings', title: 'Open Media listing rules',
+    description: 'How products, services, apps and events on Open Media are checked: what is not allowed, what gets a closer look, how reports and community verification work, and what large sellers confirm.',
+    body: () => listingPolicyMarkdown(),
   },
   {
     path: '/pricing', title: 'Open Media pricing',

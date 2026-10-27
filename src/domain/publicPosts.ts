@@ -66,7 +66,7 @@ export function socialPostFromPublic(record: PublicPostRecord, supabaseUrl?: str
     } : {}),
     ...(isListing(record.listing) ? { listing: record.listing } : {}),
     ...(paidFrom(record.paid) ? { paid: paidFrom(record.paid) } : {}),
-    topics: record.listing ? [record.listing.kind === 'product' ? 'products' : 'services'] : [],
+    topics: record.listing ? [record.listing.kind === 'product' ? 'products' : record.listing.kind === 'event' ? 'events' : 'services'] : [],
     provenance: { connectorId: 'open-media', externalId: record.id },
     relevance: { followsAuthor: false, selectedInterestMatches: [] },
   };

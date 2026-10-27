@@ -11,8 +11,12 @@ import { handleWebAppRequest, WebAppEnv } from './webApp.js';
 import { AuthEmailEnv, handleSendEmailHook } from './authEmail.js';
 import { withSecurityHeaders } from './securityHeaders.js';
 import { PublicApiEnv, withinLimit } from './publicApi.js';
+import { MarketplaceEnv, runMarketplaceJobs } from './marketplace.js';
 
-type WorkerEnv = Env & MailEnv & EventsEnv & OndcEnv & WebAppEnv & AuthEmailEnv & PublicApiEnv;
+type WorkerEnv = Env & MailEnv & EventsEnv & OndcEnv & WebAppEnv & AuthEmailEnv & PublicApiEnv & MarketplaceEnv;
+
+/** Every minute: listing checks, statements of reasons and seller confirmations (ADR 0016). */
+export const marketplaceCron = '* * * * *';
 
 /** Public routes: OAuth owner sign-in, the signed plan calendar, event API docs, then mail sync and the public API. */
 const defaultHandler = {
@@ -107,7 +111,13 @@ export default {
     // The web app's own responses already carry their policy; everything else gets the common set.
     return response.headers.has('content-security-policy') ? response : withSecurityHeaders(response);
   },
-  scheduled: async (_controller: ScheduledController, env: WorkerEnv, ctx: ExecutionContext) => {
+  scheduled: async (controller: ScheduledController, env: WorkerEnv, ctx: ExecutionContext) => {
+    if (controller.cron === marketplaceCron) {
+      ctx.waitUntil(runMarketplaceJobs(env).then((done) => {
+        if (done.checked || done.notices || done.confirmed || done.sellers) console.log(JSON.stringify({ event: 'marketplace_jobs', ...done }));
+      }).catch((error) => console.error(JSON.stringify({ event: 'marketplace_jobs_failed', message: error instanceof Error ? error.message : 'unknown' }))));
+      return;
+    }
     ctx.waitUntil(runScheduledRefresh(env));
   },
 } satisfies ExportedHandler<WorkerEnv>;
