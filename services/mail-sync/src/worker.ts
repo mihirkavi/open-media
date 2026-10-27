@@ -16,7 +16,7 @@ import { MarketplaceEnv, runMarketplaceJobs } from './marketplace.js';
 type WorkerEnv = Env & MailEnv & EventsEnv & OndcEnv & WebAppEnv & AuthEmailEnv & PublicApiEnv & MarketplaceEnv;
 
 /** Every minute: listing checks, statements of reasons and seller confirmations (ADR 0016). */
-export const marketplaceCron = '* * * * *';
+const marketplaceCron = '* * * * *';
 
 /** Public routes: OAuth owner sign-in, the signed plan calendar, event API docs, then mail sync and the public API. */
 const defaultHandler = {
