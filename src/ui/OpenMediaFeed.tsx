@@ -77,7 +77,7 @@ export function FeedView({ mode, onModeChange, posts, loading, error, hasMore, o
   const jumpToNew = () => { onShowPending?.(); scroller.current?.scrollTo({ y: 0, animated: true }); };
   return <View style={styles.screen}>
   {pendingCount > 0 && !atTop ? <Pressable accessibilityRole="button" accessibilityLabel={`Show ${pendingCount} new ${pendingCount === 1 ? 'post' : 'posts'}`} onPress={jumpToNew} style={styles.newPosts}><Ionicons name="arrow-up" size={14} color={colors.surface} /><Text style={styles.newPostsText}>{pendingCount} new {pendingCount === 1 ? 'post' : 'posts'}</Text></Pressable> : null}
-  <ScrollView ref={scroller} onScroll={onScroll} scrollEventThrottle={64} style={styles.screen} contentContainerStyle={styles.stream}>
+  <ScrollView ref={scroller} onScroll={onScroll} scrollEventThrottle={64} style={styles.screen} contentContainerStyle={styles.stream} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
     <View style={styles.header}><View style={styles.headerCopy}><Text style={styles.title}>Feed</Text><Text style={styles.subtitle}>{subtitle}</Text></View><FeedPicker value={mode} onChange={onModeChange} /></View>
     {showComposer ? <Composer viewer={viewer} open={composing} onOpenChange={onComposingChange} onPublished={onPublished} /> : null}
     {!error && unreachable.length ? <View style={styles.sourceNotice}><Text accessibilityLiveRegion="polite" style={styles.sourceNoticeText}>{unreachable.map((item) => sourceName(item.id)).join(', ')} {unreachable.length === 1 ? 'isn’t' : 'aren’t'} loading right now. Everything else is up to date.</Text><Pressable accessibilityRole="button" onPress={onRetry} style={styles.sourceNoticeButton}><Text style={styles.statusButtonText}>Retry</Text></Pressable></View> : null}
