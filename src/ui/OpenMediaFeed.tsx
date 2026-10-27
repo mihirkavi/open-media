@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Image, Linking, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Image, KeyboardAvoidingView, Linking, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { EventCard, ListingCard, ListingFields, PaidPostBlock, PaidPostFields, PaidPostInput } from './ListingCards';
 import { PaymentSheet, PaymentTarget } from './PaymentSheet';
 import { PersonLink, targetForPost, usePeople } from './people';
@@ -75,7 +75,8 @@ export function FeedView({ mode, onModeChange, posts, loading, error, hasMore, o
     if (canLoadMore && contentOffset.y + layoutMeasurement.height > contentSize.height - layoutMeasurement.height * 1.5) onLoadMore();
   };
   const jumpToNew = () => { onShowPending?.(); scroller.current?.scrollTo({ y: 0, animated: true }); };
-  return <View style={styles.screen}>
+  // iOS moves focused fields above the keyboard through the scroll view's insets; Android (edge to edge) needs the screen to shrink.
+  return <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'android' ? 'height' : undefined}>
   {pendingCount > 0 && !atTop ? <Pressable accessibilityRole="button" accessibilityLabel={`Show ${pendingCount} new ${pendingCount === 1 ? 'post' : 'posts'}`} onPress={jumpToNew} style={styles.newPosts}><Ionicons name="arrow-up" size={14} color={colors.surface} /><Text style={styles.newPostsText}>{pendingCount} new {pendingCount === 1 ? 'post' : 'posts'}</Text></Pressable> : null}
   <ScrollView ref={scroller} onScroll={onScroll} scrollEventThrottle={64} style={styles.screen} contentContainerStyle={styles.stream} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
     <View style={styles.header}><View style={styles.headerCopy}><Text style={styles.title}>Feed</Text><Text style={styles.subtitle}>{subtitle}</Text></View><FeedPicker value={mode} onChange={onModeChange} /></View>
@@ -87,7 +88,7 @@ export function FeedView({ mode, onModeChange, posts, loading, error, hasMore, o
     {!loading && !loadingMore && !error && !ordered.length ? <View style={styles.status}><Ionicons name="newspaper-outline" size={26} color={colors.textSecondary} /><Text style={styles.emptyTitle}>No public posts yet</Text><Text style={styles.statusText}>{viewer ? 'Be the first to share something.' : 'Sign in to share the first one.'}</Text></View> : null}
     {canLoadMore ? <Pressable accessibilityRole="button" onPress={onLoadMore} style={[styles.statusButton, styles.loadMore]}><Text style={styles.statusButtonText}>Load older posts</Text></Pressable> : null}
   </ScrollView>
-  </View>;
+  </KeyboardAvoidingView>;
 }
 
 function useUpcomingEvents(enabled: boolean): SocialPost[] {
