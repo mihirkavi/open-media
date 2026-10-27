@@ -56,15 +56,16 @@ async function beginAuthorization(request: Request, env: AuthEnv): Promise<Respo
   const challengeId = randomHex(32);
   const clientName = client.clientName?.slice(0, 120) || 'an AI client';
   await env.OAUTH_KV.put(`events-challenge:${challengeId}`, JSON.stringify({ oauthRequest, clientName }), { expirationTtl: CHALLENGE_TTL_SECONDS });
-  return html(renderForm(challengeId, clientName, grantedScopes(oauthRequest.scope)), 200, {
+  return html(renderForm(challengeId, clientName, grantedScopes(oauthRequest.scope), oauthRequest.redirectUri), 200, {
     'set-cookie': `${CHALLENGE_COOKIE}=${challengeId}; Path=/authorize; Max-Age=${CHALLENGE_TTL_SECONDS}; HttpOnly; Secure; SameSite=Lax`,
   });
 }
 
 async function finishAuthorization(request: Request, env: AuthEnv): Promise<Response> {
   const origin = request.headers.get('origin');
-  const expected = env.EVENTS_PUBLIC_ORIGIN ?? new URL(request.url).origin;
-  if (origin && origin !== expected && origin !== 'null') return html('Forbidden', 403);
+  // The form posts back to whichever host served it (api.openmedia.site or the original workers.dev).
+  const expected = [env.EVENTS_PUBLIC_ORIGIN, new URL(request.url).origin];
+  if (origin && !expected.includes(origin) && origin !== 'null') return html('Forbidden', 403);
   if (Number(request.headers.get('content-length') ?? '0') > 8_192) return html('Request too large', 413);
   // The sign-in form posts application/x-www-form-urlencoded.
   const form = new URLSearchParams(await request.text());
@@ -75,7 +76,7 @@ async function finishAuthorization(request: Request, env: AuthEnv): Promise<Resp
   if (!raw) return expiredPage();
   const challenge = JSON.parse(raw) as { oauthRequest: AuthRequest; clientName: string };
   const scopes = grantedScopes(challenge.oauthRequest.scope);
-  const retry = (message: string, status: number) => html(renderForm(challengeId, challenge.clientName, scopes, message), status);
+  const retry = (message: string, status: number) => html(renderForm(challengeId, challenge.clientName, scopes, challenge.oauthRequest.redirectUri, message), status);
 
   if (form.get('approve') !== 'yes') return retry('Tick the box to approve this connection.', 400);
   if (!(await allowAttempt(request, env))) return retry('Too many attempts. Try again in 15 minutes.', 429);
@@ -109,7 +110,12 @@ async function allowAttempt(request: Request, env: AuthEnv): Promise<boolean> {
   return true;
 }
 
-function renderForm(challengeId: string, clientName: string, scopes: string[], error?: string): string {
+/** Where approval sends the connection, so a lookalike client name cannot hide an unknown destination. */
+function redirectHost(redirectUri: string): string {
+  try { return new URL(redirectUri).host || redirectUri; } catch { return redirectUri; }
+}
+
+function renderForm(challengeId: string, clientName: string, scopes: string[], redirectUri: string, error?: string): string {
   const labels: Record<string, string> = {
     'events:read': 'Search events and read your saved plans, registrations and preferences',
     'events:write': 'Save events, place calendar holds you approve, record registration outcomes and update preferences you confirm',
@@ -117,6 +123,7 @@ function renderForm(challengeId: string, clientName: string, scopes: string[], e
   return page('Connect Open Media Events', `
 <h1>Connect Open Media Events to ${escapeHtml(clientName)}</h1>
 <p>Enter your owner access code to let this AI client use your event planner. The code stays on this server and is never shared with the AI client.</p>
+<p class="notice">Approving sends this connection to <strong>${escapeHtml(redirectHost(redirectUri))}</strong>. Continue only if that is the AI app you are connecting, such as claude.ai or chatgpt.com.</p>
 ${error ? `<p class="notice" role="alert">${escapeHtml(error)}</p>` : ''}
 <form method="post" action="/authorize/complete">
   <input type="hidden" name="challenge" value="${challengeId}">

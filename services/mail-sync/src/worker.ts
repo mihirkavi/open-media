@@ -9,8 +9,10 @@ import { handleMailRequest, MailEnv } from './mailHandler.js';
 import { handleOndcRequest, isOndcPath, OndcEnv } from './ondc/http.js';
 import { handleWebAppRequest, WebAppEnv } from './webApp.js';
 import { AuthEmailEnv, handleSendEmailHook } from './authEmail.js';
+import { withSecurityHeaders } from './securityHeaders.js';
+import { PublicApiEnv, withinLimit } from './publicApi.js';
 
-type WorkerEnv = Env & MailEnv & EventsEnv & OndcEnv & WebAppEnv & AuthEmailEnv;
+type WorkerEnv = Env & MailEnv & EventsEnv & OndcEnv & WebAppEnv & AuthEmailEnv & PublicApiEnv;
 
 /** Public routes: OAuth owner sign-in, the signed plan calendar, event API docs, then mail sync and the public API. */
 const defaultHandler = {
@@ -62,11 +64,15 @@ const oauth = new OAuthProvider<WorkerEnv>({
 async function handleRequest(request: Request, env: WorkerEnv, ctx: ExecutionContext): Promise<Response> {
   const url = new URL(request.url);
   const webApp = await handleWebAppRequest(request, env);
-  if (webApp) return webApp;
+  if (webApp) return withSecurityHeaders(webApp, { webApp: true });
   // Supabase Auth hands every sign-in email to this signed hook (authEmail.ts).
   if (request.method === 'POST' && url.pathname === '/auth/hooks/send-email') return handleSendEmailHook(request, env);
   // ONDC buyer apps and the registry call these directly; they never go through OAuth.
   if (isOndcPath(url.pathname)) {
+    // Each signed ONDC request can trigger a registry lookup; cap them per IP.
+    if (request.method === 'POST' && !(await withinLimit(env.PUBLIC_API_RATE_LIMITER, `ondc:${request.headers.get('cf-connecting-ip') ?? 'unknown'}`))) {
+      return new Response(JSON.stringify({ message: { ack: { status: 'NACK' } }, error: { type: 'CORE-ERROR', code: '31001', message: 'Too many requests.' } }), { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '60' } });
+    }
     const response = await handleOndcRequest(request, env, { waitUntil: (work) => ctx.waitUntil(work) });
     if (response) return response;
   }
@@ -74,6 +80,9 @@ async function handleRequest(request: Request, env: WorkerEnv, ctx: ExecutionCon
     const form = new URLSearchParams(await request.clone().text().catch(() => ''));
     if (form.get('grant_type') === jwtBearerGrant) {
       const headers = { 'content-type': 'application/json', 'cache-control': 'no-store', 'access-control-allow-origin': '*' };
+      if (!(await withinLimit(env.REGISTRATION_RATE_LIMITER, `ip:${request.headers.get('cf-connecting-ip') ?? 'unknown'}`))) {
+        return new Response(JSON.stringify({ error: 'slow_down', error_description: 'Too many token requests. Wait a minute.' }), { status: 429, headers: { ...headers, 'retry-after': '60' } });
+      }
       try { return new Response(JSON.stringify(await exchangeAssertion(env, url.origin, form)), { headers }); }
       catch (error) {
         if (!(error instanceof AgentAuthError)) throw error;
@@ -93,7 +102,11 @@ async function handleRequest(request: Request, env: WorkerEnv, ctx: ExecutionCon
 }
 
 export default {
-  fetch: (request: Request, env: WorkerEnv, ctx: ExecutionContext) => handleRequest(request, env, ctx),
+  fetch: async (request: Request, env: WorkerEnv, ctx: ExecutionContext) => {
+    const response = await handleRequest(request, env, ctx);
+    // The web app's own responses already carry their policy; everything else gets the common set.
+    return response.headers.has('content-security-policy') ? response : withSecurityHeaders(response);
+  },
   scheduled: async (_controller: ScheduledController, env: WorkerEnv, ctx: ExecutionContext) => {
     ctx.waitUntil(runScheduledRefresh(env));
   },

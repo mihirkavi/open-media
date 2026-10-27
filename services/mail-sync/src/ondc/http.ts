@@ -76,6 +76,7 @@ export function registryLookup(cfg: Config, fetchImpl: Fetch, now: () => number)
     const entry = (Array.isArray(entries) ? entries : []).find((item) => (item.ukId ?? item.unique_key_id) === uniqueKeyId && item.signing_public_key
       && (!item.valid_until || Date.parse(item.valid_until) > now()) && (!item.status || item.status === 'SUBSCRIBED'));
     const participant = entry ? { signingPublicKey: entry.signing_public_key!, subscriberUrl: entry.subscriber_url } : undefined;
+    if (lookupCache.size >= 1000) lookupCache.delete(lookupCache.keys().next().value!);
     lookupCache.set(cacheKey, { participant, until: now() + (participant ? 60 * 60 * 1000 : 60 * 1000) });
     return participant;
   };

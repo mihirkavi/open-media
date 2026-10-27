@@ -51,6 +51,7 @@ const schema = z.object({
     security: z.enum(['tls', 'starttls']),
   }).optional(),
 });
+const mailPorts = new Set([993, 143, 995, 110, 465, 587, 2525]);
 const address = z.email().max(320);
 const sendSchema = z.object({
   to: z.array(address).min(1).max(10),
@@ -94,6 +95,10 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
     if (request.method === 'POST' && url.pathname === '/v1/mail-accounts') {
       if (!await allowed(env.MAIL_CONNECT_RATE_LIMITER, session.userId)) return rateLimited(headers);
       const input = schema.parse(await readJSON(request)) as MailAccountInput;
+      // Only the standard mail ports, so mailbox setup cannot be used to probe other services.
+      if (env.MAIL_ALLOW_LOCAL_SERVERS !== 'true' && (!mailPorts.has(input.port) || (input.smtp && !mailPorts.has(input.smtp.port)))) {
+        throw new UserFacingError('Use your provider’s standard mail ports: 993 or 143 for IMAP, 995 or 110 for POP, 465 or 587 for SMTP.');
+      }
       await testConnection(await connectionInput(input, env));
       if (input.smtp) await testSmtp(await smtpConnection(input.smtp, env), input);
       const account = await repository.saveAccount(session.userId, input, encryptSecret(input.password, env.MAIL_CREDENTIALS_KEY));
@@ -208,6 +213,7 @@ async function smtpConnection(settings: SmtpSettings, env: MailEnv): Promise<Smt
 }
 
 async function readJSON(request: Request): Promise<unknown> {
+  if (Number(request.headers.get('content-length') ?? '0') > 16_384) throw new Error('Request too large.');
   const text = await request.text();
   if (new TextEncoder().encode(text).byteLength > 16_384) throw new Error('Request too large.');
   return JSON.parse(text);

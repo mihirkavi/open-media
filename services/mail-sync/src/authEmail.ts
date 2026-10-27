@@ -103,7 +103,7 @@ body{margin:0;padding:0;background:#f4f3ef}
 <div class="muted" style="font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#77776f;padding-bottom:8px">Your code</div>
 <div class="ink" style="font-family:'SF Mono',ui-monospace,Menlo,Consolas,monospace;font-size:30px;line-height:36px;letter-spacing:.18em;font-weight:600;color:#111111">${code}</div>
 </td></tr></table>
-<p class="muted" style="margin:24px 0 0;font-size:13px;line-height:20px;color:#77776f">The code and button work once and expire in an hour. No one from Open Media will ever ask for it. If an AI assistant you use is signing you in for you, share the code only with that assistant.</p>
+<p class="muted" style="margin:24px 0 0;font-size:13px;line-height:20px;color:#77776f">The code and button work once and expire in 15 minutes. No one from Open Media will ever ask for it. If an AI assistant you use is signing you in for you, share the code only with that assistant.</p>
 </td></tr></table></td></tr>
 <tr><td align="center" style="padding:24px 24px 0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif">
 <p class="muted" style="margin:0;font-size:12px;line-height:18px;color:#8a8a83">Didn’t ask for this? You can ignore this email; nothing changes without the code.<br><a href="${brand.site}" class="muted" style="color:#8a8a83;text-decoration:underline">openmedia.site</a> · One open app for your social world</p>
@@ -112,7 +112,7 @@ body{margin:0;padding:0;background:#f4f3ef}
     text.heading, '', text.intro, '',
     `Your code: ${spaced(input.code)}`,
     ...(input.link && text.button ? ['', `${text.button}: ${input.link}`] : []),
-    '', 'The code and link work once and expire in an hour. No one from Open Media will ever ask for it.',
+    '', 'The code and link work once and expire in 15 minutes. No one from Open Media will ever ask for it.',
     'Didn’t ask for this? Ignore this email; nothing changes without the code.', '', 'Open Media · https://openmedia.site',
   ].join('\n');
   return { to: input.to, subject: text.subject, html, text: plain };

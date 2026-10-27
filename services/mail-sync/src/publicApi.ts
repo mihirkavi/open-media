@@ -12,7 +12,19 @@ export interface PublicApiEnv {
   SUPABASE_URL: string;
   SUPABASE_PUBLISHABLE_KEY: string;
   /** Optional Cloudflare rate-limit binding keyed by client IP. */
-  PUBLIC_API_RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
+  PUBLIC_API_RATE_LIMITER?: RateLimiter;
+  /** Sign-in from agents: per IP (/v1/auth/*) and per email address (codes sent and checked). */
+  AUTH_RATE_LIMITER?: RateLimiter;
+  AUTH_EMAIL_RATE_LIMITER?: RateLimiter;
+  /** Anonymous agent registration and its token exchange, per IP. */
+  REGISTRATION_RATE_LIMITER?: RateLimiter;
+}
+
+export interface RateLimiter { limit(options: { key: string }): Promise<{ success: boolean }> }
+
+/** True when the request is within the limit (or no limiter is bound, as in tests). */
+export async function withinLimit(limiter: RateLimiter | undefined, key: string): Promise<boolean> {
+  return !limiter || (await limiter.limit({ key })).success;
 }
 
 export interface UpstreamVideo {

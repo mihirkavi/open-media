@@ -45,10 +45,17 @@ export function isLocalMailHost(host: string): boolean {
 /** True only for public IP addresses; anything that is not an IP is not public. */
 export function isPublicAddress(address: string): boolean {
   if (isIP(address) === 0) return false;
-  if (address === '::1' || address === '::' || address.startsWith('fe80:') || address.startsWith('fc') || address.startsWith('fd')) return false;
-  const mapped = address.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/)?.[1];
+  const lower = address.toLowerCase();
+  // Loopback, unspecified, link- and site-local, unique-local, NAT64, 6to4, Teredo, documentation and multicast IPv6.
+  if (lower === '::1' || lower === '::' || /^(fe[89ab]|fe[c-f]|fc|fd|ff|64:ff9b:|2002:|2001:0?:|2001:db8:)/.test(lower)) return false;
+  const hexMapped = lower.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/)?.[1]
+    ?? (hexMapped ? [parseInt(hexMapped[1], 16) >> 8, parseInt(hexMapped[1], 16) & 255, parseInt(hexMapped[2], 16) >> 8, parseInt(hexMapped[2], 16) & 255].join('.') : undefined);
+  if (lower.startsWith('::ffff:') && !mapped) return false;
   const ipv4 = mapped ?? (isIP(address) === 4 ? address : undefined);
   if (!ipv4) return true;
-  const [a, b] = ipv4.split('.').map(Number);
-  return !(a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224);
+  const [a, b, c] = ipv4.split('.').map(Number);
+  return !(a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168)
+    || (a === 100 && b >= 64 && b <= 127) || (a === 192 && b === 0 && (c === 0 || c === 2)) || (a === 198 && (b === 18 || b === 19))
+    || (a === 198 && b === 51 && c === 100) || (a === 203 && b === 0 && c === 113) || a >= 224);
 }

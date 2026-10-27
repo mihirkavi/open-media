@@ -377,7 +377,7 @@ Open Media is an early beta, built in the open. To be clear about where it stand
 - Messages between Open Media users are protected by strict database rules but are **not yet end-to-end encrypted**.
 - The algorithm marketplace, moderation choice, identity and governance described above are the vision, not features you can use today.
 
-Every limitation is listed in the [technical overview](docs/TECHNICAL_OVERVIEW.md#honest-limitations).
+How accounts and data are protected, the latest security review and what is still open: [docs/SECURITY.md](docs/SECURITY.md). Every limitation is listed in the [technical overview](docs/TECHNICAL_OVERVIEW.md#honest-limitations).
 
 ## Run it yourself
 

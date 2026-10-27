@@ -69,7 +69,7 @@ export async function requestSignInCode(env: SignInEnv, origin: string, body: un
   return {
     sent: true, email,
     message: `Open Media emailed a sign-in code to ${email} from security@openmedia.site. Ask the person for the code, then POST it to ${origin}/v1/auth/verify.`,
-    expires_in: 3600,
+    expires_in: 900,
     verify: `${origin}/v1/auth/verify`,
   };
 }

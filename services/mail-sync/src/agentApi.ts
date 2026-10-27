@@ -30,7 +30,7 @@ import { parseSearchQuery, postMatchesSearch } from '../../../src/domain/searchQ
 import { searchSettings, settingIndex } from '../../../src/domain/settings';
 import { availableNetworks, BridgesEnv } from './bridges.js';
 import { contactsKey, ContactsEnv, openCard, sealCard, validCards } from './contactsStore.js';
-import { callRpc, formatPost, formatProfile, openApiDocument, PublicApiEnv, UpstreamPost, UpstreamProfile } from './publicApi.js';
+import { callRpc, formatPost, formatProfile, openApiDocument, PublicApiEnv, UpstreamPost, UpstreamProfile, withinLimit } from './publicApi.js';
 import {
   availableChains, cardPaymentsConfigured, checkOnchainPayment, handlePaymentsWebhook, linkWallet, PaymentsEnv, PaymentsError, paymentsAvailability, refreshPayoutAccount, startCardCheckout, startPayoutOnboarding,
 } from './payments.js';
@@ -1192,17 +1192,21 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
   const path = url.pathname.replace(/\/+$/, '') || '/';
   const origin = url.origin;
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: { ...publicHeaders, 'access-control-max-age': '86400' } });
+  const ip = request.headers.get('cf-connecting-ip') ?? 'unknown';
+  const limited = () => new Response(JSON.stringify({ error: { code: 'rate_limited', message: 'Too many requests. Wait a minute and try again.' } }), { status: 429, headers: { ...publicHeaders, 'content-type': 'application/json; charset=utf-8', 'retry-after': '60' } });
   // Same per-client limit as the read-only API: feed and search fan out to four other networks.
-  if (env.PUBLIC_API_RATE_LIMITER) {
-    // A registered agent (auth.md) gets its own bucket instead of sharing one with its IP address.
-    const agent = await agentFromRequest(env, origin, request);
-    const { success } = await env.PUBLIC_API_RATE_LIMITER.limit({ key: agent ?? request.headers.get('cf-connecting-ip') ?? 'unknown' });
-    if (!success) return new Response(JSON.stringify({ error: { code: 'rate_limited', message: 'Too many requests. Wait a minute and try again.' } }), { status: 429, headers: { ...publicHeaders, 'content-type': 'application/json; charset=utf-8', 'retry-after': '60' } });
-  }
+  // The IP limit always applies, so minting agent identities cannot multiply it; a registered
+  // agent (auth.md) also gets its own bucket, so one busy agent cannot starve others on its IP.
+  if (!(await withinLimit(env.PUBLIC_API_RATE_LIMITER, `ip:${ip}`))) return limited();
+  const agent = await agentFromRequest(env, origin, request);
+  if (agent && !(await withinLimit(env.PUBLIC_API_RATE_LIMITER, agent))) return limited();
+  // Bodies on these routes are small JSON; refuse large ones before reading them.
+  if (Number(request.headers.get('content-length') ?? '0') > 262_144) return json({ error: { code: 'too_large', message: 'The request body is too large.' } }, 0, 413);
   try {
     if (path === '/ask' && (request.method === 'POST' || request.method === 'GET')) return nlwebAsk(request, env, origin);
     if (request.method === 'GET' && path === '/feeds/posts.jsonl') return postsFeed(env, origin);
     if (request.method === 'POST' && path === '/agent/identity') {
+      if (!(await withinLimit(env.REGISTRATION_RATE_LIMITER, `ip:${ip}`))) return limited();
       try { return json(await registerAgent(env, origin, await request.json().catch(() => ({}))), 0); }
       catch (error) {
         if (error instanceof AgentAuthError) return json({ error: error.code, error_description: error.message }, 0, error.status);
@@ -1212,6 +1216,10 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     // A person signs in from an agent with the code Open Media emails them (personSignIn.ts).
     if (request.method === 'POST' && path.startsWith('/v1/auth/')) {
       const body = await request.json().catch(() => ({}));
+      // Codes are emailed and checked at most a few times a minute per address, and per IP.
+      const email = typeof (body as { email?: unknown }).email === 'string' ? (body as { email: string }).email.trim().toLowerCase() : '';
+      if (!(await withinLimit(env.AUTH_RATE_LIMITER, `ip:${ip}`))) return limited();
+      if (email && (path === '/v1/auth/email-code' || path === '/v1/auth/verify') && !(await withinLimit(env.AUTH_EMAIL_RATE_LIMITER, `${path}:${email}`))) return limited();
       try {
         if (path === '/v1/auth/email-code') return json(await requestSignInCode(env, origin, body), 0);
         if (path === '/v1/auth/verify') return json(await verifySignInCode(env, origin, body), 0);

@@ -74,6 +74,21 @@
       "name": "PUBLIC_API_RATE_LIMITER",
       "namespace_id": "10003",
       "simple": { "limit": 120, "period": 60 }
+    },
+    {
+      "name": "AUTH_RATE_LIMITER",
+      "namespace_id": "10005",
+      "simple": { "limit": 10, "period": 60 }
+    },
+    {
+      "name": "AUTH_EMAIL_RATE_LIMITER",
+      "namespace_id": "10006",
+      "simple": { "limit": 3, "period": 60 }
+    },
+    {
+      "name": "REGISTRATION_RATE_LIMITER",
+      "namespace_id": "10007",
+      "simple": { "limit": 5, "period": 60 }
     }
   ],
   "observability": {
