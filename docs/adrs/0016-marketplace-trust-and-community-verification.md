@@ -1,6 +1,6 @@
 # ADR 0016: Marketplace trust and community verification
 
-- Status: **accepted and built** (2026-10-26). All four phases are implemented and tested locally; see "Build status" at the end. Legal points need review by a lawyer before paid selling is opened widely in any country.
+- Status: **accepted, built and deployed** (built 2026-10-26, deployed 2026-10-27). All four phases are implemented and tested; see "Build status" at the end. Legal points need review by a lawyer before paid selling is opened widely in any country.
 - Builds on: [ADR 0013](0013-identity-contacts-commerce-payments.md) (listings, ratings, payments), [ADR 0015](0015-ondc-seller-app.md) (ONDC seller app), [ADR 0012](0012-agent-interfaces-and-design-system.md) and [ADR 0014](0014-agent-readiness-webmcp-and-plugin.md) (agents)
 - Master builder prompt sections: 34 (capability-based verification), 40–42 (AI agents and provenance), 43–48 (moderation, reports as signals, filtering scopes, open moderation defaults), 88 (do not overengineer)
 

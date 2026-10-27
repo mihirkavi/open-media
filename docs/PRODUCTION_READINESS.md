@@ -17,6 +17,17 @@ This checklist defines “production ready” for the current onboarding private
 - [x] Local browser flow: magic-link onboarding, callback cleanup, profile creation, profile search, direct conversation, send, realtime receive, account export, and responsive layout.
 - [x] Latest signed iOS Store build finished successfully: build 9, EAS `f5916bd3-c316-487a-bbed-f6085bc38fcc`.
 
+## Marketplace trust and community verification (ADR 0016; deployed 2026-10-27)
+
+- [x] Deployed with the owner's approval ("Yes, I approve"):
+  - applied `20261030120000_marketplace_trust.sql` (the dry run listed only this migration);
+  - deployed Worker `9e6cfd40-e4e3-445f-821b-d63d18fc8ec9` with the new `* * * * *` marketplace cron (rollback target: `dc2af7c6-4173-42ac-b2a0-1aefe1d05798`).
+- [x] Live checks: `/policies/listings` and `/v1/transparency` return 200, `/v1/posts` still answers, the web app serves HTML with its CSP, the Open Media notices account exists, and `wrangler tail` showed the minute cron running with outcome `ok` and no `marketplace_jobs_failed` logs (it began about 12 minutes after the deploy).
+- [ ] Owner: set the `WEB_RISK_API_KEY` Worker secret (link reputation is skipped without it).
+- [ ] Owner: add operator user ids to `public.operators`.
+- [ ] Owner: configure Stripe Identity, which community verification needs.
+- [ ] Owner: legal review, a DMCA agent and an India grievance officer before paid selling opens widely.
+
 ## ONDC seller app (ADR 0015; built and deployed 2026-10-26, not yet registered with ONDC)
 
 - [x] Deployed with the owner's approval ("Push and deploy"):
