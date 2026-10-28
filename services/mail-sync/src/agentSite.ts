@@ -14,10 +14,11 @@ import { agentInterfaces, honestStatus, mission, philosophy, promise, promises, 
 import { agentSkills, skillMarkdown } from '../../../src/domain/agentSkills';
 import { webMcpTools } from '../../../src/domain/webMcpTools';
 import { listingPolicyMarkdown } from '../../../src/domain/listingSafety';
+import { builtInLenses, describeLensRules, forbiddenSignals, lensFormat, lensShareUrl, recencyHalfLifeHours } from '../../../src/domain/feedLenses';
 
-export const siteVersion = '1.1.0';
+export const siteVersion = '1.2.0';
 /** When the site's pages last changed (sitemap lastmod and Markdown frontmatter). */
-export const siteUpdated = '2026-10-25';
+export const siteUpdated = '2026-10-27';
 const assets = 'https://raw.githubusercontent.com/mihirkavi/open-media/main/assets';
 export const iconUrl = `${assets}/brand/logo-light.png`;
 const coverUrl = `${assets}/brand/cover.png`;
@@ -83,6 +84,64 @@ Open Media is free: no ads by default, no subscription and no API key for public
 `,
   },
   {
+    path: '/docs/feed-lenses', title: 'Feed lenses: how Open Media orders the Feed',
+    description: 'Raw, Relevant and every shared feed algorithm are small JSON manifests run by one open-source runner. The format, the built-in lenses, and how agents write, preview, save and share one.',
+    body: (origin) => `# Feed lenses
+
+Every way of ordering the Open Media Feed is a **lens**: a small JSON manifest, never code. Raw and Relevant are the two built in. People can describe a new lens in plain words in Search, or ask an AI agent to write one, then keep it, share it publicly, or install someone else's.
+
+One open-source runner orders the posts: [src/domain/feedLenses.ts](${sourceRepository}/blob/main/src/domain/feedLenses.ts). The app, the REST API and the MCP servers all use it, so an agent's preview matches the person's Feed. The design is [ADR 0017](${sourceRepository}/blob/main/docs/adrs/0017-feed-lenses.md).
+
+## The built-in lenses
+
+${builtInLenses.map((lens) => `### ${lens.name}\n\n${lens.description}\n\n${describeLensRules(lens).map((rule) => `- ${rule}`).join('\n')}\n\n\`\`\`json\n${JSON.stringify(lens, null, 2)}\n\`\`\``).join('\n\n')}
+
+Relevant's recency counts half as much every ${recencyHalfLifeHours} hours, so older posts still appear in time order rather than all at the bottom.
+
+## What a lens can and cannot read
+
+- Always: each post's text, time, network and kind (video, image, product, service, event).
+- Only when its manifest lists the permission: \`follows\` (who the person follows on Open Media), \`interests\` (topics the person or the lens chose), \`public_engagement\` (like and repost counts a network publishes).
+- Never, for any lens: ${forbiddenSignals.join(', ')}. These cannot be written in a manifest; unknown fields are refused.
+
+## Writing a lens
+
+\`\`\`json
+{
+  "format": "${lensFormat}",
+  "name": "Cooking videos",
+  "permissions": ["follows"],
+  "filters": { "kinds": ["video"], "about": ["cooking"], "mute": ["crypto"], "hideSources": ["hive"] },
+  "order": "ranked",
+  "objectives": { "recency": 0.6, "follows": 0.4, "interests": 0, "engagement": 0, "diversity": 0.3 },
+  "interests": []
+}
+\`\`\`
+
+Fields: \`filters\` keep posts (\`sources\`, \`kinds\`, \`about\`, \`followedOnly\`, \`maxAgeHours\`) and leave them out (\`hideSources\`, \`hideKinds\`, \`mute\`, \`muteAuthors\`). \`order\` is \`newest\` or \`ranked\`. \`objectives\` weigh recency, follows, interests and engagement (normalized), and \`diversity\` spreads authors out. The full field list is in \`GET ${origin}/v1/lenses\`.
+
+## For agents
+
+Public, no key (\`${origin}/open/mcp\` or REST):
+
+- \`list_feed_lenses\` / \`GET ${origin}/v1/lenses?q=\`: the built-in and shared lenses, with rules in words.
+- \`get_feed_lens\` / \`GET ${origin}/v1/lenses/{id}\`.
+- \`draft_feed_lens\` / \`POST ${origin}/v1/lenses/draft\` \`{"request": "only videos about cooking, no crypto"}\`: plain words to a manifest, with what was and was not understood.
+- \`preview_feed_lens\` / \`POST ${origin}/v1/lenses/preview\` \`{"lens": {…}}\` or \`{"request": "…"}\`: the public Feed through that lens, each post with its "why".
+- \`get_feed\` with \`lens\` / \`GET ${origin}/v1/feed?lens=relevant\`.
+
+The person's account (\`${origin}/me/mcp\`, bearer token):
+
+- \`list_my_feed_lenses\`, \`save_feed_lens\` (\`visibility\`: private or public), \`install_feed_lens\` (copy a shared lens), \`delete_feed_lens\`, and \`get_my_feed\` (the Feed through a lens with the person's follows).
+
+Show the person a lens's summary and rules before saving it, and ask before sharing it publicly. A saved lens appears in the person's Feed picker on every device; a shared one opens for anyone at \`${lensShareUrl('<id>')}\`.
+
+## In the app
+
+There is no lens editor. People write what they want in Search ("only videos from people I follow, no crypto"); Search shows the lens it understood, and choosing it switches the Feed. The Feed's picker shows Relevant, Raw and the lens in use. "Why this?" on every post lists the signals used, the lens's rules and what was never used.
+`,
+  },
+  {
     path: '/agents', title: 'Open Media for AI agents',
     description: 'When an AI agent should use Open Media and exactly how to call it: MCP, REST, WebMCP and skills.',
     body: (origin) => `# Open Media for AI agents
@@ -94,6 +153,7 @@ Use this page to decide whether Open Media fits a task and how to call it.
 - **Cross-network social search.** "What are people saying about Ethereum on Lens this week?" Use the \`search\` tool or \`GET /v1/search?q=\`.
 - **One feed across open networks.** Summaries of Farcaster, Lens, Hive, DeSo and Open Media posts, each with its source link and "why" reasons. Use \`get_feed\`.
 - **A person's posts everywhere.** One timeline for an Open Media handle plus the accounts they listed. Use \`get_person_timeline\`.
+- **A feed the person describes.** "Only videos about cooking, no crypto": write a feed lens with \`draft_feed_lens\`, preview it, and save or share it for the person. See [feed lenses](${origin}/docs/feed-lenses).
 - **Upcoming events in the San Francisco Bay Area** from Luma, Meetup and Eventbrite, de-duplicated. Use \`find_upcoming_events\`.
 - **Acting for a signed-in person:** publishing, messages, email, contacts, listings, follows, privacy, payments, tips and paid posts, through their own token.
 
@@ -738,6 +798,7 @@ Open Media is a free, open-source social app (iPhone, Android, web) with one fee
 - [Agent guide](${origin}/agents.md): when and how to call Open Media.
 - [API documentation](${origin}/docs.md): endpoints, errors, rate limits, idempotency, versioning, sandbox.
 - [Authentication](${origin}/auth.md): no credential for public data; the person's bearer token for their account.
+- [Feed lenses](${origin}/docs/feed-lenses.md): how Raw, Relevant and shared feed algorithms work, and how agents write, preview, save and share one.
 - [Developer portal](${origin}/developers.md), [sandbox and test mode](${origin}/sandbox.md) and [pricing](${origin}/pricing.md) (free).
 - [OpenAPI 3.1](${origin}/v1/openapi.json) and the [API index](${origin}/v1).
 
@@ -781,6 +842,7 @@ export function docsLlmsTxt(origin: string): string {
 - [API documentation](${origin}/docs.md)
 - [Authentication](${origin}/auth.md)
 - [Agent guide](${origin}/agents.md)
+- [Feed lenses](${origin}/docs/feed-lenses.md)
 - [OpenAPI 3.1](${origin}/v1/openapi.json)
 - [Public MCP server card](${origin}/open/mcp/server-card)
 - [Account MCP server card](${origin}/me/mcp/server-card)

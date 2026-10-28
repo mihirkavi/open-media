@@ -77,7 +77,7 @@ No single app should permanently own your identity, your audience, your content,
     </td>
     <td width="33%" valign="top">
       <h3>2. Your feed belongs to you</h3>
-      <p><strong>No secret algorithm.</strong> Choose <em>Raw</em> (simply newest first) or <em>Relevant</em> (a small, visible set of signals). Every ranked post has a <strong>Why this?</strong> button that shows exactly why it is there and which private data was <em>not</em> used.</p>
+      <p><strong>No secret algorithm.</strong> Choose <em>Raw</em> (simply newest first), <em>Relevant</em> (a small, visible set of signals), or describe your own feed in plain words, like “only videos from people I follow, no crypto”, and share it. Every post has a <strong>Why this?</strong> link that shows exactly why it is there and which private data was <em>not</em> used.</p>
     </td>
     <td width="33%" valign="top">
       <h3>3. You are not locked in</h3>
@@ -108,7 +108,7 @@ The app has just three main screens: **Feed**, **Clips** and **Messages**. Every
   <tr>
     <td width="50%" valign="top">
       <h3>Feed: everything in one stream</h3>
-      <p>Public posts from Open Media, Farcaster, Lens, Hive and DeSo appear together. Switch between <strong>Relevant</strong> and <strong>Raw</strong> at the top. Anyone can read the feed without an account.</p>
+      <p>Public posts from Open Media, Farcaster, Lens, Hive and DeSo appear together. Switch between <strong>Relevant</strong>, <strong>Raw</strong> and your own lens at the top; write a new one in Search. Anyone can read the feed without an account.</p>
     </td>
     <td width="50%" valign="top">
       <h3>Clips: short videos, full screen</h3>
@@ -161,6 +161,7 @@ Open Media is in **public beta**. Everything below is in the code today.
 | Area | Available now | Status |
 | --- | --- | --- |
 | **Feed** | One feed mixing Open Media with Farcaster, Lens, Hive and DeSo. Raw and Relevant modes. "Why this?" on every ranked post. Readable without an account. | ✅ Live |
+| **Feed lenses** | Every feed algorithm, Raw and Relevant included, is an open JSON manifest run by [one runner](src/domain/feedLenses.ts). Write one in plain words in Search or with an AI agent, keep it across devices, share it publicly or install someone else's. Lenses read only the signals they declare. See [ADR 0017](docs/adrs/0017-feed-lenses.md). | 🧪 Built, not yet deployed |
 | **Clips** | Full-screen short videos from the same networks, with sound on tap and smooth loading. | ✅ Live |
 | **Posting** | Text posts and short videos (up to 3 minutes). Location data is removed from videos before upload. Report and delete posts. | ✅ Live |
 | **Cross-posting** | One post to Farcaster, Lens, Hive and DeSo using keys you approve in each network's own app. No seed phrases. | 🧪 Beta: built, not yet tested on live networks |
@@ -309,7 +310,7 @@ The complete vision, with every principle and the reasoning behind it, is in the
 | **3. Email and Messages** | Email inside Messages, chats organised by person | ✅ Done |
 | **4. Connectors** | Cross-posting to open networks, chat bridges, public API | 🧪 In beta |
 | **5. Search and AI help** | One search for posts, messages, email and settings, in plain language | ✅ Done (first version) |
-| **6. Algorithm choice** | A marketplace of feed algorithms with strict data permissions | 🔜 Next |
+| **6. Algorithm choice** | Feed lenses you write in plain words or with an agent, then share, install and remove, with strict data permissions. Ratings and paid lenses come later. | 🧪 Beta |
 | **7. Moderation choice** | User-set filtering, credible reports and independent moderation providers | 🔜 Planned |
 | **8. Identity** | Optional proof of personhood, separate personas, portable identity | 🔜 Planned |
 | **9. Governance** | One-person-one-vote and an open improvement-proposal process | 🔜 Planned |
@@ -375,7 +376,7 @@ Open Media is an early beta, built in the open. To be clear about where it stand
 - The ONDC seller app is built and tested against ONDC's published signing example and a simulated buyer app, but Open Media is not yet registered with ONDC, so no buyer app can reach it. It answers catalog searches and quotes only; orders, settlement and logistics come in a later phase.
 - Videos are stored as uploaded, without streaming optimisation.
 - Messages between Open Media users are protected by strict database rules but are **not yet end-to-end encrypted**.
-- The algorithm marketplace, moderation choice, identity and governance described above are the vision, not features you can use today.
+- Feed lenses are a first step towards the algorithm marketplace: you can write, share and install lenses, but not yet rate, review or pay for them. Moderation choice, identity and governance described above are the vision, not features you can use today.
 
 How accounts and data are protected, the latest security review and what is still open: [docs/SECURITY.md](docs/SECURITY.md). Every limitation is listed in the [technical overview](docs/TECHNICAL_OVERVIEW.md#honest-limitations).
 

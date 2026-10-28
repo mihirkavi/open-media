@@ -17,6 +17,15 @@ This checklist defines “production ready” for the current onboarding private
 - [x] Local browser flow: magic-link onboarding, callback cleanup, profile creation, profile search, direct conversation, send, realtime receive, account export, and responsive layout.
 - [x] Latest signed iOS Store build finished successfully: build 9, EAS `f5916bd3-c316-487a-bbed-f6085bc38fcc`.
 
+## Feed lenses (ADR 0017; built 2026-10-27, not yet deployed)
+
+- [x] App, Worker and database tests pass; `open_media_feed_lenses_test.sql` (12 checks) passes against the local database.
+- [x] Web on the local stack, desktop and 375 px: Raw and Relevant differ, a lens written in Search applies and persists, saves to the account after sign-in, shares publicly and is listed by `GET /v1/lenses`.
+- [x] iOS Simulator (iPhone 17 Pro, existing dev build, new JS from Metro): the picker sits under the title, Search shows the drafted lens and a shared lens above the keyboard, and choosing the draft switches the Feed to it with video posts only.
+- [ ] Android emulator: the new bundle loaded (Search shows the new suggestion), but the emulator's system process hung under memory pressure before the lens flow could be exercised. Re-run with less running. The native share sheet was not exercised on either phone.
+- [ ] Owner approval to deploy: apply `20261031120000_feed_lenses.sql`, then deploy the Worker (new `/v1/lenses*`, `/v1/me/lenses*`, `/v1/me/feed` routes and MCP tools).
+- [ ] After deploy: confirm `GET /v1/lenses` and `/docs/feed-lenses` return 200, and rescan Ora.
+
 ## Marketplace trust and community verification (ADR 0016; deployed 2026-10-27)
 
 - [x] Deployed with the owner's approval ("Yes, I approve"):

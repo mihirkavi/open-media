@@ -1,6 +1,8 @@
+import { explainLensPost, FeedLens, LensContext, lensById, runLens } from './feedLenses';
 import type { PostEvent, PostListing } from './listings';
 
 export type PostKind = 'text' | 'image' | 'video' | 'link';
+/** The built-in lenses' ids. Any lens (ADR 0017) can stand where a mode is accepted. */
 export type FeedMode = 'relevant' | 'raw';
 
 export interface PostAuthor {
@@ -68,8 +70,13 @@ export interface SocialPost {
 
 export interface FeedExplanation {
   postId: string;
-  mode: FeedMode;
+  /** The lens's id: raw, relevant, or a saved lens. */
+  mode: string;
+  /** The lens's name, e.g. Relevant. */
+  lens: string;
   used: string[];
+  /** The lens's own rules, e.g. “Only videos”, “Ranked by newness 60%, who you follow 40%”. */
+  rules: string[];
   /** Published filters applied to the post's source before ranking. */
   filters: string[];
   notUsed: string[];
@@ -77,28 +84,21 @@ export interface FeedExplanation {
   checks?: string[];
 }
 
-const forbiddenSignals = ['Private messages', 'Exact location', 'Sensitive-trait inference'];
-
-export function selectFeed(posts: SocialPost[], mode: FeedMode): SocialPost[] {
-  if (mode === 'raw') return [...posts].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
-  return [...posts].sort((a, b) => relevantScore(b) - relevantScore(a));
+function resolveLens(lens: FeedMode | FeedLens): FeedLens {
+  return typeof lens === 'string' ? lensById(lens) : lens;
 }
 
-export function explainFeedPost(post: SocialPost, mode: FeedMode): FeedExplanation {
-  const source = post.eligibility ? [post.eligibility.selection] : [];
-  const used = mode === 'raw'
-    ? [...source, 'Posted recently', 'Raw chronological order']
-    : [
-        ...(post.relevance.followsAuthor ? ['You follow this author'] : []),
-        ...post.relevance.selectedInterestMatches.map((topic) => `Matches your ${topic} interest`),
-        ...(post.relevance.communityMatch ? [`From ${post.relevance.communityMatch}`] : []),
-        ...source,
-        'Posted recently',
-        'Selected by Relevant',
-      ];
+/** Orders posts through a lens (Raw, Relevant, or any saved lens). See src/domain/feedLenses.ts. */
+export function selectFeed(posts: SocialPost[], lens: FeedMode | FeedLens, context: LensContext = {}): SocialPost[] {
+  return runLens(posts, resolveLens(lens), context);
+}
+
+export function explainFeedPost(post: SocialPost, lens: FeedMode | FeedLens, context: LensContext = {}): FeedExplanation {
+  const chosen = resolveLens(lens);
+  const explanation = explainLensPost(post, chosen, context);
   // What verified people checked on a listing (ADR 0016). Not a ranking signal: shown so people can judge it.
   const checks = post.listing?.checkedBy ? [`Checked by ${post.listing.checkedBy} verified ${post.listing.checkedBy === 1 ? 'person' : 'people'} against public pages they cited`] : [];
-  return { postId: post.id, mode, used, filters: post.eligibility?.filters ?? [], notUsed: forbiddenSignals, ...(checks.length ? { checks } : {}) };
+  return { postId: post.id, mode: chosen.id, lens: chosen.name, used: explanation.used, rules: explanation.rules, filters: post.eligibility?.filters ?? [], notUsed: explanation.notUsed, ...(checks.length ? { checks } : {}) };
 }
 
 /** Clips are short videos: at most this long when the source reports a duration. */
@@ -106,10 +106,4 @@ export const maxClipSeconds = 180;
 
 export function clipPosts(posts: SocialPost[]) {
   return posts.filter((post) => post.kind === 'video' && post.media?.some((media) => media.kind === 'video' && (media.durationSeconds === undefined || media.durationSeconds <= maxClipSeconds)));
-}
-
-function relevantScore(post: SocialPost) {
-  const ageHours = Math.max(0, (Date.now() - Date.parse(post.createdAt)) / 3_600_000);
-  const recency = Math.max(0, 48 - ageHours) / 48;
-  return recency * 0.5 + (post.relevance.followsAuthor ? 0.3 : 0) + Math.min(0.2, post.relevance.selectedInterestMatches.length * 0.1);
 }

@@ -21,7 +21,9 @@ import { authorNetworks, fetchAuthorPosts } from '../../../src/connectors/networ
 import { networkConnectors } from '../../../src/connectors/networkFeeds';
 import { networkSearches } from '../../../src/connectors/networkSearch';
 import { collapseRepeatedPosts, NetworkId, networks } from '../../../src/domain/networkPosts';
-import { explainFeedPost, FeedMode, SocialPost } from '../../../src/domain/posts';
+import { explainFeedPost, FeedMode, selectFeed, SocialPost } from '../../../src/domain/posts';
+import { FeedLens, LensContext, LensError, lensSummary, relevantLens } from '../../../src/domain/feedLenses';
+import { deleteLens as deleteStoredLens, draftLens, findLens, installLens as installSharedLens, LensApiError, lensView, listLenses, myLenses, resolveLens, saveLens as saveStoredLens } from './feedLensApi.js';
 import { PostListing, validateListing } from '../../../src/domain/listings';
 import { validateOndcStore } from '../../../src/domain/ondc';
 import { isPaymentChain, onchainTransfer, Payment, paymentBreakdown, PaymentChain, PaymentRail, previewCharge } from '../../../src/domain/payments';
@@ -68,6 +70,15 @@ export class AgentError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
 }
 
+/** Lens validation messages are written for people, so they pass through as 400s (or 404s). */
+async function lensCall<T>(run: () => Promise<T> | T): Promise<T> {
+  try { return await run(); } catch (error) {
+    if (error instanceof LensApiError) throw new AgentError(error.status, error.status === 404 ? 'not_found' : 'bad_request', error.message);
+    if (error instanceof LensError) throw new AgentError(400, 'bad_request', error.message);
+    throw error;
+  }
+}
+
 async function paymentsCall<T>(run: () => Promise<T>): Promise<T> {
   try { return await run(); }
   catch (error) { throw error instanceof PaymentsError ? new AgentError(error.status, error.code, error.message) : error; }
@@ -79,6 +90,7 @@ export function isAgentPath(pathname: string, method: string): boolean {
   if (isSitePath(path) || path === '/agent/identity' || path === '/ask' || path === '/feeds/posts.jsonl' || path.startsWith('/v1/auth/')) return true;
   if (['/', '/v1', '/v1/openapi.json', '/llms.txt', '/.well-known/mcp.json', '/.well-known/mcp-server', '/open/mcp', '/me/mcp'].includes(path)) return true;
   if (['/v1/feed', '/v1/search', '/v1/networks', '/v1/settings', '/v1/about', '/v1/events/upcoming', '/v1/transparency'].includes(path)) return true;
+  if (path === '/v1/lenses' || path.startsWith('/v1/lenses/')) return true;
   if (path.startsWith('/v1/operator/') || path.startsWith('/v1/verification-tasks')) return true;
   if (method === 'GET' && /^\/v1\/listings\/[^/]+\/checks$/.test(path)) return true;
   if (method === 'PATCH' && /^\/v1\/me\/listings\/[^/]+$/.test(path)) return true;
@@ -102,14 +114,14 @@ export interface AgentPost {
   url: string | null;
   media: { type: 'image' | 'video'; url: string; posterUrl: string | null; durationSeconds: number | null; altText: string | null }[];
   engagement: { replies: number; reposts: number; likes: number } | null;
-  why: { used: string[]; filters: string[]; notUsed: string[] };
+  why: { lens: string; used: string[]; rules: string[]; filters: string[]; notUsed: string[] };
   /** A product or service on offer, with the price in minor units (cents). */
   listing?: PostListing;
 }
 
-export function agentPost(post: SocialPost, mode: FeedMode, origin: string): AgentPost {
+export function agentPost(post: SocialPost, mode: FeedMode | FeedLens, origin: string, context: LensContext = {}): AgentPost {
   const network = (post.provenance.connectorId === 'open-media' ? 'open-media' : post.provenance.connectorId) as Source;
-  const explanation = explainFeedPost(post, mode);
+  const explanation = explainFeedPost(post, mode, context);
   return {
     id: post.id,
     network,
@@ -120,17 +132,20 @@ export function agentPost(post: SocialPost, mode: FeedMode, origin: string): Age
     url: network === 'open-media' ? `${origin}/v1/posts/${post.id.replace(/^open-media-/, '')}` : post.provenance.canonicalURL ?? null,
     media: (post.media ?? []).flatMap((item) => item.url ? [{ type: item.kind, url: item.url, posterUrl: item.posterUrl ?? null, durationSeconds: item.durationSeconds ?? null, altText: item.altText || null }] : []),
     engagement: post.engagement ?? null,
-    why: { used: explanation.used, filters: explanation.filters, notUsed: explanation.notUsed },
+    why: { lens: explanation.lens, used: explanation.used, rules: explanation.rules, filters: explanation.filters, notUsed: explanation.notUsed },
     ...(post.listing ? { listing: post.listing } : {}),
   };
 }
 
 type FeedCursor = Partial<Record<Source, string | { createdAt: string; id: string }>>;
 
-export async function feed(env: AgentEnv, origin: string, options: { sources?: Source[]; kind?: 'feed' | 'clips'; mode?: FeedMode; cursor?: string }) {
+export async function feed(env: AgentEnv, origin: string, options: { sources?: Source[]; kind?: 'feed' | 'clips'; mode?: FeedMode; lens?: FeedLens; context?: LensContext; cursor?: string }) {
   const chosen = options.sources?.length ? options.sources : [...sources];
   const kind = options.kind ?? 'feed';
-  const mode = options.mode ?? 'raw';
+  // A lens (ADR 0017) decides the order; mode names a built-in one. Raw stays the default for agents.
+  const lens = options.lens ?? (options.mode === 'relevant' ? relevantLens : undefined);
+  const mode = lens?.id ?? 'raw';
+  const context = options.context ?? {};
   const cursor = options.cursor ? decodeFeedCursor(options.cursor) : {};
   const results = await Promise.allSettled(chosen.map(async (source) => {
     if (source === 'open-media') {
@@ -156,17 +171,26 @@ export async function feed(env: AgentEnv, origin: string, options: { sources?: S
       if (result.value.next) next[result.value.source] = result.value.next;
     } else unavailable.push(chosen[index]);
   });
-  const ordered = mode === 'raw'
-    ? collapseRepeatedPosts(posts).sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt))
-    : collapseRepeatedPosts(posts);
+  const chosenLens = lens ?? 'raw';
+  // Each page is ordered through the lens on its own; a lens that filters can return a short page.
+  const ordered = selectFeed(collapseRepeatedPosts(posts), chosenLens, context);
   return {
-    data: ordered.map((post) => agentPost(post, mode, origin)),
+    data: ordered.map((post) => agentPost(post, chosenLens, origin, context)),
     mode,
+    lens: typeof chosenLens === 'string' ? { id: 'raw', name: 'Raw', summary: 'Newest first' } : { id: chosenLens.id, name: chosenLens.name, summary: lensSummary(chosenLens) },
     kind,
     sources: chosen,
     unavailable,
     nextCursor: Object.keys(next).length ? encodeJson(next) : null,
   };
+}
+
+/** The public Feed through a lens given as an id, a manifest, or plain words; nothing is saved. */
+export async function previewLens(env: AgentEnv, origin: string, input: Record<string, unknown>) {
+  const lens = await lensCall(() => resolveLens(env, { lens: input.lens, manifest: input.manifest, request: input.request }));
+  const chosen = Array.isArray(input.sources) ? input.sources.filter((item): item is Source => sources.includes(item as Source)) : undefined;
+  const page = await feed(env, origin, { lens, sources: chosen, kind: input.kind === 'clips' ? 'clips' : 'feed' });
+  return { ...page, lens: lensView(lens, origin), note: lens.permissions.includes('follows') && lens.filters.followedOnly ? 'This preview has no account, so “people you follow” keeps nothing here. Use get_my_feed with the person’s token.' : undefined };
 }
 
 export async function search(env: AgentEnv, origin: string, query: string) {
@@ -759,6 +783,25 @@ export class Account {
   }
 
   follows() { return this.rpc('open_media_my_follows', {}); }
+
+  // Feed lenses (ADR 0017): the person's own manifests, validated by the app's runner before storage.
+  lenses() { return lensCall(() => myLenses((name, args) => this.rpc(name, args), this.origin)); }
+  saveLens(input: { lens?: unknown; request?: unknown; visibility?: unknown }) { return lensCall(() => saveStoredLens((name, args) => this.rpc(name, args), this.origin, input)); }
+  installLens(id: unknown) { return lensCall(() => installSharedLens(this.env, (name, args) => this.rpc(name, args), this.origin, id)); }
+  deleteLens(key: unknown) { return lensCall(() => deleteStoredLens((name, args) => this.rpc(name, args), key)); }
+
+  /** Open Media accounts the person follows (accepted only): the follows signal for their lenses. */
+  async followedAuthorIds(): Promise<Set<string>> {
+    const follows = await this.rpc<{ following?: { id: string; status?: string | null }[] }>('open_media_my_follows', {});
+    return new Set((follows?.following ?? []).filter((item) => !item.status || item.status === 'accepted').map((item) => item.id));
+  }
+
+  /** The Feed through a lens with the person's own follows, the way their app shows it. */
+  async myFeed(options: { lens?: unknown; manifest?: unknown; request?: unknown; sources?: Source[]; kind?: 'feed' | 'clips'; cursor?: string }) {
+    const lens = await lensCall(() => resolveLens(this.env, options));
+    const followedAuthorIds = lens.permissions.includes('follows') ? await this.followedAuthorIds() : undefined;
+    return feed(this.env, this.origin, { sources: options.sources, kind: options.kind, cursor: options.cursor, lens, context: { followedAuthorIds } });
+  }
   follow(handle: unknown) { return this.rpc('open_media_follow', { p_handle: this.cleanHandle(handle) }); }
   unfollow(handle: unknown) { return this.rpc('open_media_unfollow', { p_handle: this.cleanHandle(handle) }); }
   answerFollowRequest(followerId: string, accept: unknown) {
@@ -919,8 +962,13 @@ function registerPublicTools(server: McpServer, env: AgentEnv, origin: string) {
   server.registerResource('posts-view', postsViewUri, { title: 'Open Media posts', description: 'Shows posts from get_feed and search as a readable list with source links.', mimeType: mcpAppMimeType },
     async (uri) => ({ contents: [{ uri: uri.href, mimeType: mcpAppMimeType, text: postsViewHtml, _meta: { ui: { prefersBorder: true } } }] }));
   const sourceEnum = z.enum(sources);
-  tool(server, 'get_feed', { title: 'Read the feed', description: 'The mixed feed: Open Media plus Farcaster, Lens, Hive and DeSo public posts, newest first (raw) or ranked (relevant). Each post includes its network, source link and “why” reasons. Pass nextCursor back to read further.', input: { sources: z.array(sourceEnum).optional(), kind: z.enum(['feed', 'clips']).optional().describe('clips = short videos only'), mode: z.enum(['raw', 'relevant']).optional(), cursor: z.string().optional() }, readOnly: true, view: postsViewUri },
-    (args) => feed(env, origin, { sources: args.sources as Source[] | undefined, kind: args.kind as 'feed' | 'clips' | undefined, mode: args.mode as FeedMode | undefined, cursor: args.cursor as string | undefined }));
+  tool(server, 'get_feed', { title: 'Read the feed', description: 'The mixed feed: Open Media plus Farcaster, Lens, Hive and DeSo public posts through a feed lens: raw (newest first, the default), relevant, or any shared lens id from list_feed_lenses. Each post includes its network, source link and “why” reasons, including the lens’s rules. Pass nextCursor back to read further.', input: { sources: z.array(sourceEnum).optional(), kind: z.enum(['feed', 'clips']).optional().describe('clips = short videos only'), mode: z.enum(['raw', 'relevant']).optional().describe('Older name for the built-in lenses; prefer lens'), lens: z.string().optional().describe('raw, relevant, or a shared lens id'), cursor: z.string().optional() }, readOnly: true, view: postsViewUri },
+    async (args) => feed(env, origin, { sources: args.sources as Source[] | undefined, kind: args.kind as 'feed' | 'clips' | undefined, mode: args.mode as FeedMode | undefined, lens: typeof args.lens === 'string' ? (await lensCall(() => findLens(env, String(args.lens)))).lens : undefined, cursor: args.cursor as string | undefined }));
+  // Feed lenses (ADR 0017): how the Feed is ordered, as inspectable manifests anyone can write and share.
+  tool(server, 'list_feed_lenses', { title: 'List feed lenses', description: 'The feed algorithms people can use: the built-in Raw and Relevant, and lenses people shared publicly, each with its rules in plain words, what it reads, how many installed it, and the manifest format for writing one.', input: { query: z.string().max(80).optional() }, readOnly: true }, (args) => listLenses(env, origin, args.query as string | undefined));
+  tool(server, 'get_feed_lens', { title: 'Get a feed lens', description: 'One lens by id (raw, relevant or a shared lens id): its manifest, rules in words, what it may read and what it can never read.', input: { id: z.string() }, readOnly: true }, async (args) => { const found = await lensCall(() => findLens(env, String(args.id))); return lensView(found.lens, origin, found.row); });
+  tool(server, 'draft_feed_lens', { title: 'Write a feed lens from plain words', description: 'Turns what the person wants (“only videos about cooking from people I follow, no crypto”) into a lens manifest, saying what was understood and what was not. Nothing is saved. You may refine the manifest yourself before previewing or saving it.', input: { request: z.string().min(1).max(400) }, readOnly: true }, (args) => lensCall(() => draftLens(args.request, origin)));
+  tool(server, 'preview_feed_lens', { title: 'Preview a feed lens', description: 'The public feed as a lens would show it, without saving anything. Give lens (an id), manifest (a lens object) or request (plain words). Each post carries its “why”.', input: { lens: z.string().optional(), manifest: z.record(z.string(), z.unknown()).optional(), request: z.string().max(400).optional(), sources: z.array(sourceEnum).optional(), kind: z.enum(['feed', 'clips']).optional() }, readOnly: true, view: postsViewUri }, (args) => previewLens(env, origin, args));
   tool(server, 'search', { title: 'Search everything public', description: 'Plain-language search across public posts on Open Media, Farcaster, Lens, Hive and DeSo, plus matching app settings. Understands phrases like “videos about ethereum on lens today” and says what it understood and how each network was searched.', input: { query: z.string().min(1).max(200) }, readOnly: true, view: postsViewUri },
     (args) => search(env, origin, String(args.query)));
   tool(server, 'get_post', { title: 'Get a post', description: 'One public Open Media post by id.', input: { id: z.string() }, readOnly: true }, (args) => publicPost(env, origin, String(args.id)));
@@ -996,6 +1044,21 @@ function registerAccountTools(server: McpServer, account: Account) {
   tool(server, 'get_my_identity', { title: 'My identity and privacy', description: 'The person’s identity tier (2 handle only, 3 declared name, 4 verified, 5 verified with legal name shown), whether they have the blue tick, the name others see, public or private, verification status and how many follow requests wait.', input: {}, readOnly: true }, () => account.identity());
   tool(server, 'set_my_privacy', { title: 'Set name and privacy', description: 'Change which name others see (handle_only, declared, or verified_legal once verified) and whether the account is public or private. Confirm with the person first; private hides posts from everyone but accepted followers.', input: { nameDisclosure: z.enum(['handle_only', 'declared', 'verified_legal']).optional(), visibility: z.enum(['public', 'private']).optional() }, readOnly: false }, (args) => account.setIdentity(args));
   tool(server, 'start_identity_verification', { title: 'Start identity verification', description: 'Returns a Stripe Identity link for the person to open themselves (document plus selfie). Never ask the person for document details yourself. Says so when verification is not available on this server.', input: {}, readOnly: false }, () => account.startVerification());
+  tool(server, 'list_my_feed_lenses', { title: 'My feed lenses', description: 'The lenses the person saved (private and shared), with their rules in words. They appear in the person’s Feed picker on every device.', input: {}, readOnly: true }, () => account.lenses());
+  tool(server, 'save_feed_lens', { title: 'Save or share a feed lens', description: 'Saves a lens to the person’s account (visibility private, the default) or shares it publicly (visibility public: anyone can read, install and fork it, under the person’s handle unless their account is private). Give lens (a manifest, e.g. from draft_feed_lens) or request (plain words). Saving the same id again updates it. Show the person the summary and rules first, and ask before sharing publicly.', input: { lens: z.record(z.string(), z.unknown()).optional(), request: z.string().max(400).optional(), visibility: z.enum(['private', 'public']).optional() }, readOnly: false }, (args) => account.saveLens(args));
+  tool(server, 'install_feed_lens', { title: 'Install a shared feed lens', description: 'Copies a publicly shared lens into the person’s lenses (counted as an install for its author). The copy is theirs to change.', input: { id: z.string() }, readOnly: false }, (args) => account.installLens(args.id));
+  tool(server, 'delete_feed_lens', { title: 'Remove a feed lens', description: 'Removes one of the person’s lenses by its id (key). Copies others installed are not affected. Raw and Relevant cannot be removed.', input: { key: z.string() }, readOnly: false }, (args) => account.deleteLens(args.key));
+  tool(server, 'get_my_feed', { title: 'My feed through a lens', description: 'The feed the way the person’s app shows it: through raw, relevant, one of their lenses (by id), a shared lens id, a manifest or plain words, using who they follow when the lens asks for it.', input: { lens: z.string().optional(), manifest: z.record(z.string(), z.unknown()).optional(), request: z.string().max(400).optional(), sources: z.array(z.enum(sources)).optional(), kind: z.enum(['feed', 'clips']).optional(), cursor: z.string().optional() }, readOnly: true, view: postsViewUri },
+    async (args) => {
+      // The person's own saved lenses are found by key; anything else resolves as a public lens.
+      if (typeof args.lens === 'string' && !['raw', 'relevant'].includes(args.lens) && !/^[0-9a-f-]{36}$/i.test(args.lens)) {
+        const mine = await account.lenses();
+        const saved = mine.data.find((item) => item.key === args.lens);
+        if (!saved) throw new AgentError(404, 'not_found', 'No saved lens with that id. See list_my_feed_lenses.');
+        return account.myFeed({ manifest: saved.manifest, sources: args.sources as Source[] | undefined, kind: args.kind as 'feed' | 'clips' | undefined, cursor: args.cursor as string | undefined });
+      }
+      return account.myFeed({ lens: args.lens, manifest: args.manifest, request: args.request, sources: args.sources as Source[] | undefined, kind: args.kind as 'feed' | 'clips' | undefined, cursor: args.cursor as string | undefined });
+    });
   tool(server, 'list_my_follows', { title: 'Follows and requests', description: 'Who the person follows (with pending requests), their followers, and follow requests waiting for them.', input: {}, readOnly: true }, () => account.follows());
   tool(server, 'follow', { title: 'Follow someone', description: 'Follow an Open Media account by handle. Private accounts get a request they must accept.', input: { handle: z.string() }, readOnly: false }, (args) => account.follow(args.handle));
   tool(server, 'unfollow', { title: 'Unfollow someone', description: 'Stop following an account, or withdraw a pending request.', input: { handle: z.string() }, readOnly: false }, (args) => account.unfollow(args.handle));
@@ -1059,8 +1122,8 @@ export function serverCard(origin: string) {
     version,
     documentation: `${origin}/llms.txt`,
     servers: [
-      { name: 'open-media', title: 'Open Media', url: `${origin}/open/mcp`, transport: 'streamable-http', authentication: { type: 'none' }, tools: ['get_feed', 'search', 'get_post', 'get_profile', 'list_networks', 'find_setting', 'about_open_media'] },
-      { name: 'open-media-account', title: 'Open Media (your account)', url: `${origin}/me/mcp`, transport: 'streamable-http', authentication: { type: 'bearer', description: 'The person’s Open Media access token: sign in with request_sign_in_code and sign_in_with_code on the public server (or POST /v1/auth/email-code then /v1/auth/verify), or copy it from Settings → Developers and agents. It expires after about an hour; renew it with refresh_sign_in.' }, tools: ['get_me', 'set_up_profile', 'publish_post', 'delete_post', 'report_post', 'list_conversations', 'start_conversation', 'send_message', 'export_my_data', 'block_person', 'report_conversation', 'delete_my_account', 'list_email', 'list_mailboxes', 'connect_mailbox', 'sync_mailbox', 'send_email', 'remove_mailbox', 'list_chat_networks', 'list_bridged_chats', 'send_bridged_message', 'chat_network_sign_in_options', 'start_chat_network_sign_in', 'continue_chat_network_sign_in', 'disconnect_chat_network', 'cross_posting_status', 'plus every public tool'] },
+      { name: 'open-media', title: 'Open Media', url: `${origin}/open/mcp`, transport: 'streamable-http', authentication: { type: 'none' }, tools: ['get_feed', 'search', 'get_post', 'get_profile', 'list_feed_lenses', 'get_feed_lens', 'draft_feed_lens', 'preview_feed_lens', 'list_networks', 'find_setting', 'about_open_media'] },
+      { name: 'open-media-account', title: 'Open Media (your account)', url: `${origin}/me/mcp`, transport: 'streamable-http', authentication: { type: 'bearer', description: 'The person’s Open Media access token: sign in with request_sign_in_code and sign_in_with_code on the public server (or POST /v1/auth/email-code then /v1/auth/verify), or copy it from Settings → Developers and agents. It expires after about an hour; renew it with refresh_sign_in.' }, tools: ['get_me', 'set_up_profile', 'publish_post', 'delete_post', 'report_post', 'list_conversations', 'start_conversation', 'send_message', 'export_my_data', 'block_person', 'report_conversation', 'delete_my_account', 'list_email', 'list_mailboxes', 'connect_mailbox', 'sync_mailbox', 'send_email', 'remove_mailbox', 'list_chat_networks', 'list_bridged_chats', 'send_bridged_message', 'chat_network_sign_in_options', 'start_chat_network_sign_in', 'continue_chat_network_sign_in', 'disconnect_chat_network', 'cross_posting_status', 'list_my_feed_lenses', 'save_feed_lens', 'install_feed_lens', 'delete_feed_lens', 'get_my_feed', 'plus every public tool'] },
       { name: 'open-media-events', title: 'Open Media Events', url: `${origin}/mcp`, transport: 'streamable-http', authentication: { type: 'oauth2', metadata: `${origin}/.well-known/oauth-authorization-server` } },
     ],
   };
@@ -1106,11 +1169,16 @@ function baseOpenApi(origin: string) {
       '/v1/feed': { get: { summary: 'The mixed feed across Open Media and open networks, with “Why this?” reasons', parameters: [
         { name: 'sources', in: 'query', schema: { type: 'string' }, description: `Comma-separated: ${sources.join(', ')}. Default: all.` },
         { name: 'kind', in: 'query', schema: { type: 'string', enum: ['feed', 'clips'] } },
-        { name: 'mode', in: 'query', schema: { type: 'string', enum: ['raw', 'relevant'] } },
+        { name: 'mode', in: 'query', schema: { type: 'string', enum: ['raw', 'relevant'] }, description: 'Older name for the built-in lenses; prefer lens.' },
+        { name: 'lens', in: 'query', schema: { type: 'string' }, description: 'raw, relevant, or a shared lens id from /v1/lenses (ADR 0017).' },
         { name: 'cursor', in: 'query', schema: { type: 'string' }, description: 'nextCursor from a previous page.' },
       ], responses: { 200: ok('A page of posts', { type: 'object', properties: { data: { type: 'array', items: { $ref: '#/components/schemas/AgentPost' } }, unavailable: { type: 'array', items: { type: 'string' } }, nextCursor: { type: ['string', 'null'] }, next: { type: ['string', 'null'] } } }), 400: error } } },
       '/v1/search': { get: { summary: 'Plain-language search across public posts on every network, plus matching settings', parameters: [{ name: 'q', in: 'query', required: true, schema: { type: 'string', maxLength: 200 } }], responses: { 200: ok('Results with what was understood and how each network was searched'), 400: error } } },
       '/v1/networks': { get: { summary: 'Every network and connector, with what works today', responses: { 200: ok('Networks and capabilities') } } },
+      '/v1/lenses': { get: { summary: 'Feed lenses: the built-in Raw and Relevant and publicly shared lenses, with rules in plain words and the manifest format', parameters: [{ name: 'q', in: 'query', schema: { type: 'string', maxLength: 80 } }], responses: { 200: ok('Lenses') } } },
+      '/v1/lenses/{id}': { get: { summary: 'One feed lens: manifest, rules, what it reads and never reads', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: ok('The lens'), 404: error } } },
+      '/v1/lenses/draft': { post: { summary: 'Write a lens from plain words; nothing is saved', requestBody: textBody('request', 400), responses: { 200: ok('The drafted lens with what was and was not understood'), 400: error } } },
+      '/v1/lenses/preview': { post: { summary: 'The public feed through a lens (id, manifest or plain words); nothing is saved', requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { lens: { type: 'string' }, manifest: { type: 'object' }, request: { type: 'string', maxLength: 400 }, sources: { type: 'array', items: { type: 'string', enum: [...sources] } }, kind: { type: 'string', enum: ['feed', 'clips'] } } } } } }, responses: { 200: ok('Posts with their “why”'), 400: error, 404: error } } },
       '/v1/settings': { get: { summary: 'The searchable settings index', parameters: [{ name: 'q', in: 'query', schema: { type: 'string' } }], responses: { 200: ok('Matching settings') } } },
       '/v1/events/upcoming': { get: { summary: 'Upcoming public events (Luma, Meetup, Eventbrite) in the San Francisco Bay Area, de-duplicated across platforms, with official registration links', parameters: [{ name: 'area', in: 'query', schema: { type: 'string' } }, { name: 'days', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 14, default: 7 } }, { name: 'q', in: 'query', schema: { type: 'string' } }, { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 } }], responses: { 200: ok('Events, soonest first, with each provider’s status'), 400: error } } },
       '/v1/people/{network}/{handle}': { get: { summary: 'One person’s public posts in one timeline (Open Media profile plus the accounts they listed, or one open-network account)', parameters: [{ name: 'network', in: 'path', required: true, schema: { type: 'string', enum: ['open-media', ...authorNetworks] } }, { name: 'handle', in: 'path', required: true, schema: { type: 'string' } }, { name: 'cursor', in: 'query', schema: { type: 'string' } }], responses: { 200: ok('The person and their posts, newest first'), 400: error, 404: error } } },
@@ -1163,6 +1231,13 @@ function baseOpenApi(origin: string) {
         get: { summary: 'Who you follow, your followers and requests waiting for you', security: bearer, responses: { 200: ok('Follows'), 401: error } },
         post: { summary: 'Follow someone (private accounts get a request)', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['handle'], properties: { handle: { type: 'string' } } } } } }, responses: { 201: ok('Following or requested'), 400: error, 401: error } },
       },
+      '/v1/me/lenses': {
+        get: { summary: 'Your saved feed lenses', security: bearer, responses: { 200: ok('Lenses'), 401: error } },
+        post: { summary: 'Save a lens (private) or share it publicly; saving the same id updates it', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { lens: { type: 'object' }, request: { type: 'string', maxLength: 400 }, visibility: { type: 'string', enum: ['private', 'public'] } } } } } }, responses: { 201: ok('Saved'), 400: error, 401: error } },
+      },
+      '/v1/me/lenses/install': { post: { summary: 'Install (copy) a publicly shared lens', security: bearer, requestBody: textBody('id', 36), responses: { 201: ok('Installed'), 400: error, 401: error, 404: error } } },
+      '/v1/me/lenses/{key}': { delete: { summary: 'Remove one of your lenses', security: bearer, parameters: [{ name: 'key', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: ok('Removed'), 401: error } } },
+      '/v1/me/feed': { get: { summary: 'Your feed through a lens, using who you follow when the lens asks for it', security: bearer, parameters: [{ name: 'lens', in: 'query', schema: { type: 'string' } }, { name: 'kind', in: 'query', schema: { type: 'string', enum: ['feed', 'clips'] } }, { name: 'cursor', in: 'query', schema: { type: 'string' } }], responses: { 200: ok('Posts with their “why”'), 401: error } } },
       '/v1/me/follows/{handle}': { delete: { summary: 'Unfollow, or withdraw a request', security: bearer, parameters: [{ name: 'handle', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: ok('Done'), 401: error } } },
       '/v1/me/follow-requests/{id}': { post: { summary: 'Accept or decline a follow request', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['accept'], properties: { accept: { type: 'boolean' } } } } } }, responses: { 200: ok('Done'), 401: error } } },
       '/v1/me/followers/{id}': { delete: { summary: 'Remove a follower', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], responses: { 200: ok('Done'), 401: error } } },
@@ -1346,10 +1421,20 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
       const mode = url.searchParams.get('mode') ?? 'raw';
       if (kind !== 'feed' && kind !== 'clips') throw new AgentError(400, 'bad_request', 'kind must be feed or clips.');
       if (mode !== 'raw' && mode !== 'relevant') throw new AgentError(400, 'bad_request', 'mode must be raw or relevant.');
-      const page = await feed(env, origin, { sources: chosen as Source[] | undefined, kind, mode, cursor: url.searchParams.get('cursor') ?? undefined });
+      const lensId = url.searchParams.get('lens');
+      const lens = lensId ? (await lensCall(() => findLens(env, lensId))).lens : undefined;
+      const page = await feed(env, origin, { sources: chosen as Source[] | undefined, kind, mode, lens, cursor: url.searchParams.get('cursor') ?? undefined });
       return json({ ...page, next: page.nextCursor ? withParams(url, { cursor: page.nextCursor }) : null }, 30);
     }
     if (request.method === 'GET' && path === '/v1/search') return json(await search(env, origin, url.searchParams.get('q') ?? ''), 30);
+    if (request.method === 'GET' && path === '/v1/lenses') return json(await listLenses(env, origin, url.searchParams.get('q')), 60);
+    const lensPath = path.match(/^\/v1\/lenses\/([^/]+)$/);
+    if (request.method === 'GET' && lensPath) { const found = await lensCall(() => findLens(env, decodeURIComponent(lensPath[1]))); return json(lensView(found.lens, origin, found.row), 60); }
+    if (request.method === 'POST' && (path === '/v1/lenses/draft' || path === '/v1/lenses/preview')) {
+      const input = await request.json().catch(() => ({})) as Record<string, unknown>;
+      if (path === '/v1/lenses/draft') return json(await lensCall(() => draftLens(input.request ?? input.text, origin)), 0);
+      return json(await previewLens(env, origin, input), 0);
+    }
     if (request.method === 'GET' && path === '/v1/networks') return json(networksDescription(env), 300);
     if (request.method === 'GET' && path === '/v1/settings') return json(settingsLookup(url.searchParams.get('q')), 3600);
     if (request.method === 'GET' && path === '/v1/about') return json(aboutOpenMedia(origin), 3600);
@@ -1444,6 +1529,12 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     if (request.method === 'POST' && decisionMatch) return json(await account.operatorDecide(decodeURIComponent(decisionMatch[1]), body) as object, 0);
     if (request.method === 'POST' && path === '/v1/operator/replies') return json(await account.operatorReply(body.handle, body.text), 0, 201);
     if (request.method === 'GET' && path === '/v1/me/follows') return json(await account.follows() as object, 0);
+    if (request.method === 'GET' && path === '/v1/me/lenses') return json(await account.lenses(), 0);
+    if (request.method === 'POST' && path === '/v1/me/lenses') return json(await account.saveLens(body), 0, 201);
+    if (request.method === 'POST' && path === '/v1/me/lenses/install') return json(await account.installLens(body.id), 0, 201);
+    const myLensMatch = path.match(/^\/v1\/me\/lenses\/([^/]+)$/);
+    if (request.method === 'DELETE' && myLensMatch) return json(await account.deleteLens(decodeURIComponent(myLensMatch[1])), 0);
+    if (request.method === 'GET' && path === '/v1/me/feed') return json(await account.myFeed({ lens: url.searchParams.get('lens') ?? undefined, kind: url.searchParams.get('kind') === 'clips' ? 'clips' : 'feed', cursor: url.searchParams.get('cursor') ?? undefined }), 0);
     if (request.method === 'POST' && path === '/v1/me/follows') return json(await account.follow(body.handle) as object, 0, 201);
     const followMatch = path.match(/^\/v1\/me\/follows\/([^/]+)$/);
     if (request.method === 'DELETE' && followMatch) return json(await account.unfollow(decodeURIComponent(followMatch[1])) as object, 0);

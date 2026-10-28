@@ -29,7 +29,7 @@ import { deletePost, reportPost } from "../data/postService";
 import { bridgedSourceOf, loadBridgedConversations, sendBridgedMessage } from "../connectors/bridgesConnector";
 import { normalizeStoredEmail, replySubject } from "../domain/emailNormalization";
 import { Conversation, Message } from "../domain/models";
-import { FeedMode } from "../domain/posts";
+import { useFeedLenses } from "./useFeedLenses";
 import { initialsFor } from "../domain/publicPosts";
 import { ThemeColors } from "../theme";
 import { useOpenMediaTheme } from "../themeContext";
@@ -114,7 +114,7 @@ export function OpenMediaApp({
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
   }, []);
-  const [feedMode, setFeedMode] = useState<FeedMode>("relevant");
+  const lenses = useFeedLenses(currentUserId);
   const [composeOpen, setComposeOpen] = useState(false);
   const feed = useMixedFeed(currentUserId);
   const canPost = messageMode === "open_media";
@@ -387,8 +387,10 @@ export function OpenMediaApp({
         ) : null}
         {!person && destination === "feed" ? (
           <FeedView
-            mode={feedMode}
-            onModeChange={setFeedMode}
+            lens={lenses.lens}
+            lenses={lenses.lenses}
+            onLensChange={lenses.choose}
+            lensContext={lenses.context}
             posts={feed.posts}
             loading={feed.loading}
             error={feed.error}
@@ -429,6 +431,7 @@ export function OpenMediaApp({
             posts={feed.posts}
             conversations={conversations}
             viewer={viewer}
+            lenses={lenses}
             onNavigate={navigate}
           />
         ) : null}
@@ -442,8 +445,9 @@ export function OpenMediaApp({
         ) : null}
         {!person && destination === "settings" ? (
           <OpenMediaSettings
-            feedMode={feedMode}
-            onFeedModeChange={setFeedMode}
+            feedLens={lenses.lens.id}
+            feedLenses={lenses.lenses}
+            onFeedLensChange={lenses.choose}
             onMailSynced={onMailSynced}
           />
         ) : null}

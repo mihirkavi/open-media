@@ -10,7 +10,7 @@ export interface SettingIndexEntry {
 
 export const settingIndex: SettingIndexEntry[] = [
   { id: 'appearance', title: 'Appearance', description: 'Use System, Light, or Dark appearance.', route: 'appearance', keywords: ['dark mode', 'light mode', 'theme', 'system'] },
-  { id: 'feed-mode', title: 'Feed mode', description: 'Choose transparent Relevant or chronological Raw.', route: 'feed', keywords: ['chronological feed', 'raw', 'relevant', 'algorithm'] },
+  { id: 'feed-mode', title: 'Feed mode', description: 'Choose transparent Relevant, chronological Raw, or a feed lens you describe in Search.', route: 'feed', keywords: ['chronological feed', 'raw', 'relevant', 'algorithm', 'feed lens', 'lenses', 'my feed', 'feed filters', 'why am i seeing this'] },
   { id: 'message-privacy', title: 'Message privacy', description: 'Control who can message you.', route: 'messages', keywords: ['who can message me', 'direct messages', 'dm privacy'] },
   { id: 'email', title: 'Email', description: 'Connect and manage mail accounts.', route: 'email', keywords: ['connect gmail', 'connect outlook', 'imap', 'mail'] },
   { id: 'feed-networks', title: 'Networks in Feed', description: 'Feed mixes public posts from Open Media, Farcaster, Lens, Hive, and DeSo into one stream.', route: 'feed', keywords: ['blockchain', 'farcaster', 'lens', 'hive', 'deso', 'web3', 'decentralized', 'sources'] },

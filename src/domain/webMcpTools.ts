@@ -25,13 +25,20 @@ export const webMcpTools: WebMcpToolDefinition[] = [
   },
   {
     name: 'get_open_media_feed', title: 'Read the Open Media feed',
-    description: 'The mixed public feed from Open Media and the open networks, newest first (raw) or transparently ranked (relevant), with source links and "why" reasons. Pass nextCursor back as cursor to read further.',
+    description: 'The mixed public feed from Open Media and the open networks through a feed lens: raw (newest first), relevant (transparently ranked) or a shared lens id, with source links and "why" reasons. Pass nextCursor back as cursor to read further.',
     inputSchema: { type: 'object', properties: {
       sources: { type: 'string', description: 'Comma-separated networks: open-media, farcaster, lens, hive, deso' },
-      mode: { type: 'string', enum: ['raw', 'relevant'] },
+      lens: { type: 'string', description: 'raw, relevant, or a shared lens id from list_open_media_feed_lenses' },
+      mode: { type: 'string', enum: ['raw', 'relevant'], description: 'Older name for the built-in lenses; prefer lens' },
       cursor: { type: 'string', description: 'nextCursor from the previous page' },
     } },
-    path: '/v1/feed', query: { sources: 'sources', mode: 'mode', cursor: 'cursor' },
+    path: '/v1/feed', query: { sources: 'sources', lens: 'lens', mode: 'mode', cursor: 'cursor' },
+  },
+  {
+    name: 'list_open_media_feed_lenses', title: 'List Open Media feed lenses',
+    description: 'How the Open Media Feed can be ordered: the built-in Raw and Relevant and lenses people shared, each as an inspectable manifest with its rules in plain words, what it may read, and what no lens can ever read.',
+    inputSchema: { type: 'object', properties: { query: { type: 'string', description: 'Words in a lens name or rule, e.g. "videos" or "cooking"' } } },
+    path: '/v1/lenses', query: { q: 'query' },
   },
   {
     name: 'find_upcoming_events', title: 'Find upcoming events',

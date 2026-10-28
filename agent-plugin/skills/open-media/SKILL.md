@@ -18,7 +18,7 @@ Open Media is one open app for a person's social world: one feed across Open Med
 
 Prefer MCP. Public tools need no account:
 
-- MCP (public, no key): `https://api.openmedia.site/open/mcp` - get_feed, search, get_post, get_profile, get_person_timeline, find_upcoming_events, get_listing_checks, get_transparency, list_networks, find_setting, about_open_media, and sign-in: request_sign_in_code, sign_in_with_code, refresh_sign_in.
+- MCP (public, no key): `https://api.openmedia.site/open/mcp` - get_feed, list_feed_lenses, draft_feed_lens, preview_feed_lens, search, get_post, get_profile, get_person_timeline, find_upcoming_events, get_listing_checks, get_transparency, list_networks, find_setting, about_open_media, and sign-in: request_sign_in_code, sign_in_with_code, refresh_sign_in.
 - MCP (the person's account): `https://api.openmedia.site/me/mcp` with `Authorization: Bearer <token>`.
 
 ## Signing the person in

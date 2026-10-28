@@ -1,6 +1,6 @@
 # ADR 0003: Transparent feed baseline
 
-- Status: accepted
+- Status: accepted; implementation superseded by [ADR 0017](0017-feed-lenses.md) (Raw and Relevant are now built-in feed lenses)
 - Date: 2026-08-15
 
 ## Decision

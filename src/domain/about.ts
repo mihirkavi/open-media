@@ -25,7 +25,7 @@ export const promises = [
   {
     title: 'Your feed belongs to you',
     line: 'No secret algorithm.',
-    body: 'Choose Raw, simply newest first, or Relevant, a small set of signals you can see. Every ranked post explains itself with “Why this?”, including the private data it did not use.',
+    body: 'Choose Raw, simply newest first, or Relevant, a small set of signals you can see, or describe your own feed in plain words and share it. Every feed is an open lens anyone can read, and every post explains itself with “Why this?”, including the private data it did not use.',
   },
   {
     title: 'You are not locked in',
@@ -69,7 +69,7 @@ export const roadmap: { phase: string; detail: string; status: RoadmapStatus }[]
   { phase: 'Email and Messages', detail: 'Email inside Messages, conversations organised by person.', status: 'done' },
   { phase: 'Connectors', detail: 'Cross-posting to open networks, chat bridges, the public and agent APIs.', status: 'beta' },
   { phase: 'Search and AI help', detail: 'One plain-language search for posts, messages, email and settings.', status: 'done' },
-  { phase: 'Algorithm choice', detail: 'Feed algorithms you can inspect, install and remove, with strict data permissions.', status: 'next' },
+  { phase: 'Algorithm choice', detail: 'Feed lenses you describe in plain words or with an agent, then inspect, share, install and remove, with strict data permissions.', status: 'beta' },
   { phase: 'Moderation choice', detail: 'Filters you set, credible reports and independent moderation providers.', status: 'planned' },
   { phase: 'Identity', detail: 'Optional proof of personhood without storing ID documents, separate personas, portable identity.', status: 'planned' },
   { phase: 'Governance', detail: 'One person, one vote, and an open improvement-proposal process.', status: 'planned' },
@@ -94,7 +94,11 @@ export const agentInterfaces = {
     { path: '/.well-known/mcp.json', description: 'MCP server card: the MCP servers, their tools and how to authenticate.' },
   ],
   public: [
-    { method: 'GET', path: '/v1/feed', description: 'The mixed feed: Open Media, Farcaster, Lens, Hive and DeSo, newest first, each post with its “Why this?” reasons.' },
+    { method: 'GET', path: '/v1/feed', description: 'The mixed feed: Open Media, Farcaster, Lens, Hive and DeSo through a feed lens (raw, relevant or a shared one), each post with its “Why this?” reasons.' },
+    { method: 'GET', path: '/v1/lenses', description: 'Feed lenses: the built-in Raw and Relevant and lenses people shared, each with its rules in plain words and what it may read.' },
+    { method: 'GET', path: '/v1/lenses/{id}', description: 'One feed lens and its manifest.' },
+    { method: 'POST', path: '/v1/lenses/draft', description: 'Write a feed lens from plain words, with what was and was not understood.' },
+    { method: 'POST', path: '/v1/lenses/preview', description: 'The public feed through a lens (an id, a manifest or plain words); nothing is saved.' },
     { method: 'GET', path: '/v1/search?q=', description: 'Plain-language search across public posts on every network, plus matching settings.' },
     { method: 'GET', path: '/v1/posts', description: 'Open Media public posts, newest first, paginated.' },
     { method: 'GET', path: '/v1/posts/{id}', description: 'One public post.' },
@@ -146,6 +150,11 @@ export const agentInterfaces = {
     { method: 'POST', path: '/v1/me/paid-posts', description: 'Publish a post with a free preview and a paid part.' },
     { method: 'GET', path: '/v1/me/posts/{id}/paid', description: 'The paid part of a post you wrote or paid for.' },
     { method: 'GET', path: '/v1/me/follows', description: 'Who you follow, your followers, and follow requests waiting for you.' },
+    { method: 'GET', path: '/v1/me/lenses', description: 'Your feed lenses.' },
+    { method: 'POST', path: '/v1/me/lenses', description: 'Save a feed lens, or share it publicly.' },
+    { method: 'POST', path: '/v1/me/lenses/install', description: 'Install a shared feed lens (a copy that is yours).' },
+    { method: 'DELETE', path: '/v1/me/lenses/{key}', description: 'Remove one of your feed lenses.' },
+    { method: 'GET', path: '/v1/me/feed', description: 'Your feed through a lens, using who you follow when the lens asks for it.' },
     { method: 'POST', path: '/v1/me/follows', description: 'Follow someone; private accounts get a request.' },
     { method: 'DELETE', path: '/v1/me/follows/{handle}', description: 'Unfollow, or withdraw a request.' },
     { method: 'POST', path: '/v1/me/follow-requests/{id}', description: 'Accept or decline a follow request.' },
@@ -165,8 +174,8 @@ export const agentInterfaces = {
     { method: 'POST', path: '/v1/search/assist', description: 'A short AI summary, with citations, of public posts you pass in. No account needed.' },
   ],
   mcp: [
-    { path: '/open/mcp', auth: 'none', description: 'Public tools: feed, search, posts, profiles, person timelines, upcoming events, networks, settings and the mission.' },
-    { path: '/me/mcp', auth: 'Open Media access token', description: 'Your account: posts, listings, payments (each one confirmed by you first), tips and paid posts, messages, contacts, linked accounts, identity and privacy, follows, email, chat networks, cross-posting status, blocking, reports, export and account deletion.' },
+    { path: '/open/mcp', auth: 'none', description: 'Public tools: feed, feed lenses (list, draft, preview), search, posts, profiles, person timelines, upcoming events, networks, settings and the mission.' },
+    { path: '/me/mcp', auth: 'Open Media access token', description: 'Your account: posts, feed lenses (save, share, install, your feed through one), listings, payments (each one confirmed by you first), tips and paid posts, messages, contacts, linked accounts, identity and privacy, follows, email, chat networks, cross-posting status, blocking, reports, export and account deletion.' },
     { path: '/mcp', auth: 'OAuth 2.1', description: 'Open Media Events: find events, check your calendar and plan your week.' },
   ],
 };
