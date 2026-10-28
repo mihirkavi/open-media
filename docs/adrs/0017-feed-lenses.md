@@ -1,6 +1,6 @@
 # ADR 0017: Feed lenses, written in plain words and shared openly
 
-- Status: **accepted, built and tested locally** (2026-10-27). Not deployed: the migration and Worker changes wait for the owner's deploy approval.
+- Status: **accepted and deployed** (built 2026-10-27; migration, Worker and web app deployed 2026-10-28 as Worker `3d5e448c`; iOS build 15 sent to TestFlight).
 - Supersedes the ranking in: [ADR 0003](0003-transparent-feed-baseline.md) (Raw and Relevant stay; their implementation changes)
 - Builds on: [ADR 0010](0010-universal-search.md) (Search), [ADR 0012](0012-agent-interfaces-and-design-system.md) and [ADR 0014](0014-agent-readiness-webmcp-and-plugin.md) (agents), [ADR 0013](0013-identity-contacts-commerce-payments.md) (follows)
 - Master builder prompt sections: 4.2 (you control what you see), 23 (default feed), 24 (algorithm marketplace), 25 (algorithm sandbox), 26 (why am I seeing this), Phase 6 (RankingProvider, manifests, permissions, marketplace foundation, sandboxing)

@@ -17,15 +17,17 @@ This checklist defines “production ready” for the current onboarding private
 - [x] Local browser flow: magic-link onboarding, callback cleanup, profile creation, profile search, direct conversation, send, realtime receive, account export, and responsive layout.
 - [x] Latest signed iOS Store build finished successfully: build 9, EAS `f5916bd3-c316-487a-bbed-f6085bc38fcc`.
 
-## Feed lenses (ADR 0017; built 2026-10-27, not yet deployed)
+## Feed lenses (ADR 0017; deployed 2026-10-28)
 
 - [x] App, Worker and database tests pass; `open_media_feed_lenses_test.sql` (12 checks) passes against the local database.
 - [x] Web on the local stack, desktop and 375 px: Raw and Relevant differ, a lens written in Search applies and persists, saves to the account after sign-in, shares publicly and is listed by `GET /v1/lenses`.
 - [x] iOS Simulator (iPhone 17 Pro, existing dev build, new JS from Metro): the picker sits under the title, Search shows the drafted lens and a shared lens above the keyboard, and choosing the draft switches the Feed to it with video posts only.
 - [x] Android emulator (2026-10-28): Search draft → Feed through the lens, picker wrap, "Why this?", saved to the account, kept after a restart, Raw, and sharing through Android's share sheet.
 - [ ] iOS share sheet not exercised yet.
-- [ ] Owner approval to deploy: apply `20261031120000_feed_lenses.sql`, then deploy the Worker (new `/v1/lenses*`, `/v1/me/lenses*`, `/v1/me/feed` routes and MCP tools).
-- [ ] After deploy: confirm `GET /v1/lenses` and `/docs/feed-lenses` return 200, and rescan Ora.
+- [x] Owner approved the deploy ("Deploy, then build"). Applied `20261031120000_feed_lenses.sql` with `npx supabase db push --linked` after a dry run, and deployed Worker `convo-mail-sync` version `32deeaa0-77c5-4440-be31-d69beba795c8` (rollback `9e6cfd40`). That deploy reused the old web build, so `npm run deploy` then rebuilt the web app and deployed version `3d5e448c-c46f-42a3-9662-27377e9dcc7e`; openmedia.site now serves the lens-aware bundle.
+- [x] After deploy: `GET /v1/lenses`, `POST /v1/lenses/draft`, `GET /v1/feed?lens=relevant`, `/docs/feed-lenses` and `/llms.txt` return 200; `open_media_public_feed_lenses` answers anonymously.
+- [x] iOS build 15 (EAS `879c1d25`) started with `--auto-submit` to TestFlight.
+- [ ] Rescan Ora.
 
 ## Marketplace trust and community verification (ADR 0016; deployed 2026-10-27)
 
