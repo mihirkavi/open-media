@@ -1,6 +1,6 @@
 # ADR 0018: Work: professional profiles, jobs and the Work feed
 
-- Status: **accepted, built 2026-10-28, verified on the web locally, not yet deployed** (migration `20261101120000_work_profiles_and_jobs.sql` not applied to production).
+- Status: **accepted and deployed** (built and verified on the web 2026-10-28; migration `20261101120000_work_profiles_and_jobs.sql` applied and Worker `4c66eaec` deployed the same day; iOS and Android not yet tested).
 - Builds on: [ADR 0017](0017-feed-lenses.md) (lenses), [ADR 0016](0016-marketplace-trust-and-community-verification.md) (listing checks), [ADR 0013](0013-identity-contacts-commerce-payments.md) (listings), [ADR 0012](0012-agent-interfaces-and-design-system.md) and [ADR 0014](0014-agent-readiness-webmcp-and-plugin.md) (agents)
 - Master builder prompt: LinkedIn only "where APIs and protocols permit" (§3, §11, §81); official APIs, never scraping; content-first UI.
 

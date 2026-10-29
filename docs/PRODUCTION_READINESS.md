@@ -17,10 +17,11 @@ This checklist defines “production ready” for the current onboarding private
 - [x] Local browser flow: magic-link onboarding, callback cleanup, profile creation, profile search, direct conversation, send, realtime receive, account export, and responsive layout.
 - [x] Latest signed iOS Store build finished successfully: build 9, EAS `f5916bd3-c316-487a-bbed-f6085bc38fcc`.
 
-## Work (ADR 0018; built 2026-10-28, not deployed)
+## Work (ADR 0018; deployed 2026-10-28)
 
-- [ ] Apply `supabase/migrations/20261101120000_work_profiles_and_jobs.sql` (dry run first, then `db push`).
-- [ ] Deploy the Worker and web app with `npm run deploy` (owner approval first).
+- [x] Applied `supabase/migrations/20261101120000_work_profiles_and_jobs.sql` to production on 2026-10-28 (dry run first).
+- [x] Deployed web app and Worker with `npm run deploy` on 2026-10-28 (owner said "push and deploy"): Worker `4c66eaec-0523-4817-8a10-5fbe1313f559`, rollback `a91f2f3c-c49a-4935-bf4d-00c2f8ed5b57`. Live checks: `/v1/lenses` lists relevant, raw and work; `/v1/jobs` answers; `/v1/me/professional` refuses without a token; the Work feed opens from Search on openmedia.site.
+- [x] Earlier the same day: Worker `a91f2f3c` fixed iCloud IMAP sign-in hanging on Workers (commit `34e9ab0`); rollback `3d5e448c`. Linking an iCloud account on openmedia.site is not yet confirmed by the owner.
 - [x] Web verified locally on 2026-10-28 at desktop width and 375 px, signed in and signed out: Work lens from Search, profile changes from Search, LinkedIn-export import through the API (birth date and address dropped), job posting, the job-scam check (held), application draft (nothing sent), export with `jsonResume`, public resume page.
 - [ ] iOS Simulator and Android emulator (deferred by the owner on 2026-10-28).
 - [ ] Workers AI tailoring checked on real profiles in production.
