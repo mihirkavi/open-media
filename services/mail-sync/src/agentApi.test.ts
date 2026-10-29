@@ -283,7 +283,14 @@ test('public resumes come from the JSON Resume packages and respect private prof
     const page = await handleAgentRequest(new Request(`${origin}/v1/profiles/asha/resume`), env);
     assert.equal(page.status, 200);
     assert.match(page.headers.get('content-security-policy') ?? '', /default-src 'none'/);
-    assert.match(await page.text(), /Senior designer/);
+    const html = await page.text();
+    assert.match(html, /Senior designer/);
+    // Open Media's look, not the theme's: its palette and type, no scripts, no outside requests.
+    assert.match(html, /--color-background-light:#FFFFFF/);
+    assert.match(html, /--color-background-dark:#0A0A0A/);
+    assert.match(html, /font-family:Inter/);
+    assert.doesNotMatch(html, /<script|fonts\.googleapis\.com/i);
+    assert.match(html, /<time datetime="2022-03">Mar 2022<\/time>/);
     const json = await (await handleAgentRequest(new Request(`${origin}/v1/profiles/asha/resume.json`), env)).json() as { basics: { label: string } };
     assert.equal(json.basics.label, 'Product designer');
     const yaml = await (await handleAgentRequest(new Request(`${origin}/v1/profiles/asha/resume.yaml`), env)).text();

@@ -8,6 +8,8 @@ import schemaPackage from '@jsonresume/schema';
 import { convert as toRenderCv } from '@jsonresume/jsonresume-to-rendercv/convert.js';
 import { render as renderEven } from 'jsonresume-theme-even';
 
+import { darkColors, lightColors } from '../../../src/theme';
+
 type JsonResume = Record<string, unknown>;
 
 /** Checks a document against the official JSON Resume schema. */
@@ -55,9 +57,39 @@ export async function renderCvYaml(resume: JsonResume): Promise<string> {
     .replace(/^ {2}social_networks:\n(?! {4}-)/m, '');
 }
 
-/** A resume page rendered by jsonresume-theme-even, for links in applications and for recruiters. */
+/**
+ * The theme's own colour variables, set to Open Media's palette (src/theme.ts) so the page looks
+ * like the app: black and white, warm grays, emphasis from weight rather than hue, Inter type,
+ * and the reader's light or dark setting.
+ */
+const openMediaTheme = `<meta name="color-scheme" content="light dark">
+<style>
+:root{
+  --color-background-light:${lightColors.surface};--color-dimmed-light:${lightColors.chrome};--color-primary-light:${lightColors.text};--color-secondary-light:${lightColors.textSecondary};--color-accent-light:${lightColors.accent};
+  --color-background-dark:${darkColors.surface};--color-dimmed-dark:${darkColors.chrome};--color-primary-dark:${darkColors.text};--color-secondary-dark:${darkColors.textSecondary};--color-accent-dark:${darkColors.accent};
+}
+html,body{font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+body{letter-spacing:-0.005em}
+h1{font-weight:700;letter-spacing:-0.03em}
+h2,h3,h4{font-weight:600;letter-spacing:-0.015em}
+a{color:var(--color-accent);text-decoration:underline;text-underline-offset:2px;text-decoration-color:var(--color-secondary)}
+a:hover{text-decoration-color:currentColor}
+svg{color:var(--color-secondary)}
+time-duration{display:none}
+hr,section{border-color:${lightColors.border}}
+@media (prefers-color-scheme: dark){hr,section{border-color:${darkColors.border}}}
+</style>`;
+
+/** A resume page rendered by jsonresume-theme-even, for links in applications and for recruiters, in Open Media's look. */
 export function resumeHtml(resume: JsonResume): string {
-  return renderEven(resume as never);
+  return renderEven(resume as never)
+    // The theme loads Lato from Google Fonts; the page uses Open Media's type and makes no outside requests.
+    .replace(/<link[^>]+fonts\.googleapis\.com[^>]*>/g, '')
+    // Its scripts only add "2 years"-style durations; the page runs no scripts at all.
+    .replace(/<script\b[\s\S]*?<\/script>/gi, '')
+    // A year on its own stays a year, rather than the theme's "Jan 2016".
+    .replace(/<time datetime="(\d{4})">[^<]*<\/time>/g, '<time datetime="$1">$1</time>')
+    .replace('</head>', `${openMediaTheme}\n</head>`);
 }
 
 /** The page's security headers: the theme's own styles only, no scripts, no outside requests except https images. */
