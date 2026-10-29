@@ -6,6 +6,7 @@ import { FollowStatus, followPerson, loadPublicPerson, loadTimeline, PublicPerso
 import { networks } from '../domain/networkPosts';
 import { cardFor, ContactCard, IdentityRef, linkedIdentities, refKey, shownName } from '../domain/people';
 import { SocialPost } from '../domain/posts';
+import { fieldDefinition, fieldDisplay, fieldHref, publicProfileUrl } from '../domain/profileFields';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { PostCard } from './OpenMediaFeed';
@@ -98,6 +99,12 @@ export function PersonProfile({ target, viewerId, onBack, onMessage }: { target:
       <Text style={styles.meta}>{[handle ? `@${handle}` : undefined, where].filter(Boolean).join(' · ')}</Text>
       {person?.bio ? <Text style={styles.bio}>{person.bio}</Text> : null}
       <ProfessionalLines profile={person?.professional} />
+      {person?.fields.length ? <View style={styles.fields}>{person.fields.map((item) => {
+        const href = fieldHref(item.field, item.value);
+        const label = fieldDefinition(item.field)?.label ?? item.field;
+        return <Text key={item.field} style={styles.small}>{label}: {href ? <Text accessibilityRole="link" onPress={() => { Linking.openURL(href).catch(() => undefined); }} style={styles.fieldLink}>{fieldDisplay(item.field, item.value)}</Text> : fieldDisplay(item.field, item.value)}</Text>;
+      })}</View> : null}
+      {handle && target.ref.kind === 'open_media' ? <Text style={styles.small}><Text accessibilityRole="link" onPress={() => { Linking.openURL(publicProfileUrl(handle)).catch(() => undefined); }} style={styles.fieldLink}>{publicProfileUrl(handle).replace('https://', '')}</Text>{person?.professional ? <> · <Text accessibilityRole="link" onPress={() => { Linking.openURL(`${publicProfileUrl(handle)}/resume`).catch(() => undefined); }} style={styles.fieldLink}>Resume</Text></> : null}</Text> : null}
       {person?.joinedAt ? <Text style={styles.small}>{`Joined ${new Date(person.joinedAt).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })} · ${person.postCount ?? 0} ${person.postCount === 1 ? 'post' : 'posts'}`}</Text> : null}
       <View style={styles.actions}>
         {person && viewerId && !self ? <Pressable accessibilityRole="button" accessibilityState={{ selected: Boolean(follow) }} onPress={toggleFollow} style={[styles.button, !follow && styles.primary]}>
@@ -189,6 +196,8 @@ function createStyles(colors: ThemeColors) {
     initials: { color: colors.text, fontSize: 32, fontWeight: '600' },
     name: { color: colors.text, fontSize: 26, fontWeight: '700', textAlign: 'center' },
     meta: { color: colors.textTertiary, fontSize: 14 },
+    fields: { marginTop: 8, alignItems: 'center', gap: 3 },
+    fieldLink: { color: colors.text, textDecorationLine: 'underline' },
     bio: { marginTop: 6, maxWidth: 520, color: colors.textSecondary, fontSize: 15, lineHeight: 22, textAlign: 'center' },
     small: { marginTop: 4, color: colors.textTertiary, fontSize: 13, lineHeight: 19, textAlign: 'center' },
     faint: { color: colors.textTertiary, fontSize: 12 },

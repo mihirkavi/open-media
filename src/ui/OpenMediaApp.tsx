@@ -28,6 +28,7 @@ import {
 import { deletePost, reportPost } from "../data/postService";
 import { bridgedSourceOf, loadBridgedConversations, sendBridgedMessage } from "../connectors/bridgesConnector";
 import { normalizeStoredEmail, replySubject } from "../domain/emailNormalization";
+import { profileHandleFromPath } from "../domain/profileFields";
 import { Conversation, Message } from "../domain/models";
 import { useFeedLenses } from "./useFeedLenses";
 import { initialsFor } from "../domain/publicPosts";
@@ -87,12 +88,14 @@ export function OpenMediaApp({
   profile,
   onSignOut,
   onAccountDeleted,
+  onProfileChange,
   messageMode = "open_media",
 }: {
   currentUserId: string;
   profile: OpenMediaProfileData;
   onSignOut: () => Promise<void>;
   onAccountDeleted?: () => void;
+  onProfileChange?: (profile: OpenMediaProfileData) => void;
   messageMode?: MessageMode;
 }) {
   const { width } = useWindowDimensions();
@@ -311,7 +314,11 @@ export function OpenMediaApp({
   };
 
   // Unified profiles (ADR 0013): any name or avatar opens the person, over the current screen.
-  const [person, setPerson] = useState<PersonTarget>();
+  // openmedia.site/@handle opens that profile over the app (ADR 0019).
+  const [person, setPerson] = useState<PersonTarget | undefined>(() => {
+    const handle = Platform.OS === "web" && typeof window !== "undefined" ? profileHandleFromPath(window.location.pathname) : undefined;
+    return handle ? { ref: { kind: "open_media", handle } } : undefined;
+  });
   const [openConversationId, setOpenConversationId] = useState<string>();
   const encounters = useMemo(
     () => conversations.map(encounterForConversation).filter((item): item is NonNullable<typeof item> => Boolean(item)),
@@ -320,11 +327,17 @@ export function OpenMediaApp({
   const contacts = useContactsStore(messageMode === "open_media" && apiConfigured(), encounters);
   const openPerson = useCallback((target: PersonTarget) => {
     setPerson(target);
-    if (Platform.OS === "web" && typeof window !== "undefined") window.history.pushState({ person: true }, "", `${window.location.pathname}${window.location.hash}`);
+    if (Platform.OS !== "web" || typeof window === "undefined") return;
+    // An Open Media profile shows its own address, /@handle, so it can be copied and shared.
+    const path = target.ref.kind === "open_media" ? `/@${target.ref.handle.replace(/^@/, "").toLowerCase()}` : window.location.pathname;
+    window.history.pushState({ person: true }, "", `${path}${window.location.hash}`);
   }, []);
   const closePerson = () => {
     if (Platform.OS === "web" && typeof window !== "undefined" && window.history.state?.person) window.history.back();
-    else setPerson(undefined);
+    else {
+      setPerson(undefined);
+      if (Platform.OS === "web" && typeof window !== "undefined" && profileHandleFromPath(window.location.pathname)) window.history.replaceState(null, "", `/${window.location.hash}`);
+    }
   };
   useEffect(() => {
     if (Platform.OS !== "web" || typeof window === "undefined") return;
@@ -441,6 +454,7 @@ export function OpenMediaApp({
             onNavigate={navigate}
             onSignOut={onSignOut}
             onAccountDeleted={onAccountDeleted}
+            onProfileChange={onProfileChange}
           />
         ) : null}
         {!person && destination === "settings" ? (

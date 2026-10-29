@@ -100,6 +100,8 @@ Open Media's professional side (ADR 0018): a professional profile on every accou
 ## Steps
 
 1. Profile: read it with \`get_professional_profile\`. To fill it, ask for their resume (JSON Resume) or LinkedIn's own data export (LinkedIn → Settings → Data privacy → Get a copy of your data; Profile.csv, Positions.csv, Education.csv, Skills.csv) and call \`import_resume\` without save. Show what was read, then call it again with save: true once they agree. Or write the fields yourself from what they tell you and save with \`set_professional_profile\` after they agree.
+   Contact details and accounts on other networks (LinkedIn, X, Instagram, GitHub, …) are profile fields: \`get_profile_fields\`, then \`set_profile_fields\` with the whole list. Each has a visibility: everyone, connections (mutual follows or people they share a conversation with) or only_me; email and phone start as only_me. Never make a contact detail visible to more people without asking.
+   The person's public address is openmedia.site/@handle, and their resume is openmedia.site/@handle/resume.
 2. Jobs: \`find_jobs\` with words and remote. Each job has its pay, place, kind and \`applyUrl\` (the employer's own page).
 3. Tailoring: \`tailor_resume\` with the job's \`postId\` (or its title and description). Show the draft and the \`removed\` list. Save changes to the profile only if they ask.
 4. Applying: \`draft_job_application\`. Show the exact message. Only after they approve it, send it with \`start_conversation\` and \`send_message\`, or give them the apply link to apply themselves.

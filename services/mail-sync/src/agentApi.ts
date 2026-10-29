@@ -23,9 +23,10 @@ import { networkSearches } from '../../../src/connectors/networkSearch';
 import { collapseRepeatedPosts, NetworkId, networks } from '../../../src/domain/networkPosts';
 import { explainFeedPost, FeedMode, selectFeed, SocialPost } from '../../../src/domain/posts';
 import { builtInLenses, FeedLens, LensContext, LensError, lensSummary, relevantLens, workLens } from '../../../src/domain/feedLenses';
+import { fieldDefinition, fieldHref, ProfileFieldError, ProfileFieldValue, profileFieldDefinitions, readVisibleFields, validateProfileFields } from '../../../src/domain/profileFields';
 import { fromJsonResume, fromLinkedInExport, isEmptyProfessional, parseProfessional, ProfessionalError, toJsonResume } from '../../../src/domain/professionalProfile';
 import { applicationMessage, tailorProfile } from './careerAssist.js';
-import { renderCvYaml, resumeHtml, resumePageHeaders, validateJsonResume } from './resumeFormats.js';
+import { noResumeHtml, renderCvYaml, resumeHtml, resumePageHeaders, validateJsonResume } from './resumeFormats.js';
 import { UserFacingError } from './errors.js';
 import { deleteLens as deleteStoredLens, draftLens, findLens, installLens as installSharedLens, LensApiError, lensView, listLenses, myLenses, resolveLens, saveLens as saveStoredLens } from './feedLensApi.js';
 import { EmploymentType, employmentTypes, PostListing, validateListing } from '../../../src/domain/listings';
@@ -51,7 +52,7 @@ import { verifyWebBotAuth } from './webBotAuth.js';
 import { reportReasons } from '../../../src/domain/listingSafety';
 import { discloseLegalName, handleVerificationWebhook, startVerification, VerificationEnv, VerificationError, verificationConfigured } from './verification.js';
 
-export type AgentEnv = PublicApiEnv & BridgesEnv & ContactsEnv & VerificationEnv & PublicEventsEnv & PaymentsEnv & AgentAuthEnv & MarketplaceEnv;
+export type AgentEnv = { WEB_APP_HOSTS?: string } & PublicApiEnv & BridgesEnv & ContactsEnv & VerificationEnv & PublicEventsEnv & PaymentsEnv & AgentAuthEnv & MarketplaceEnv;
 
 const version = '1.0.0';
 const sources = ['open-media', 'farcaster', 'lens', 'hive', 'deso'] as const;
@@ -101,6 +102,7 @@ export function isAgentPath(pathname: string, method: string): boolean {
   if (path === '/v1/me' || path.startsWith('/v1/me/')) return true;
   if (method === 'GET' && /^\/v1\/people\/[^/]+\/[^/]+$/.test(path)) return true;
   if (method === 'GET' && /^\/v1\/profiles\/[^/]+\/resume(\.json|\.yaml)?$/.test(path)) return true;
+  if (method === 'GET' && /^\/@[a-z0-9_]{3,24}\/resume(\.json|\.yaml)?$/i.test(path)) return true;
   if (method === 'POST' && path === '/v1/verification/stripe/webhook') return true;
   if (method === 'POST' && path === '/v1/payments/stripe/webhook') return true;
   return method !== 'GET' && /^\/v1\/posts\/[^/]+\/report$/.test(path);
@@ -198,15 +200,42 @@ export async function previewLens(env: AgentEnv, origin: string, input: Record<s
   return { ...page, lens: lensView(lens, origin), note: lens.permissions.includes('follows') && lens.filters.followedOnly ? 'This preview has no account, so “people you follow” keeps nothing here. Use get_my_feed with the person’s token.' : undefined };
 }
 
+/** The web app's address for links people open: this host when it is the web app, else openmedia.site. */
+function webOrigin(env: AgentEnv, origin: string): string {
+  const hosts = (env.WEB_APP_HOSTS ?? '').split(',').map((host) => host.trim()).filter(Boolean);
+  return hosts.includes(new URL(origin).hostname) ? origin : `https://${hosts[0] ?? 'openmedia.site'}`;
+}
+
+/** Adds the profile fields shown to everyone to a resume: contact details, website and social accounts. */
+function withPublicFields(resume: Record<string, unknown>, fields: { field: string; value: string }[]): Record<string, unknown> {
+  const basics = { ...(resume.basics as Record<string, unknown>) };
+  const profiles = [...((basics.profiles as { network: string; url?: string }[]) ?? [])];
+  for (const item of fields) {
+    if (item.field === 'email') basics.email = item.value;
+    else if (item.field === 'phone') basics.phone = item.value;
+    else if (item.field === 'location' && !basics.location) basics.location = { city: item.value };
+    else if (fieldDefinition(item.field)?.group !== 'about' || item.field === 'website') {
+      const url = fieldHref(item.field, item.value);
+      if (url && !profiles.some((profile) => profile.url === url)) profiles.push({ network: fieldDefinition(item.field)!.label, username: item.value, url } as { network: string; url: string });
+    }
+  }
+  return { ...resume, basics: { ...basics, profiles } };
+}
+
 /** A person's public professional profile as a resume: JSON Resume, RenderCV YAML, or a page drawn by a JSON Resume theme. */
 export async function publicResume(env: AgentEnv, origin: string, handle: string, format: 'html' | 'json' | 'yaml'): Promise<Response> {
   const clean = handle.toLowerCase().replace(/^@/, '');
   if (!handlePattern.test(clean)) throw new AgentError(404, 'not_found', 'No such profile.');
-  const person = await callRpc<{ handle?: string; displayName?: string; canView?: boolean; professional?: unknown } | null>(env, fetch, 'open_media_public_profile', { p_handle: clean });
+  // Asked without a token, so only the fields the person shows to everyone come back.
+  const person = await callRpc<{ handle?: string; displayName?: string; canView?: boolean; professional?: unknown; fields?: unknown } | null>(env, fetch, 'open_media_public_profile', { p_handle: clean });
   let professional;
   try { professional = person?.canView ? parseProfessional(person.professional) : undefined; } catch { professional = undefined; }
-  if (!person?.handle || !professional || isEmptyProfessional(professional)) throw new AgentError(404, 'not_found', 'This person has no public professional profile.');
-  const resume = toJsonResume(professional, { name: person.displayName ?? person.handle, handle: person.handle, url: `${origin}/v1/profiles/${person.handle}/resume` });
+  if (!person?.handle || !professional || isEmptyProfessional(professional)) {
+    // A browser gets a readable page rather than an API error.
+    if (format === 'html' && person?.handle) return new Response(noResumeHtml(person.displayName ?? person.handle, `${webOrigin(env, origin)}/@${person.handle}`), { status: 404, headers: { ...resumePageHeaders, 'cache-control': 'no-store' } });
+    throw new AgentError(404, 'not_found', 'This person has no public professional profile.');
+  }
+  const resume = withPublicFields(toJsonResume(professional, { name: person.displayName ?? person.handle, handle: person.handle, url: `${webOrigin(env, origin)}/@${person.handle}/resume` }), readVisibleFields(person.fields));
   if (format === 'json') return new Response(JSON.stringify(resume, null, 2), { headers: { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=300' } });
   if (format === 'yaml') return new Response(await renderCvYaml(resume), { headers: { 'content-type': 'text/yaml; charset=utf-8', 'access-control-allow-origin': '*', 'content-disposition': `inline; filename="${person.handle}-rendercv.yaml"`, 'cache-control': 'public, max-age=300' } });
   return new Response(resumeHtml(resume), { headers: resumePageHeaders });
@@ -517,16 +546,16 @@ export class Account {
   private async ownProfile() {
     const [row] = await this.rest<{ handle: string; display_name: string; professional: unknown }[]>('GET', `/rest/v1/profiles?id=eq.${this.userId}&select=handle,display_name,professional`);
     if (!row) throw new AgentError(404, 'no_profile', 'This account has no profile yet. Choose a name and handle with set_up_profile first.');
-    return { handle: row.handle, name: row.display_name, url: `${this.origin}/v1/profiles/${row.handle}/resume`, professional: parseProfessional(row.professional) };
+    return { handle: row.handle, name: row.display_name, url: `${webOrigin(this.env, this.origin)}/@${row.handle}/resume`, professional: parseProfessional(row.professional) };
   }
 
   async professional() {
     const own = await this.ownProfile();
-    const resumeUrl = `${this.origin}/v1/profiles/${own.handle}/resume`;
+    const resumeUrl = own.url;
     const jsonResume = toJsonResume(own.professional, { ...own, url: resumeUrl });
     return {
       professional: own.professional, jsonResume, jsonResumeValid: validateJsonResume(jsonResume).valid, renderCvYaml: await renderCvYaml(jsonResume),
-      resumeUrl, links: { page: resumeUrl, jsonResume: `${resumeUrl}.json`, renderCv: `${resumeUrl}.yaml` },
+      resumeUrl, profileUrl: `${webOrigin(this.env, this.origin)}/@${own.handle}`, links: { page: resumeUrl, jsonResume: `${resumeUrl}.json`, renderCv: `${resumeUrl}.yaml` },
       note: 'Public, like the rest of the profile. jsonResume imports into Reactive Resume (file import, format JSON_RESUME) and other JSON Resume tools; renderCvYaml renders with RenderCV (rendercv render).',
     };
   }
@@ -536,6 +565,19 @@ export class Account {
     try { profile = parseProfessional(value); } catch (error) { throw new AgentError(400, 'bad_request', error instanceof ProfessionalError ? error.message : 'Check the professional profile.'); }
     await this.rpc('open_media_set_professional_profile', { p_professional: profile });
     return { professional: profile, note: 'Saved. It shows on the person’s public profile.' };
+  }
+
+  /** Profile fields with who may see each one (ADR 0019). */
+  async profileFields() {
+    const fields = await this.rpc<ProfileFieldValue[]>('open_media_my_profile_fields', {});
+    return { fields, available: profileFieldDefinitions.map((field) => ({ field: field.id, label: field.label, group: field.group, defaultVisibility: field.defaultVisibility })), note: 'Visibility: everyone, connections (mutual follows or people they share a conversation with) or only_me.' };
+  }
+
+  async setProfileFields(value: unknown) {
+    let fields: ProfileFieldValue[];
+    try { fields = validateProfileFields(value); } catch (error) { throw new AgentError(400, 'bad_request', error instanceof ProfileFieldError ? error.message : 'Check the profile fields.'); }
+    const saved = await this.rpc<ProfileFieldValue[]>('open_media_set_profile_fields', { p_fields: fields });
+    return { fields: saved, note: 'Saved. This replaces every profile field; fields left out were removed.' };
   }
 
   /** Reads a JSON Resume or LinkedIn export into a profile. Saves only with save: true, after the person agreed. */
@@ -1126,6 +1168,8 @@ function registerAccountTools(server: McpServer, account: Account) {
   // Work: professional profile and jobs (ADR 0018)
   const jobInput = { postId: z.string().optional().describe('A job post on Open Media, from find_jobs'), title: z.string().max(120).optional(), description: z.string().max(4000).optional().describe('The job description, if the job is elsewhere'), employer: z.string().max(120).optional() };
   tool(server, 'get_professional_profile', { title: 'My professional profile', description: 'The work side of the person’s profile (headline, experience, education, skills, links, open to work or hiring), plus the same data as a JSON Resume document they can open in Reactive Resume, RenderCV and other resume tools.', input: {}, readOnly: true }, () => account.professional());
+  tool(server, 'get_profile_fields', { title: 'My profile fields', description: 'The person’s profile fields (pronouns, location, website, email, phone, and accounts on LinkedIn, X, Instagram, GitHub and other networks), each with who may see it: everyone, connections (mutual follows or people they share a conversation with) or only_me. Also lists every field that can be set.', input: {}, readOnly: true }, () => account.profileFields());
+  tool(server, 'set_profile_fields', { title: 'Save my profile fields', description: 'Replaces all of the person’s profile fields with this list of {field, value, visibility}. Fields left out are removed, so read get_profile_fields first and send the whole list. Email and phone default to only_me. Confirm with the person, especially before making a contact detail visible to anyone.', input: { fields: z.array(z.object({ field: z.string(), value: z.string().max(300), visibility: z.enum(['everyone', 'connections', 'only_me']).optional() })).max(40) }, readOnly: false }, (args) => account.setProfileFields(args.fields));
   tool(server, 'set_professional_profile', { title: 'Save my professional profile', description: 'Replaces the work side of the person’s public profile: headline, summary, openTo (work, hiring or none), location, work [{name (employer), position, location, startDate "2021-04", endDate, summary, highlights}], education [{institution, area, studyType, startDate, endDate}], skills, languages, links [{label, url https}]. It is public. Only use facts the person gave you; show them the result and ask before saving.', input: { professional: z.record(z.string(), z.unknown()) }, readOnly: false }, (args) => account.setProfessional(args.professional));
   tool(server, 'import_resume', { title: 'Import a resume or LinkedIn export', description: 'Reads a JSON Resume document (jsonResume) or the CSV files from LinkedIn’s own data export (linkedInFiles: {"Profile.csv": text, "Positions.csv": text, "Education.csv": text, "Skills.csv": text}) into a professional profile. LinkedIn has no API for this: the person downloads the export from LinkedIn (Settings → Data privacy → Get a copy of your data). Nothing is saved unless save is true; show the person what was read first. Birth dates, addresses and contact details are never imported.', input: { jsonResume: z.unknown().optional(), linkedInFiles: z.record(z.string(), z.string()).optional(), save: z.boolean().optional() }, readOnly: false }, (args) => account.importResume(args));
   tool(server, 'tailor_resume', { title: 'Tailor my profile to a job', description: 'Drafts the person’s headline, summary, skill order and job highlights for one job, and a short cover note, using only what their profile already says. Anything the AI added that the profile doesn’t say is removed and listed in removed. Nothing is saved: to keep it, save it with set_professional_profile after the person agrees.', input: jobInput, readOnly: true }, (args) => account.tailor(args));
@@ -1253,7 +1297,7 @@ export function serverCard(origin: string) {
     documentation: `${origin}/llms.txt`,
     servers: [
       { name: 'open-media', title: 'Open Media', url: `${origin}/open/mcp`, transport: 'streamable-http', authentication: { type: 'none' }, tools: ['get_feed', 'search', 'get_post', 'get_profile', 'list_feed_lenses', 'get_feed_lens', 'draft_feed_lens', 'preview_feed_lens', 'find_jobs', 'list_networks', 'find_setting', 'about_open_media'] },
-      { name: 'open-media-account', title: 'Open Media (your account)', url: `${origin}/me/mcp`, transport: 'streamable-http', authentication: { type: 'bearer', description: 'The person’s Open Media access token: sign in with request_sign_in_code and sign_in_with_code on the public server (or POST /v1/auth/email-code then /v1/auth/verify), or copy it from Settings → Developers and agents. It expires after about an hour; renew it with refresh_sign_in.' }, tools: ['get_me', 'set_up_profile', 'publish_post', 'delete_post', 'report_post', 'list_conversations', 'start_conversation', 'send_message', 'export_my_data', 'block_person', 'report_conversation', 'delete_my_account', 'list_email', 'list_mailboxes', 'connect_mailbox', 'sync_mailbox', 'send_email', 'remove_mailbox', 'list_chat_networks', 'list_bridged_chats', 'send_bridged_message', 'chat_network_sign_in_options', 'start_chat_network_sign_in', 'continue_chat_network_sign_in', 'disconnect_chat_network', 'cross_posting_status', 'list_my_feed_lenses', 'save_feed_lens', 'install_feed_lens', 'delete_feed_lens', 'get_my_feed', 'get_professional_profile', 'set_professional_profile', 'import_resume', 'tailor_resume', 'draft_job_application', 'publish_job', 'plus every public tool'] },
+      { name: 'open-media-account', title: 'Open Media (your account)', url: `${origin}/me/mcp`, transport: 'streamable-http', authentication: { type: 'bearer', description: 'The person’s Open Media access token: sign in with request_sign_in_code and sign_in_with_code on the public server (or POST /v1/auth/email-code then /v1/auth/verify), or copy it from Settings → Developers and agents. It expires after about an hour; renew it with refresh_sign_in.' }, tools: ['get_me', 'set_up_profile', 'publish_post', 'delete_post', 'report_post', 'list_conversations', 'start_conversation', 'send_message', 'export_my_data', 'block_person', 'report_conversation', 'delete_my_account', 'list_email', 'list_mailboxes', 'connect_mailbox', 'sync_mailbox', 'send_email', 'remove_mailbox', 'list_chat_networks', 'list_bridged_chats', 'send_bridged_message', 'chat_network_sign_in_options', 'start_chat_network_sign_in', 'continue_chat_network_sign_in', 'disconnect_chat_network', 'cross_posting_status', 'list_my_feed_lenses', 'save_feed_lens', 'install_feed_lens', 'delete_feed_lens', 'get_my_feed', 'get_profile_fields', 'set_profile_fields', 'get_professional_profile', 'set_professional_profile', 'import_resume', 'tailor_resume', 'draft_job_application', 'publish_job', 'plus every public tool'] },
       { name: 'open-media-events', title: 'Open Media Events', url: `${origin}/mcp`, transport: 'streamable-http', authentication: { type: 'oauth2', metadata: `${origin}/.well-known/oauth-authorization-server` } },
     ],
   };
@@ -1345,6 +1389,10 @@ function baseOpenApi(origin: string) {
       '/v1/me/professional': {
         get: { summary: 'Your professional profile, and the same data as a JSON Resume document', security: bearer, responses: { 200: ok('Professional profile'), 401: error } },
         put: { summary: 'Replace your professional profile (public): headline, summary, openTo, location, work, education, skills, languages, links', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object' } } } }, responses: { 200: ok('Saved'), 400: error, 401: error } },
+      },
+      '/v1/me/profile-fields': {
+        get: { summary: 'Your profile fields (contact details and accounts on other networks), each with its visibility', security: bearer, responses: { 200: ok('Profile fields'), 401: error } },
+        put: { summary: 'Replace your profile fields: a list of {field, value, visibility (everyone, connections, only_me)}', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'array', maxItems: 40, items: { type: 'object', required: ['field', 'value'], properties: { field: { type: 'string' }, value: { type: 'string', maxLength: 300 }, visibility: { type: 'string', enum: ['everyone', 'connections', 'only_me'] } } } } } } }, responses: { 200: ok('Saved'), 400: error, 401: error } },
       },
       '/v1/me/professional/import': { post: { summary: 'Read a JSON Resume (jsonResume) or LinkedIn data-export CSVs (linkedInFiles) into a professional profile; saved only with save: true', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { jsonResume: { type: 'object' }, linkedInFiles: { type: 'object', additionalProperties: { type: 'string' } }, save: { type: 'boolean' } } } } } }, responses: { 200: ok('What was read'), 400: error, 401: error } } },
       '/v1/me/career/tailor': { post: { summary: 'Draft your profile and a cover note for one job, from your own profile only; nothing is saved', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { postId: { type: 'string', format: 'uuid' }, title: { type: 'string' }, description: { type: 'string' }, employer: { type: 'string' } } } } } }, responses: { 200: ok('Draft, with anything removed listed'), 400: error, 401: error, 429: error } } },
@@ -1569,7 +1617,7 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     }
     if (request.method === 'GET' && path === '/v1/search') return json(await search(env, origin, url.searchParams.get('q') ?? ''), 30);
     if (request.method === 'GET' && path === '/v1/lenses') return json(await listLenses(env, origin, url.searchParams.get('q')), 60);
-    const resumeMatch = request.method === 'GET' ? path.match(/^\/v1\/profiles\/([^/]+)\/resume(\.json|\.yaml)?$/) : null;
+    const resumeMatch = request.method === 'GET' ? path.match(/^\/v1\/profiles\/([^/]+)\/resume(\.json|\.yaml)?$/) ?? path.match(/^\/@([a-z0-9_]{3,24})\/resume(\.json|\.yaml)?$/i) : null;
     if (resumeMatch) return await publicResume(env, origin, decodeURIComponent(resumeMatch[1]), resumeMatch[2] === '.json' ? 'json' : resumeMatch[2] === '.yaml' ? 'yaml' : 'html');
     if (request.method === 'GET' && path === '/v1/jobs') {
       const remote = url.searchParams.get('remote');
@@ -1636,6 +1684,8 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     if (request.method === 'PUT' && path === '/v1/me/linked-accounts') return json(await account.setLinkedAccounts(Array.isArray(raw) ? raw : body.accounts), 0);
     if (request.method === 'POST' && path === '/v1/me/listings') return json(await account.publishListing(body, idempotencyKey), 0, 201);
     if (request.method === 'GET' && path === '/v1/me/professional') return json(await account.professional(), 0);
+    if (request.method === 'GET' && path === '/v1/me/profile-fields') return json(await account.profileFields(), 0);
+    if (request.method === 'PUT' && path === '/v1/me/profile-fields') return json(await account.setProfileFields(Array.isArray(raw) ? raw : body.fields), 0);
     if (request.method === 'PUT' && path === '/v1/me/professional') return json(await account.setProfessional(body), 0);
     if (request.method === 'POST' && path === '/v1/me/professional/import') return json(await account.importResume(body), 0);
     if (request.method === 'POST' && path === '/v1/me/career/tailor') return json(await account.tailor(body), 0);

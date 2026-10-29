@@ -277,7 +277,7 @@ test('job search is public and asks the database for open jobs only', async () =
 
 test('public resumes come from the JSON Resume packages and respect private profiles', async () => {
   const realFetch = globalThis.fetch;
-  let profile: unknown = { handle: 'asha', displayName: 'Asha', canView: true, professional: savedProfessional };
+  let profile: unknown = { handle: 'asha', displayName: 'Asha', canView: true, professional: savedProfessional, fields: [{ field: 'linkedin', value: 'asha-rao' }] };
   globalThis.fetch = (async () => Response.json(profile)) as typeof fetch;
   try {
     const page = await handleAgentRequest(new Request(`${origin}/v1/profiles/asha/resume`), env);
@@ -293,6 +293,8 @@ test('public resumes come from the JSON Resume packages and respect private prof
     assert.match(html, /<time datetime="2022-03">Mar 2022<\/time>/);
     const json = await (await handleAgentRequest(new Request(`${origin}/v1/profiles/asha/resume.json`), env)).json() as { basics: { label: string } };
     assert.equal(json.basics.label, 'Product designer');
+    // Fields the person shows to everyone join the resume; the database never returns the others here.
+    assert.ok((json.basics as unknown as { profiles: { network: string; url: string }[] }).profiles.some((item) => item.network === 'LinkedIn' && item.url === 'https://www.linkedin.com/in/asha-rao'));
     const yaml = await (await handleAgentRequest(new Request(`${origin}/v1/profiles/asha/resume.yaml`), env)).text();
     assert.match(yaml, /^cv:\n {2}name: "Asha"/);
     assert.match(yaml, /company: "Acme"/);

@@ -29,3 +29,16 @@ test('www redirects to the apex; the API, agents and other hosts are left to the
   assert.equal(await ask('https://convo-mail-sync.convo-mail-sync.workers.dev/'), undefined);
   assert.equal(await handleWebAppRequest(new Request('https://openmedia.site/', { headers: html }), { WEB_APP_HOSTS: 'openmedia.site' }), undefined, 'no build, no web app');
 });
+
+test('openmedia.site/@handle opens the app on that profile, and /handle redirects there', async () => {
+  served.length = 0;
+  assert.equal(await (await ask('https://openmedia.site/@mihirkavishwar'))!.text(), 'app');
+  assert.deepEqual(served, ['/']);
+  const shortcut = await ask('https://openmedia.site/MihirKavishwar');
+  assert.equal(shortcut!.status, 301);
+  assert.equal(shortcut!.headers.get('location'), 'https://openmedia.site/@mihirkavishwar');
+  // Pages, API roots and resume files are never taken as handles.
+  for (const path of ['/docs', '/mission', '/v1', '/auth', '/llms.txt', '/@mihirkavishwar/resume']) assert.ok(!(await ask(`https://openmedia.site${path}`))?.headers.get('location')?.includes('/@'), path);
+  assert.equal(await ask('https://openmedia.site/@mihirkavishwar/resume'), undefined, 'the resume page comes from the Worker');
+  assert.equal(await ask('https://openmedia.site/mihirkavishwar', { accept: 'application/json' }), undefined, 'only browsers are redirected');
+});

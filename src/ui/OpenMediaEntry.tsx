@@ -6,6 +6,7 @@ import { Text, TextInput } from './Text';
 
 import { completeSignInURL, getSupabaseClient, localAutoSignInAvailable, sendSignInLink, signInEmailHasCode, signOut, verifySignInCode, waitForLocalSignInCode } from '../auth/supabase';
 import { getCurrentProfile, OpenMediaProfile, saveCurrentProfile } from '../data/openMediaService';
+import { profileHandleFromPath } from '../domain/profileFields';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { BrandMark } from './BrandMark';
@@ -95,10 +96,22 @@ export function OpenMediaEntry() {
   if (!session && !signingIn) return <PublicSite onSignIn={() => { setError(''); setSigningIn(true); }} />;
   if (!session) return <SignInScreen error={error} onError={setError} onBack={() => setSigningIn(false)} onMatrixDemo={matrixAvailable ? () => setMatrixDemo(true) : undefined} />;
   if (!profile) return <ProfileSetup session={session} error={error} onError={setError} onComplete={(nextProfile) => { loadedUserId.current = session.user.id; setProfile(nextProfile); }} onSignOut={async () => { await signOut(); setSession(undefined); }} />;
-  return <OpenMediaApp currentUserId={session.user.id} profile={profile} onSignOut={async () => { await signOut(); setSession(undefined); setProfile(undefined); }} onAccountDeleted={() => { setSession(undefined); setProfile(undefined); }} />;
+  return <OpenMediaApp currentUserId={session.user.id} profile={profile} onSignOut={async () => { await signOut(); setSession(undefined); setProfile(undefined); }} onAccountDeleted={() => { setSession(undefined); setProfile(undefined); }} onProfileChange={setProfile} />;
 }
 
 const publicPages: PublicPage[] = ['landing', 'feed', 'mission', 'developers'];
+
+/** Shows /@handle in the address bar while an Open Media profile is open, so it can be copied and shared. */
+export function showProfileAddress(target: PersonTarget) {
+  if (Platform.OS !== 'web' || typeof window === 'undefined' || target.ref.kind !== 'open_media') return;
+  window.history.pushState({ person: true }, '', `/@${target.ref.handle.replace(/^@/, '').toLowerCase()}`);
+}
+
+/** Leaves a profile address for the app's own page when the profile closes. */
+export function leaveProfileAddress() {
+  if (Platform.OS !== 'web' || typeof window === 'undefined' || !profileHandleFromPath(window.location.pathname)) return;
+  window.history.replaceState(null, '', `/${window.location.hash}`);
+}
 
 function pageFromHash(): PublicPage {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return 'feed';
@@ -113,8 +126,13 @@ function pageFromHash(): PublicPage {
 function PublicSite({ onSignIn }: { onSignIn: () => void }) {
   const [page, setPage] = useState<PublicPage>(pageFromHash);
   // Guests can open anyone's public profile; private details need an account.
-  const [person, setPerson] = useState<PersonTarget>();
-  const people = useMemo(() => ({ open: setPerson }), []);
+  // openmedia.site/@handle opens that profile (ADR 0019).
+  const [person, setPerson] = useState<PersonTarget | undefined>(() => {
+    const handle = Platform.OS === 'web' && typeof window !== 'undefined' ? profileHandleFromPath(window.location.pathname) : undefined;
+    return handle ? { ref: { kind: 'open_media', handle } } : undefined;
+  });
+  const people = useMemo(() => ({ open: (target: PersonTarget) => { setPerson(target); showProfileAddress(target); } }), []);
+  const closePerson = () => { setPerson(undefined); leaveProfileAddress(); };
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
     const onHash = () => setPage(pageFromHash());
@@ -128,7 +146,7 @@ function PublicSite({ onSignIn }: { onSignIn: () => void }) {
     }
     setPage(Platform.OS === 'web' || next !== 'landing' ? next : 'feed');
   };
-  if (person) return <PeopleProvider value={people}><View style={{ flex: 1 }}><PersonProfile target={person} onBack={() => setPerson(undefined)} /></View></PeopleProvider>;
+  if (person) return <PeopleProvider value={people}><View style={{ flex: 1 }}><PersonProfile target={person} onBack={closePerson} /></View></PeopleProvider>;
   if (page === 'landing') return <LandingPage onNavigate={navigate} onSignIn={onSignIn} />;
   if (page === 'mission') return <MissionPage chrome={Platform.OS === 'web' ? 'public' : 'app'} onNavigate={navigate} onSignIn={onSignIn} onBack={() => navigate('feed')} />;
   if (page === 'developers') return <DevelopersPage chrome={Platform.OS === 'web' ? 'public' : 'app'} onNavigate={navigate} onSignIn={onSignIn} onBack={() => navigate('feed')} />;

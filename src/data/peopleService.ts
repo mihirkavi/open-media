@@ -5,6 +5,7 @@ import { NetworkId } from '../domain/networkPosts';
 import { ContactCard, IdentityRef, isContactCard } from '../domain/people';
 import { SocialPost } from '../domain/posts';
 import { isEmptyProfessional, parseProfessional, ProfessionalProfile } from '../domain/professionalProfile';
+import { readVisibleFields } from '../domain/profileFields';
 import { loadPublicPosts } from './postService';
 
 /** What anyone may see about an Open Media account (open_media_public_profile). */
@@ -25,6 +26,8 @@ export interface PublicPerson {
   followStatus?: FollowStatus;
   /** The work side of their profile (ADR 0018), when they filled it in. */
   professional?: ProfessionalProfile;
+  /** Profile fields this viewer may see (ADR 0019); the server leaves out the rest. */
+  fields: { field: string; value: string }[];
 }
 
 export type FollowStatus = 'pending' | 'accepted' | null;
@@ -50,6 +53,7 @@ export async function loadPublicPerson(handle: string): Promise<PublicPerson | u
     canView: row.canView !== false,
     followStatus: row.followStatus === 'pending' || row.followStatus === 'accepted' ? row.followStatus : null,
     professional: readProfessional(row.professional),
+    fields: readVisibleFields(row.fields),
   };
 }
 

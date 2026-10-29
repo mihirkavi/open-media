@@ -131,6 +131,8 @@ export const agentInterfaces = {
     { method: 'DELETE', path: '/v1/me/contacts/{id}', description: 'Delete a contact card.' },
     { method: 'PUT', path: '/v1/me/linked-accounts', description: 'Set the open-network accounts shown on your public profile.' },
     { method: 'POST', path: '/v1/me/listings', description: 'Offer a product, service, event or job as a public post. It goes live at once and is checked in the background.' },
+    { method: 'GET', path: '/v1/me/profile-fields', description: 'Your profile fields (contact details, accounts on other networks), each with who may see it.' },
+    { method: 'PUT', path: '/v1/me/profile-fields', description: 'Replace your profile fields and who may see each one: everyone, connections or only me.' },
     { method: 'GET', path: '/v1/me/professional', description: 'Your professional profile, and the same data as a JSON Resume document.' },
     { method: 'PUT', path: '/v1/me/professional', description: 'Replace your professional profile: headline, experience, education, skills, links, open to work or hiring. It is public.' },
     { method: 'POST', path: '/v1/me/professional/import', description: 'Read a JSON Resume or LinkedIn’s own data-export files into a professional profile; saved only when you say so.' },

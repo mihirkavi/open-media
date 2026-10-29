@@ -6,6 +6,7 @@ import {
 
 import { Conversation, Message, Person } from "../domain/models";
 import { isEmptyProfessional, parseProfessional, ProfessionalProfile, toJsonResume } from "../domain/professionalProfile";
+import { ProfileFieldValue, validateProfileFields } from "../domain/profileFields";
 import { getSupabaseClient } from "../auth/supabase";
 
 export interface OpenMediaProfile {
@@ -172,9 +173,11 @@ export async function exportCurrentAccountData(): Promise<
   // The professional profile also comes as a JSON Resume document, for resume tools (ADR 0018).
   const profile = exported.profile as { handle?: string; display_name?: string; professional?: unknown } | null;
   const professional = professionalFrom(profile?.professional);
+  const fields = await loadMyProfileFields().catch(() => []);
+  const withFields = { ...exported, profileFields: fields };
   return professional && profile?.handle && !isEmptyProfessional(professional)
-    ? { ...exported, jsonResume: toJsonResume(professional, { name: profile.display_name ?? profile.handle, handle: profile.handle }) }
-    : exported;
+    ? { ...withFields, jsonResume: toJsonResume(professional, { name: profile.display_name ?? profile.handle, handle: profile.handle }) }
+    : withFields;
 }
 
 export async function startDirectConversation(
@@ -335,6 +338,39 @@ export async function saveProfessionalProfile(profile: ProfessionalProfile): Pro
   const { data, error } = await requireClient().rpc("open_media_set_professional_profile", { p_professional: clean });
   if (error) throw error;
   return parseProfessional(data);
+}
+
+/** The signed-in person's profile fields with each one's visibility (ADR 0019). */
+export async function loadMyProfileFields(): Promise<ProfileFieldValue[]> {
+  const { data, error } = await requireClient().rpc("open_media_my_profile_fields");
+  if (error) throw error;
+  return Array.isArray(data) ? (data as ProfileFieldValue[]) : [];
+}
+
+/** Replaces the signed-in person's profile fields; the database checks and filters them again. */
+export async function saveMyProfileFields(values: ProfileFieldValue[]): Promise<ProfileFieldValue[]> {
+  const { data, error } = await requireClient().rpc("open_media_set_profile_fields", { p_fields: validateProfileFields(values) });
+  if (error) throw error;
+  return Array.isArray(data) ? (data as ProfileFieldValue[]) : [];
+}
+
+/** Name and bio, as they show at the top of the profile. */
+export async function saveProfileBasics(input: { displayName: string; bio: string }): Promise<OpenMediaProfile> {
+  const displayName = input.displayName.trim();
+  const bio = input.bio.trim();
+  if (!displayName || displayName.length > 80) throw new Error("Enter your name (up to 80 characters).");
+  if (bio.length > 240) throw new Error("Keep your bio under 240 characters.");
+  const client = requireClient();
+  const { data: auth } = await client.auth.getUser();
+  if (!auth.user) throw new Error("Sign in again to save your profile.");
+  const { data, error } = await client
+    .from("profiles")
+    .update({ display_name: displayName, bio, updated_at: new Date().toISOString() })
+    .eq("id", auth.user.id)
+    .select("id, handle, display_name, bio, avatar_url, professional")
+    .single();
+  if (error) throw error;
+  return profileFromRow(data as ProfileRow);
 }
 
 /** The signed-in person's own professional profile, read fresh. */

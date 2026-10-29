@@ -92,6 +92,16 @@ export function resumeHtml(resume: JsonResume): string {
     .replace('</head>', `${openMediaTheme}\n</head>`);
 }
 
+/** What /@handle/resume shows before the person has filled in their work profile, in the same look. */
+export function noResumeHtml(name: string, profileUrl: string): string {
+  const escape = (text: string) => text.replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!);
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(name)} · Resume</title>${openMediaTheme}
+<style>body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--color-background-light);color:var(--color-primary-light);font-size:16px;line-height:1.6;padding:24px;box-sizing:border-box}
+@media (prefers-color-scheme: dark){body{background:var(--color-background-dark);color:var(--color-primary-dark)}}
+main{max-width:460px;text-align:center}h1{font-size:28px;margin:0 0 8px}p{margin:8px 0;color:var(--color-secondary-light)}@media (prefers-color-scheme: dark){p{color:var(--color-secondary-dark)}}</style></head>
+<body><main><h1>${escape(name)} has no resume yet</h1><p>A resume appears here once they add their work, education or skills to their Open Media profile.</p><p><a href="${escape(profileUrl)}">See their profile</a></p></main></body></html>`;
+}
+
 /** The page's security headers: the theme's own styles only, no scripts, no outside requests except https images. */
 export const resumePageHeaders: Record<string, string> = {
   'content-type': 'text/html; charset=utf-8',
