@@ -1,6 +1,6 @@
 # ADR 0019: Profile fields with per-field privacy, Edit profile, and /@handle addresses
 
-- Status: **accepted, built 2026-10-28, verified on the web locally, not yet deployed** (migration `20261102120000_profile_fields.sql` not applied to production).
+- Status: **accepted, built 2026-10-28, deployed 2026-10-29** (Worker `e3e1dc99`). Verified on the web; iOS and Android not yet tested.
 - Builds on: [ADR 0018](0018-work-lens-professional-profiles.md) (professional profiles and resumes), [ADR 0013](0013-identity-contacts-commerce-payments.md) (profiles, follows, contacts)
 
 ## Context

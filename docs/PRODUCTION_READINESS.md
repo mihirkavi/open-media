@@ -17,10 +17,10 @@ This checklist defines “production ready” for the current onboarding private
 - [x] Local browser flow: magic-link onboarding, callback cleanup, profile creation, profile search, direct conversation, send, realtime receive, account export, and responsive layout.
 - [x] Latest signed iOS Store build finished successfully: build 9, EAS `f5916bd3-c316-487a-bbed-f6085bc38fcc`.
 
-## Profile fields and /@handle addresses (ADR 0019; built 2026-10-28, not deployed)
+## Profile fields and /@handle addresses (ADR 0019; deployed 2026-10-29)
 
-- [ ] Apply `supabase/migrations/20261102120000_profile_fields.sql` (dry run first).
-- [ ] Deploy with `npm run deploy` (owner approval first), then check openmedia.site/@mihirkavishwar, /mihirkavishwar (redirect) and /@mihirkavishwar/resume.
+- [x] Applied `supabase/migrations/20261102120000_profile_fields.sql` on 2026-10-29 after a dry run.
+- [x] Deployed with `npm run deploy` on 2026-10-29 (owner said "Deploy it"): Worker `e3e1dc99-12d4-4de5-b1ef-77acb8983c58`, rollback `4c66eaec-0523-4817-8a10-5fbe1313f559`. Live checks: openmedia.site/@mihirkavishwar opens the profile; /mihirkavishwar returns 301 to it; /@mihirkavishwar/resume shows the no-resume page (the owner's work profile is empty).
 - [x] Web verified locally on 2026-10-28: Edit profile saves every section; email (only me) and phone (connections) are hidden from signed-out viewers and from the resume; /@handle opens the profile signed in and out; the no-resume page.
 - [ ] iOS Simulator and Android emulator (deferred by the owner).
 
