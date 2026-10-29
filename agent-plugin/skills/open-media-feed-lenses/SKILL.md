@@ -5,7 +5,7 @@ description: "Help a person shape their Open Media Feed: turn what they ask for 
 
 # Open Media feed lenses
 
-Every way of ordering the Open Media Feed is a lens: a small JSON manifest, never code. Raw (newest first) and Relevant (newness, who you follow, your topics) are built in. One open-source runner orders posts for the app and for agents, so a preview here matches the person's Feed. Format and rules: https://api.openmedia.site/docs/feed-lenses.
+Every way of ordering the Open Media Feed is a lens: a small JSON manifest, never code. Raw (newest first), Relevant (newness, who you follow, your topics) and Work (jobs, hiring and professional posts, ranked like Relevant) are built in. One open-source runner orders posts for the app and for agents, so a preview here matches the person's Feed. Format and rules: https://api.openmedia.site/docs/feed-lenses.
 
 ## When to use this skill
 

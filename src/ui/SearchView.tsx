@@ -4,10 +4,12 @@ import { ActivityIndicator, Keyboard, Platform, Pressable, ScrollView, Share, St
 import { Text, TextInput } from './Text';
 
 import { searchSharedLenses, StoredLens } from '../data/lensService';
-import { lensFromRequest, lensSummary, looksLikeLensRequest } from '../domain/feedLenses';
+import { loadProfessionalProfile, saveProfessionalProfile } from '../data/openMediaService';
+import { builtInLensFor, lensFromRequest, lensSummary, looksLikeLensRequest } from '../domain/feedLenses';
 import { Conversation } from '../domain/models';
 import { networks, sourceName } from '../domain/networkPosts';
 import { SocialPost } from '../domain/posts';
+import { applyProfessionalIntent, emptyProfessional, professionalIntent } from '../domain/professionalProfile';
 import { conversationTitle } from '../domain/selectors';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
@@ -30,7 +32,8 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
   const byId = useMemo(() => new Map(search.posts.map((post) => [post.id, post])), [search.posts]);
   const hasQuery = Boolean(search.parsed.raw);
   const lensRows = useLensRows(search.parsed.raw, lenses, Boolean(viewer));
-  const nothing = hasQuery && !search.searching && !search.posts.length && !search.settings.length && !search.messages.length && !lensRows.length;
+  const profileRows = useProfileRows(query, Boolean(viewer));
+  const nothing = hasQuery && !search.searching && !search.posts.length && !search.settings.length && !search.messages.length && !lensRows.length && !profileRows.length;
   // Choosing a lens shows the Feed through it.
   const showFeed = () => { if (onNavigate) onNavigate('feed'); else onClose?.(); };
 
@@ -67,6 +70,8 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
 
     {lensRows.length ? <Section title="Feed" styles={styles}>{lensRows.map((row) => <Row key={row.key} icon="options-outline" title={row.title} subtitle={row.subtitle} onPress={() => { row.run().then((leave) => { if (leave) showFeed(); }).catch(() => undefined); }} styles={styles} colors={colors} />)}</Section> : null}
 
+    {profileRows.length ? <Section title="Your profile" styles={styles}>{profileRows.map((row) => <Row key={row.key} icon="briefcase-outline" title={row.title} subtitle={row.subtitle} onPress={() => { row.run().catch(() => undefined); }} styles={styles} colors={colors} />)}</Section> : null}
+
     {search.settings.length ? <Section title="Settings" styles={styles}>{search.settings.map((setting) => <Row key={setting.id} icon="settings-outline" title={setting.title} subtitle={setting.description} onPress={() => onNavigate?.('settings')} styles={styles} colors={colors} />)}</Section> : null}
 
     {search.messages.length ? <Section title="Messages and email · on this device" styles={styles}>{search.messages.map((conversation) => <Row key={conversation.id} icon="chatbubble-outline" title={conversationTitle(conversation)} subtitle={conversation.preview} onPress={() => onNavigate?.('messages')} styles={styles} colors={colors} />)}</Section> : null}
@@ -82,6 +87,31 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
 }
 
 interface LensRow { key: string; title: string; subtitle: string; run: () => Promise<boolean> }
+
+/**
+ * The work side of a profile (ADR 0018) is changed by saying it: “my headline is Product designer”,
+ * “I’m open to work”, “we’re hiring”, “add skills Figma, research”. One row shows the change, and
+ * choosing it saves it. There is no profile form.
+ */
+function useProfileRows(query: string, signedIn: boolean): LensRow[] {
+  const [status, setStatus] = useState<{ query: string; text: string }>();
+  const intent = useMemo(() => professionalIntent(query.replace(/[’‘]/g, "'")), [query]);
+  if (!intent) return [];
+  const shown = status?.query === query ? status.text : undefined;
+  return [{
+    key: 'professional', title: intent.title,
+    subtitle: shown ?? (signedIn ? 'Shown on your public profile. Choose this to save it.' : 'Sign in to change your profile.'),
+    run: async () => {
+      if (!signedIn) return false;
+      try {
+        const current = (await loadProfessionalProfile()) ?? emptyProfessional;
+        await saveProfessionalProfile(applyProfessionalIntent(current, intent));
+        setStatus({ query, text: 'Saved. It shows on your profile.' });
+      } catch (reason) { setStatus({ query, text: reason instanceof Error ? reason.message : 'That didn’t save. Try again.' }); }
+      return false;
+    },
+  }];
+}
 
 const managePattern = /^(remove|delete|uninstall|forget|drop|share|publish|use|switch to|show me|open)\b/i;
 
@@ -108,7 +138,8 @@ function useLensRows(query: string, lenses: FeedLenses | undefined, signedIn: bo
   return useMemo(() => {
     if (!lenses || value.length < 3) return [];
     const rows: LensRow[] = [];
-    const named = lenses.lenses.filter((lens) => lower.includes(lens.name.toLocaleLowerCase()));
+    const alias = builtInLensFor(value);
+    const named = lenses.lenses.filter((lens) => lens.id === alias?.id || lower.includes(lens.name.toLocaleLowerCase()));
     const action = lower.match(managePattern)?.[1];
     for (const lens of named) {
       const custom = !lens.builtIn;
@@ -134,7 +165,7 @@ function useLensRows(query: string, lenses: FeedLenses | undefined, signedIn: bo
             return false;
           },
         });
-      } else if (lenses.lens.id !== lens.id && (action || lower === lens.name.toLocaleLowerCase() || /\b(feed|lens)\b/.test(lower))) {
+      } else if (lenses.lens.id !== lens.id && (action || lower === lens.name.toLocaleLowerCase() || lens.id === alias?.id || /\b(feed|lens)\b/.test(lower))) {
         rows.push({ key: `use-${lens.id}`, title: `Show the Feed through ${lens.name}`, subtitle: lensSummary(lens), run: async () => { lenses.choose(lens.id); return true; } });
       }
     }

@@ -2,7 +2,7 @@
 import type { SocialPost } from './posts';
 
 /**
- * Feed lenses (ADR 0017): every way of ordering the Feed, including the built-in Raw and Relevant,
+ * Feed lenses (ADR 0017): every way of ordering the Feed, including the built-in Raw, Relevant and Work,
  * is a small JSON manifest, never code. One runner here reads a manifest and orders posts the app or
  * an agent already loaded. A lens sees only the signals its manifest asks for, and the signals the
  * builder prompt forbids (private messages, exact location, sensitive traits, KYC documents,
@@ -12,7 +12,7 @@ import type { SocialPost } from './posts';
 export const lensFormat = 'open-media.feed-lens/1';
 
 export type LensSource = 'open-media' | 'farcaster' | 'lens' | 'hive' | 'deso' | 'events';
-export type LensKind = 'text' | 'image' | 'video' | 'product' | 'service' | 'event';
+export type LensKind = 'text' | 'image' | 'video' | 'product' | 'service' | 'event' | 'job';
 /** Data about the viewer or the post's audience that a lens must ask for. Post text, time, network and kind are always readable. */
 export type LensPermission = 'follows' | 'interests' | 'public_engagement';
 
@@ -77,7 +77,7 @@ export interface LensContext {
 export const forbiddenSignals = ['Private messages', 'Exact location', 'Sensitive-trait inference', 'KYC documents', 'Emotional-state prediction'] as const;
 
 export const lensSources: LensSource[] = ['open-media', 'farcaster', 'lens', 'hive', 'deso', 'events'];
-export const lensKinds: LensKind[] = ['text', 'image', 'video', 'product', 'service', 'event'];
+export const lensKinds: LensKind[] = ['text', 'image', 'video', 'product', 'service', 'event', 'job'];
 export const lensPermissions: LensPermission[] = ['follows', 'interests', 'public_engagement'];
 
 const noObjectives: LensObjectives = { recency: 0, follows: 0, interests: 0, engagement: 0, diversity: 0 };
@@ -95,7 +95,30 @@ export const relevantLens: FeedLens = {
   objectives: { recency: 0.5, follows: 0.3, interests: 0.2, engagement: 0, diversity: 0.3 }, interests: [],
 };
 
-export const builtInLenses: FeedLens[] = [relevantLens, rawLens];
+/**
+ * Work (ADR 0018): the professional side of Open Media. Job posts and posts about hiring, careers,
+ * launches and events in your field, lifted like Relevant. It reads nothing Relevant does not.
+ */
+export const workLens: FeedLens = {
+  format: lensFormat, id: 'work', name: 'Work', version: 1, builtIn: true, author: 'Open Media',
+  description: 'Jobs, hiring, careers, launches and professional events, newer first and lifted when you follow the author or a post matches a topic you chose. Nothing else is used.',
+  permissions: ['follows', 'interests'],
+  filters: { about: ['job', 'jobs', 'hiring', 'hire', 'career', 'careers', 'role', 'resume', 'interview', 'internship', 'recruiting', 'networking', 'startup', 'founder', 'conference', 'launch', 'launched', 'opentowork', 'remote', 'freelance'] },
+  order: 'ranked', objectives: { recency: 0.5, follows: 0.35, interests: 0.25, engagement: 0, diversity: 0.3 }, interests: [],
+};
+
+export const builtInLenses: FeedLens[] = [relevantLens, rawLens, workLens];
+
+/** Other words that pick a built-in lens in Search, so “jobs” or “networking” opens Work. */
+export const lensAliases: Record<string, string[]> = {
+  work: ['work', 'jobs', 'job', 'hiring', 'career', 'careers', 'networking', 'network', 'professional', 'linkedin', 'office', 'productive', 'recruiting'],
+};
+
+/** The built-in lens a whole Search query names through an alias, if any. */
+export function builtInLensFor(query: string): FeedLens | undefined {
+  const value = ` ${query.trim().toLocaleLowerCase().replace(/[^\p{L}\p{N}\s]+/gu, ' ').replace(/\b(feed|lens|mode|show|me|the|my|open)\b/g, ' ').replace(/\s+/g, ' ').trim()} `;
+  return builtInLenses.find((lens) => (lensAliases[lens.id] ?? []).some((alias) => value === ` ${alias} `));
+}
 const builtInIds = builtInLenses.map((lens) => lens.id);
 
 /** Half-life of the recency objective: a post 12 hours old counts half as much as a new one. */
@@ -118,7 +141,7 @@ export function parseLens(value: unknown): FeedLens {
   const derived = slug(name);
   const id = input.id === undefined ? (builtInIds.includes(derived) ? `${derived}-lens` : derived) : text(input.id, limits.id, 'id');
   if (!/^[a-z0-9][a-z0-9_-]*$/i.test(id)) throw new LensError('A lens id may use letters, digits, - and _ only.');
-  // Only Open Media's own two lenses are built in; a manifest cannot claim to be one or take its id.
+  // Only Open Media's own lenses are built in; a manifest cannot claim to be one or take its id.
   const builtIn = builtInLenses.find((item) => item.id === id);
   if (builtIn && input.builtIn === true) return builtIn;
   if (builtIn) throw new LensError(`"${id}" is one of Open Media's built-in lenses. Give your copy another id.`);
@@ -187,6 +210,7 @@ export function postKinds(post: SocialPost): LensKind[] {
   if (post.listing?.kind === 'product') kinds.push('product');
   if (post.listing?.kind === 'service') kinds.push('service');
   if (post.event || post.listing?.kind === 'event') kinds.push('event');
+  if (post.listing?.kind === 'job') kinds.push('job');
   if (!kinds.length) kinds.push('text');
   return kinds;
 }
@@ -194,7 +218,7 @@ export function postKinds(post: SocialPost): LensKind[] {
 /** Which of the given words or hashtags a post mentions, as whole words in its title, text or topics. */
 export function matchingTopics(post: SocialPost, topics: string[]): string[] {
   if (!topics.length) return [];
-  const haystack = ` ${[post.title ?? '', post.body, post.listing?.title ?? '', post.event?.title ?? '', ...post.topics].join(' ').toLocaleLowerCase().replace(/[^\p{L}\p{N}\s]+/gu, ' ')} `;
+  const haystack = ` ${[post.title ?? '', post.body, post.listing?.title ?? '', post.listing?.kind ?? '', post.event?.title ?? '', ...post.topics].join(' ').toLocaleLowerCase().replace(/[^\p{L}\p{N}\s]+/gu, ' ')} `;
   return topics.filter((topic) => {
     const word = topic.toLocaleLowerCase().replace(/^#/, '').replace(/[^\p{L}\p{N}\s]+/gu, ' ').trim();
     return word.length > 0 && haystack.includes(` ${word} `);
@@ -377,6 +401,7 @@ const kindWords: [RegExp, LensKind[], string][] = [
   [/\b(products?|stuff to buy|shopping)\b/gi, ['product'], 'products'],
   [/\b(services?|freelancers?|gigs?)\b/gi, ['service'], 'services'],
   [/\b(events?|meetups?|happenings?)\b/gi, ['event'], 'events'],
+  [/\b(job (?:posts?|listings?|openings?)|vacanc(?:y|ies)|openings?)\b/gi, ['job'], 'job posts'],
 ];
 const sourceWords: [RegExp, LensSource][] = [[/\b(farcaster|warpcast)\b/gi, 'farcaster'], [/\blens\b(?!\s+(?:called|named))/gi, 'lens'], [/\bhive\b/gi, 'hive'], [/\bdeso\b/gi, 'deso'], [/\bopen media\b/gi, 'open-media']];
 const negative = /^\s*(?:and\s+|but\s+|also\s+)?(?:no|hide|hiding|without|mute|muting|not|never|skip|exclude|excluding|remove|block|less|fewer|stop showing|don'?t show|do not show|nothing (?:about|from|on))\b/i;
@@ -483,7 +508,7 @@ export function lensFromRequest(input: string): LensDraft {
 
 function defaultName(filters: LensFilters, interests: string[]): string {
   const topic = filters.about?.[0] ?? interests[0];
-  const kind = filters.kinds?.length === 1 ? { text: 'Text', image: 'Images', video: 'Videos', product: 'Products', service: 'Services', event: 'Events' }[filters.kinds[0]] : undefined;
+  const kind = filters.kinds?.length === 1 ? { text: 'Text', image: 'Images', video: 'Videos', product: 'Products', service: 'Services', event: 'Events', job: 'Jobs' }[filters.kinds[0]] : undefined;
   const parts = [filters.followedOnly ? 'Following' : '', topic ? capitalize(topic) : '', kind ?? ''].filter(Boolean);
   if (!parts.length && filters.sources?.length === 1) parts.push(sourceName(filters.sources[0]));
   if (!parts.length && (filters.mute || filters.hideKinds || filters.hideSources)) parts.push('Quiet');
@@ -554,7 +579,7 @@ function sourceName(source: string): string {
   return sourceLabels[source as LensSource] ?? source;
 }
 
-const kindLabels: Record<LensKind, string> = { text: 'text posts', image: 'images', video: 'videos', product: 'products', service: 'services', event: 'events' };
+const kindLabels: Record<LensKind, string> = { text: 'text posts', image: 'images', video: 'videos', product: 'products', service: 'services', event: 'events', job: 'job posts' };
 
 function listKinds(kinds: LensKind[]) {
   return joinWords(kinds.map((kind) => kindLabels[kind]));

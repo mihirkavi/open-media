@@ -88,7 +88,7 @@ Open Media is free: no ads by default, no subscription and no API key for public
     description: 'Raw, Relevant and every shared feed algorithm are small JSON manifests run by one open-source runner. The format, the built-in lenses, and how agents write, preview, save and share one.',
     body: (origin) => `# Feed lenses
 
-Every way of ordering the Open Media Feed is a **lens**: a small JSON manifest, never code. Raw and Relevant are the two built in. People can describe a new lens in plain words in Search, or ask an AI agent to write one, then keep it, share it publicly, or install someone else's.
+Every way of ordering the Open Media Feed is a **lens**: a small JSON manifest, never code. Raw, Relevant and Work are built in; Work is the professional feed of jobs, hiring and networking (ADR 0018). People can describe a new lens in plain words in Search, or ask an AI agent to write one, then keep it, share it publicly, or install someone else's.
 
 One open-source runner orders the posts: [src/domain/feedLenses.ts](${sourceRepository}/blob/main/src/domain/feedLenses.ts). The app, the REST API and the MCP servers all use it, so an agent's preview matches the person's Feed. The design is [ADR 0017](${sourceRepository}/blob/main/docs/adrs/0017-feed-lenses.md).
 

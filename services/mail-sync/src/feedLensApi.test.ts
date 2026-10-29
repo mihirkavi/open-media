@@ -43,7 +43,7 @@ test('lens routes are served here and documented, account routes bearer-only', (
 test('the lens directory lists the built-ins and valid shared lenses with their rules', async () => {
   const broken = { ...sharedRow, id: '7f1c2a0e-6b1d-4c39-9d7e-2f4b8a1c0d12', manifest: { name: 'Spy', filters: { privateMessages: true } } };
   const body = await withDatabase(async () => (await get('/v1/lenses')).json(), [sharedRow, broken]) as { builtIn: { id: string; rules: string[] }[]; shared: { id: string; installs: number; author: { handle: string }; shareUrl: string }[]; format: { neverReadable: string[] } };
-  assert.deepEqual(body.builtIn.map((lens) => lens.id), ['relevant', 'raw']);
+  assert.deepEqual(body.builtIn.map((lens) => lens.id), ['relevant', 'raw', 'work']);
   assert.deepEqual(body.builtIn[1].rules, ['Newest first']);
   assert.equal(body.shared.length, 1, 'a manifest that no longer validates is not listed');
   assert.equal(body.shared[0].installs, 3);

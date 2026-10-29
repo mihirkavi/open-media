@@ -1,4 +1,4 @@
-export type SettingRoute = 'appearance' | 'feed' | 'messages' | 'email' | 'connected-apps' | 'cross-posting' | 'privacy' | 'data' | 'about';
+export type SettingRoute = 'appearance' | 'feed' | 'messages' | 'email' | 'connected-apps' | 'cross-posting' | 'privacy' | 'data' | 'profile' | 'about';
 
 export interface SettingIndexEntry {
   id: string;
@@ -10,7 +10,8 @@ export interface SettingIndexEntry {
 
 export const settingIndex: SettingIndexEntry[] = [
   { id: 'appearance', title: 'Appearance', description: 'Use System, Light, or Dark appearance.', route: 'appearance', keywords: ['dark mode', 'light mode', 'theme', 'system'] },
-  { id: 'feed-mode', title: 'Feed mode', description: 'Choose transparent Relevant, chronological Raw, or a feed lens you describe in Search.', route: 'feed', keywords: ['chronological feed', 'raw', 'relevant', 'algorithm', 'feed lens', 'lenses', 'my feed', 'feed filters', 'why am i seeing this'] },
+  { id: 'feed-mode', title: 'Feed mode', description: 'Choose transparent Relevant, chronological Raw, Work for jobs and networking, or a feed lens you describe in Search.', route: 'feed', keywords: ['chronological feed', 'raw', 'relevant', 'work', 'jobs feed', 'networking', 'algorithm', 'feed lens', 'lenses', 'my feed', 'feed filters', 'why am i seeing this'] },
+  { id: 'professional', title: 'Professional profile', description: 'Your headline, experience and skills, and whether you’re open to work or hiring. Type it in Search (“my headline is…”, “I’m open to work”) or ask an agent to import your resume or LinkedIn export. Jobs and networking are in the Work feed.', route: 'profile', keywords: ['professional profile', 'headline', 'resume', 'cv', 'linkedin', 'open to work', 'hiring', 'jobs', 'job search', 'networking', 'career', 'work experience', 'skills'] },
   { id: 'message-privacy', title: 'Message privacy', description: 'Control who can message you.', route: 'messages', keywords: ['who can message me', 'direct messages', 'dm privacy'] },
   { id: 'email', title: 'Email', description: 'Connect and manage mail accounts.', route: 'email', keywords: ['connect gmail', 'connect outlook', 'imap', 'mail'] },
   { id: 'feed-networks', title: 'Networks in Feed', description: 'Feed mixes public posts from Open Media, Farcaster, Lens, Hive, and DeSo into one stream.', route: 'feed', keywords: ['blockchain', 'farcaster', 'lens', 'hive', 'deso', 'web3', 'decentralized', 'sources'] },

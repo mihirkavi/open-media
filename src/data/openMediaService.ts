@@ -5,6 +5,7 @@ import {
 } from "@supabase/supabase-js";
 
 import { Conversation, Message, Person } from "../domain/models";
+import { isEmptyProfessional, parseProfessional, ProfessionalProfile, toJsonResume } from "../domain/professionalProfile";
 import { getSupabaseClient } from "../auth/supabase";
 
 export interface OpenMediaProfile {
@@ -13,6 +14,8 @@ export interface OpenMediaProfile {
   displayName: string;
   bio: string;
   avatarUrl?: string;
+  /** The work side of the profile (ADR 0018); empty when not filled in. */
+  professional?: ProfessionalProfile;
 }
 
 interface ProfileRow {
@@ -21,6 +24,7 @@ interface ProfileRow {
   display_name: string;
   bio: string;
   avatar_url: string | null;
+  professional?: unknown;
 }
 /** What anyone may see about another person (open_media_profile_cards): never a withheld name. */
 interface ProfileCard {
@@ -63,7 +67,7 @@ export async function getCurrentProfile(
 ): Promise<OpenMediaProfile | undefined> {
   const { data, error } = await requireClient()
     .from("profiles")
-    .select("id, handle, display_name, bio, avatar_url")
+    .select("id, handle, display_name, bio, avatar_url, professional")
     .eq("id", session.user.id)
     .maybeSingle();
   if (error) throw error;
@@ -164,7 +168,13 @@ export async function exportCurrentAccountData(): Promise<
   if (error) throw error;
   if (!data || typeof data !== "object" || Array.isArray(data))
     throw new Error("Open Media could not prepare your data export.");
-  return data as Record<string, unknown>;
+  const exported = data as Record<string, unknown>;
+  // The professional profile also comes as a JSON Resume document, for resume tools (ADR 0018).
+  const profile = exported.profile as { handle?: string; display_name?: string; professional?: unknown } | null;
+  const professional = professionalFrom(profile?.professional);
+  return professional && profile?.handle && !isEmptyProfessional(professional)
+    ? { ...exported, jsonResume: toJsonResume(professional, { name: profile.display_name ?? profile.handle, handle: profile.handle }) }
+    : exported;
 }
 
 export async function startDirectConversation(
@@ -311,7 +321,30 @@ function profileFromRow(row: ProfileRow): OpenMediaProfile {
     displayName: row.display_name,
     bio: row.bio,
     avatarUrl: row.avatar_url ?? undefined,
+    professional: professionalFrom(row.professional),
   };
+}
+
+function professionalFrom(value: unknown): ProfessionalProfile | undefined {
+  try { return value === undefined ? undefined : parseProfessional(value); } catch { return undefined; }
+}
+
+/** Saves the work side of the signed-in person's profile; the database checks it again. */
+export async function saveProfessionalProfile(profile: ProfessionalProfile): Promise<ProfessionalProfile> {
+  const clean = parseProfessional(profile);
+  const { data, error } = await requireClient().rpc("open_media_set_professional_profile", { p_professional: clean });
+  if (error) throw error;
+  return parseProfessional(data);
+}
+
+/** The signed-in person's own professional profile, read fresh. */
+export async function loadProfessionalProfile(): Promise<ProfessionalProfile | undefined> {
+  const client = requireClient();
+  const { data: auth } = await client.auth.getUser();
+  if (!auth.user) return undefined;
+  const { data, error } = await client.from("profiles").select("professional").eq("id", auth.user.id).maybeSingle();
+  if (error) throw error;
+  return professionalFrom((data as { professional?: unknown } | null)?.professional);
 }
 
 function personFromCard(card: ProfileCard): Person {

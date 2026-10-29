@@ -65,15 +65,15 @@ export async function listLenses(env: PublicApiEnv, origin: string, query?: stri
     format: lensFormatDescription(origin),
     builtIn: builtIn.map((lens) => lensView(lens, origin)),
     shared,
-    note: 'Raw and Relevant are built in. Shared lenses were written by people and are run by Open Media’s own runner over public posts; none can read private data.',
+    note: 'Raw, Relevant and Work are built in. Shared lenses were written by people and are run by Open Media’s own runner over public posts; none can read private data.',
   };
 }
 
-/** A lens by id: raw, relevant, or a shared lens's id. */
+/** A lens by id: raw, relevant, work, or a shared lens's id. */
 export async function findLens(env: PublicApiEnv, id: string): Promise<{ lens: FeedLens; row?: LensRow }> {
   const builtIn = builtInLenses.find((lens) => lens.id === id);
   if (builtIn) return { lens: builtIn };
-  if (!uuid.test(id)) throw new LensApiError(404, 'No lens with that id. Use raw, relevant, or the id of a shared lens from GET /v1/lenses.');
+  if (!uuid.test(id)) throw new LensApiError(404, 'No lens with that id. Use raw, relevant, work, or the id of a shared lens from GET /v1/lenses.');
   const row = await callRpc<LensRow | null>(env, fetch, 'open_media_public_feed_lens', { p_id: id });
   const lens = row ? lensFromRow(row) : undefined;
   if (!row || !lens) throw new LensApiError(404, 'That lens isn’t shared, or no longer exists.');
@@ -124,7 +124,7 @@ export async function saveLens(rpc: PersonRpc, origin: string, input: { lens?: u
   if (visibility !== 'private' && visibility !== 'public') throw new LensApiError(400, 'visibility must be private or public.');
   const lens = input.lens !== undefined ? checkManifest(input.lens) : typeof input.request === 'string' && input.request.trim() ? lensFromRequest(input.request).lens : undefined;
   if (!lens) throw new LensApiError(400, 'Send lens (a manifest) or request (plain words).');
-  if (lens.builtIn) throw new LensApiError(400, 'Raw and Relevant are built in. Save a copy with another id instead.');
+  if (lens.builtIn) throw new LensApiError(400, 'Raw, Relevant and Work are built in. Save a copy with another id instead.');
   const forkedFrom = typeof input.forkedFrom === 'string' && uuid.test(input.forkedFrom) ? input.forkedFrom : null;
   const { builtIn: _builtIn, author: _author, ...manifest } = lens;
   const row = await rpc<LensRow>('open_media_save_feed_lens', { p_key: lens.id, p_name: lens.name, p_manifest: manifest, p_visibility: visibility, p_forked_from: forkedFrom });

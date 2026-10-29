@@ -284,13 +284,14 @@ function listFormat(items: string[]) {
 }
 
 /**
- * Relevant, Raw, and the saved lens in use (or the most recent one), so the control never grows
+ * Relevant, Raw, and Work or the saved lens in use (or the most recent one), so the control never grows
  * past three choices. Other saved lenses are reached by name from Search.
  */
 export function FeedPicker({ value, lenses = [], onChange }: { value: string; lenses?: FeedLens[]; onChange: (id: string) => void }) {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
-  const custom = lenses.filter((item) => !item.builtIn);
-  const third = custom.find((item) => item.id === value) ?? custom[0];
+  // Work and saved lenses share the third place: the one in use, or the most recent saved lens.
+  const custom = lenses.filter((item) => !item.builtIn || (item.id !== 'relevant' && item.id !== 'raw'));
+  const third = custom.find((item) => item.id === value) ?? custom.find((item) => !item.builtIn);
   const choices = [{ id: 'relevant', name: 'Relevant' }, { id: 'raw', name: 'Raw' }, ...(third ? [{ id: third.id, name: third.name }] : [])];
   return <View accessibilityRole="tablist" accessibilityLabel="Feed lens" style={styles.segment}>{choices.map((choice) => <Pressable key={choice.id} accessibilityRole="tab" accessibilityLabel={choice.id === third?.id ? `${choice.name}, your lens` : choice.name} accessibilityState={{ selected: value === choice.id }} onPress={() => onChange(choice.id)} style={[styles.segmentButton, value === choice.id && styles.segmentActive]}><Text numberOfLines={1} style={[styles.segmentText, choice.id === third?.id && styles.segmentCustom, value === choice.id && styles.segmentTextActive]}>{choice.name}</Text></Pressable>)}</View>;
 }

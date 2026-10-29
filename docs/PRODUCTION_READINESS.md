@@ -17,6 +17,16 @@ This checklist defines “production ready” for the current onboarding private
 - [x] Local browser flow: magic-link onboarding, callback cleanup, profile creation, profile search, direct conversation, send, realtime receive, account export, and responsive layout.
 - [x] Latest signed iOS Store build finished successfully: build 9, EAS `f5916bd3-c316-487a-bbed-f6085bc38fcc`.
 
+## Work (ADR 0018; built 2026-10-28, not deployed)
+
+- [ ] Apply `supabase/migrations/20261101120000_work_profiles_and_jobs.sql` (dry run first, then `db push`).
+- [ ] Deploy the Worker and web app with `npm run deploy` (owner approval first).
+- [x] Web verified locally on 2026-10-28 at desktop width and 375 px, signed in and signed out: Work lens from Search, profile changes from Search, LinkedIn-export import through the API (birth date and address dropped), job posting, the job-scam check (held), application draft (nothing sent), export with `jsonResume`, public resume page.
+- [ ] iOS Simulator and Android emulator (deferred by the owner on 2026-10-28).
+- [ ] Workers AI tailoring checked on real profiles in production.
+- [ ] Owner: a LinkedIn developer app (Sign In with LinkedIn using OpenID Connect, Share on LinkedIn) before the LinkedIn connector can move from planned.
+- [ ] Owner decision: whether to host Resume Matcher (its own server behind an authenticating proxy, plus a model key).
+
 ## Feed lenses (ADR 0017; deployed 2026-10-28)
 
 - [x] App, Worker and database tests pass; `open_media_feed_lenses_test.sql` (12 checks) passes against the local database.

@@ -64,6 +64,14 @@ export const connectorCatalog: ConnectorDescriptor[] = [
       ],
     };
   }),
+  // ADR 0018: only LinkedIn's official products. Until Open Media has its own LinkedIn app, profiles come from the person's own data export.
+  {
+    id: 'linkedin-official', displayName: 'LinkedIn (official API)', kind: 'social', authentication: 'oauth2-pkce', status: 'planned',
+    capabilities: [
+      { operation: 'publish-post', available: false, reason: 'Share on LinkedIn (posting as you) needs Open Media’s LinkedIn developer app, which is not set up yet.' },
+      { operation: 'read-feed', available: false, reason: 'LinkedIn offers no API to read your feed, connections or jobs, and Open Media does not scrape it. Import your own profile from LinkedIn’s data export instead.' },
+    ],
+  },
   {
     id: 'snapchat', displayName: 'Snapchat', kind: 'social', authentication: 'oauth2-pkce', status: 'unavailable',
     capabilities: [{ operation: 'read-messages', available: false, reason: 'Snap Kit does not expose private chat history, and no working chat bridge exists.' }, { operation: 'send-message', available: false, reason: 'Snap Kit does not provide a third-party private-message transport.' }],

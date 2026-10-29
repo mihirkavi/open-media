@@ -217,3 +217,79 @@ test('an agent cannot start a payment until the person confirmed that exact amou
     assert.ok(asPerson.every((request) => request.headers.apikey !== 'service-key' && request.headers.authorization !== 'Bearer service-key'), 'the person’s calls never use the server key');
   });
 });
+
+const jobPost = '9a1c2a0e-6b1d-4c39-9d7e-2f4b8a1c0d44';
+const savedProfessional = { headline: 'Product designer', work: [{ name: 'Acme', position: 'Senior designer', startDate: '2022-03', highlights: ['Led the design system'] }], skills: ['Figma', 'User research'], education: [], languages: [], links: [] };
+
+test('Work tools: jobs are posted as job listings, and drafts and imports change nothing without the person', async () => {
+  const database = (name: string) => name === 'open_media_create_listing_post' ? { id: jobPost, body: 'Join us', createdAt: '2026-10-28T00:00:00Z', author: { handle: 'employer' }, listing: { kind: 'job', title: 'Designer' } }
+    : name === 'open_media_public_post' ? { id: jobPost, body: 'Own our design system and run user research.', author: { handle: 'employer' }, listing: { kind: 'job', title: 'Senior product designer', job: { employmentType: 'full_time', applyUrl: 'https://jobs.example.com/1' } } }
+    : null;
+  const realFetch = globalThis.fetch;
+  await withAccount(database, async (call, requests) => {
+    // The person's own profile row is read over REST; answer it here.
+    const inner = globalThis.fetch;
+    globalThis.fetch = (async (url: string, init?: RequestInit) => String(url).includes('/rest/v1/profiles?') ? Response.json([{ handle: 'asha', display_name: 'Asha', professional: savedProfessional }]) : inner(url, init)) as typeof fetch;
+    const tools = new Map(((await call('tools/list')).tools as { name: string; annotations: { readOnlyHint: boolean } }[]).map((item) => [item.name, item.annotations]));
+    for (const name of ['get_professional_profile', 'tailor_resume', 'draft_job_application']) assert.equal(tools.get(name)?.readOnlyHint, true, name);
+    for (const name of ['set_professional_profile', 'import_resume', 'publish_job']) assert.equal(tools.get(name)?.readOnlyHint, false, name);
+
+    await call('tools/call', { name: 'publish_job', arguments: { title: 'Senior designer (contract)', pay: '80000-120000', currency: 'USD', remote: true, applyUrl: 'https://jobs.example.com/1' } });
+    const created = requests.find((request) => request.url.includes('open_media_create_listing_post'))!;
+    assert.deepEqual(created.body.p_listing.job, { employmentType: 'contract', payMaxMinor: 12_000_000, applyUrl: 'https://jobs.example.com/1' });
+    assert.equal(created.body.p_listing.priceMinor, 8_000_000);
+
+    const scam = await call('tools/call', { name: 'publish_job', arguments: { title: 'Role', applyUrl: 'http://example.com' } });
+    assert.equal(scam.isError, true);
+
+    const draft = JSON.parse((await call('tools/call', { name: 'draft_job_application', arguments: { postId: jobPost } })).content[0].text);
+    assert.equal(draft.sent, false);
+    assert.equal(draft.to, '@employer');
+    assert.equal(draft.applyUrl, 'https://jobs.example.com/1');
+    assert.match(draft.message, /Senior designer at Acme/);
+    assert.ok(!requests.some((request) => request.url.includes('/rest/v1/messages') || request.url.includes('start_direct_conversation')), 'drafting sends nothing');
+
+    const preview = JSON.parse((await call('tools/call', { name: 'import_resume', arguments: { linkedInFiles: { 'Positions.csv': 'Company Name,Title,Description,Location,Started On,Finished On\nAcme,Designer,,,Jan 2020,\n' } } })).content[0].text);
+    assert.equal(preview.saved, false);
+    assert.equal(preview.professional.work[0].startDate, '2020-01');
+    assert.ok(!requests.some((request) => request.url.includes('open_media_set_professional_profile')), 'an import is not saved until the person agrees');
+    await call('tools/call', { name: 'import_resume', arguments: { linkedInFiles: { 'Positions.csv': 'Company Name,Title,Description,Location,Started On,Finished On\nAcme,Designer,,,Jan 2020,\n' }, save: true } });
+    assert.ok(requests.some((request) => request.url.includes('open_media_set_professional_profile')));
+    globalThis.fetch = inner;
+  });
+  globalThis.fetch = realFetch;
+});
+
+test('job search is public and asks the database for open jobs only', async () => {
+  const realFetch = globalThis.fetch;
+  let args: Record<string, unknown> | undefined;
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    if (String(url).includes('open_media_public_jobs')) args = JSON.parse(String(init?.body));
+    return Response.json([]);
+  }) as typeof fetch;
+  try {
+    const response = await handleAgentRequest(new Request(`${origin}/v1/jobs?q=designer&remote=true`), env);
+    assert.equal(response.status, 200);
+    assert.deepEqual(args, { p_query: 'designer', p_remote: true, p_limit: 30 });
+    assert.match(((await response.json()) as { note: string }).note, /never applies/);
+  } finally { globalThis.fetch = realFetch; }
+});
+
+test('public resumes come from the JSON Resume packages and respect private profiles', async () => {
+  const realFetch = globalThis.fetch;
+  let profile: unknown = { handle: 'asha', displayName: 'Asha', canView: true, professional: savedProfessional };
+  globalThis.fetch = (async () => Response.json(profile)) as typeof fetch;
+  try {
+    const page = await handleAgentRequest(new Request(`${origin}/v1/profiles/asha/resume`), env);
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get('content-security-policy') ?? '', /default-src 'none'/);
+    assert.match(await page.text(), /Senior designer/);
+    const json = await (await handleAgentRequest(new Request(`${origin}/v1/profiles/asha/resume.json`), env)).json() as { basics: { label: string } };
+    assert.equal(json.basics.label, 'Product designer');
+    const yaml = await (await handleAgentRequest(new Request(`${origin}/v1/profiles/asha/resume.yaml`), env)).text();
+    assert.match(yaml, /^cv:\n {2}name: "Asha"/);
+    assert.match(yaml, /company: "Acme"/);
+    profile = { handle: 'asha', canView: false };
+    assert.equal((await handleAgentRequest(new Request(`${origin}/v1/profiles/asha/resume`), env)).status, 404);
+  } finally { globalThis.fetch = realFetch; }
+});

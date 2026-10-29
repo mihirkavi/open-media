@@ -10,6 +10,7 @@ import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { PostCard } from './OpenMediaFeed';
 import { newId, PersonTarget, usePeople } from './people';
+import { ProfessionalLines } from './ProfessionalLines';
 import { Text } from './Text';
 import { VerifiedTick } from './VerifiedTick';
 
@@ -96,6 +97,7 @@ export function PersonProfile({ target, viewerId, onBack, onMessage }: { target:
       <View style={styles.nameLine}><Text accessibilityRole="header" style={styles.name}>{name}</Text>{person?.verified ? <VerifiedTick size={20} /> : null}</View>
       <Text style={styles.meta}>{[handle ? `@${handle}` : undefined, where].filter(Boolean).join(' · ')}</Text>
       {person?.bio ? <Text style={styles.bio}>{person.bio}</Text> : null}
+      <ProfessionalLines profile={person?.professional} />
       {person?.joinedAt ? <Text style={styles.small}>{`Joined ${new Date(person.joinedAt).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })} · ${person.postCount ?? 0} ${person.postCount === 1 ? 'post' : 'posts'}`}</Text> : null}
       <View style={styles.actions}>
         {person && viewerId && !self ? <Pressable accessibilityRole="button" accessibilityState={{ selected: Boolean(follow) }} onPress={toggleFollow} style={[styles.button, !follow && styles.primary]}>

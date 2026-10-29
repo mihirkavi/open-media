@@ -70,7 +70,7 @@ export interface SocialPost {
 
 export interface FeedExplanation {
   postId: string;
-  /** The lens's id: raw, relevant, or a saved lens. */
+  /** The lens's id: raw, relevant, work, or a saved lens. */
   mode: string;
   /** The lens's name, e.g. Relevant. */
   lens: string;

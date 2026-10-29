@@ -22,9 +22,13 @@ import { networkConnectors } from '../../../src/connectors/networkFeeds';
 import { networkSearches } from '../../../src/connectors/networkSearch';
 import { collapseRepeatedPosts, NetworkId, networks } from '../../../src/domain/networkPosts';
 import { explainFeedPost, FeedMode, selectFeed, SocialPost } from '../../../src/domain/posts';
-import { FeedLens, LensContext, LensError, lensSummary, relevantLens } from '../../../src/domain/feedLenses';
+import { builtInLenses, FeedLens, LensContext, LensError, lensSummary, relevantLens, workLens } from '../../../src/domain/feedLenses';
+import { fromJsonResume, fromLinkedInExport, isEmptyProfessional, parseProfessional, ProfessionalError, toJsonResume } from '../../../src/domain/professionalProfile';
+import { applicationMessage, tailorProfile } from './careerAssist.js';
+import { renderCvYaml, resumeHtml, resumePageHeaders, validateJsonResume } from './resumeFormats.js';
+import { UserFacingError } from './errors.js';
 import { deleteLens as deleteStoredLens, draftLens, findLens, installLens as installSharedLens, LensApiError, lensView, listLenses, myLenses, resolveLens, saveLens as saveStoredLens } from './feedLensApi.js';
-import { PostListing, validateListing } from '../../../src/domain/listings';
+import { EmploymentType, employmentTypes, PostListing, validateListing } from '../../../src/domain/listings';
 import { validateOndcStore } from '../../../src/domain/ondc';
 import { isPaymentChain, onchainTransfer, Payment, paymentBreakdown, PaymentChain, PaymentRail, previewCharge } from '../../../src/domain/payments';
 import { maxPostLength, PublicPostRecord, socialPostFromPublic } from '../../../src/domain/publicPosts';
@@ -89,13 +93,14 @@ export function isAgentPath(pathname: string, method: string): boolean {
   const path = pathname.replace(/\/+$/, '') || '/';
   if (isSitePath(path) || path === '/agent/identity' || path === '/ask' || path === '/feeds/posts.jsonl' || path.startsWith('/v1/auth/')) return true;
   if (['/', '/v1', '/v1/openapi.json', '/llms.txt', '/.well-known/mcp.json', '/.well-known/mcp-server', '/open/mcp', '/me/mcp'].includes(path)) return true;
-  if (['/v1/feed', '/v1/search', '/v1/networks', '/v1/settings', '/v1/about', '/v1/events/upcoming', '/v1/transparency'].includes(path)) return true;
+  if (['/v1/feed', '/v1/search', '/v1/networks', '/v1/settings', '/v1/about', '/v1/events/upcoming', '/v1/transparency', '/v1/jobs'].includes(path)) return true;
   if (path === '/v1/lenses' || path.startsWith('/v1/lenses/')) return true;
   if (path.startsWith('/v1/operator/') || path.startsWith('/v1/verification-tasks')) return true;
   if (method === 'GET' && /^\/v1\/listings\/[^/]+\/checks$/.test(path)) return true;
   if (method === 'PATCH' && /^\/v1\/me\/listings\/[^/]+$/.test(path)) return true;
   if (path === '/v1/me' || path.startsWith('/v1/me/')) return true;
   if (method === 'GET' && /^\/v1\/people\/[^/]+\/[^/]+$/.test(path)) return true;
+  if (method === 'GET' && /^\/v1\/profiles\/[^/]+\/resume(\.json|\.yaml)?$/.test(path)) return true;
   if (method === 'POST' && path === '/v1/verification/stripe/webhook') return true;
   if (method === 'POST' && path === '/v1/payments/stripe/webhook') return true;
   return method !== 'GET' && /^\/v1\/posts\/[^/]+\/report$/.test(path);
@@ -191,6 +196,30 @@ export async function previewLens(env: AgentEnv, origin: string, input: Record<s
   const chosen = Array.isArray(input.sources) ? input.sources.filter((item): item is Source => sources.includes(item as Source)) : undefined;
   const page = await feed(env, origin, { lens, sources: chosen, kind: input.kind === 'clips' ? 'clips' : 'feed' });
   return { ...page, lens: lensView(lens, origin), note: lens.permissions.includes('follows') && lens.filters.followedOnly ? 'This preview has no account, so “people you follow” keeps nothing here. Use get_my_feed with the person’s token.' : undefined };
+}
+
+/** A person's public professional profile as a resume: JSON Resume, RenderCV YAML, or a page drawn by a JSON Resume theme. */
+export async function publicResume(env: AgentEnv, origin: string, handle: string, format: 'html' | 'json' | 'yaml'): Promise<Response> {
+  const clean = handle.toLowerCase().replace(/^@/, '');
+  if (!handlePattern.test(clean)) throw new AgentError(404, 'not_found', 'No such profile.');
+  const person = await callRpc<{ handle?: string; displayName?: string; canView?: boolean; professional?: unknown } | null>(env, fetch, 'open_media_public_profile', { p_handle: clean });
+  let professional;
+  try { professional = person?.canView ? parseProfessional(person.professional) : undefined; } catch { professional = undefined; }
+  if (!person?.handle || !professional || isEmptyProfessional(professional)) throw new AgentError(404, 'not_found', 'This person has no public professional profile.');
+  const resume = toJsonResume(professional, { name: person.displayName ?? person.handle, handle: person.handle, url: `${origin}/v1/profiles/${person.handle}/resume` });
+  if (format === 'json') return new Response(JSON.stringify(resume, null, 2), { headers: { 'content-type': 'application/json; charset=utf-8', 'access-control-allow-origin': '*', 'cache-control': 'public, max-age=300' } });
+  if (format === 'yaml') return new Response(await renderCvYaml(resume), { headers: { 'content-type': 'text/yaml; charset=utf-8', 'access-control-allow-origin': '*', 'content-disposition': `inline; filename="${person.handle}-rendercv.yaml"`, 'cache-control': 'public, max-age=300' } });
+  return new Response(resumeHtml(resume), { headers: resumePageHeaders });
+}
+
+/** Open job posts on Open Media (ADR 0018), newest first, each with its “why” through the Work lens. */
+export async function jobs(env: AgentEnv, origin: string, options: { query?: string; remote?: boolean; limit?: number } = {}) {
+  const records = await callRpc<PublicPostRecord[]>(env, fetch, 'open_media_public_jobs', { p_query: options.query?.trim().slice(0, 80) || null, p_remote: options.remote ?? null, p_limit: Math.min(50, Math.max(1, options.limit ?? 30)) });
+  const posts = (Array.isArray(records) ? records : []).map((record) => socialPostFromPublic(record, env.SUPABASE_URL));
+  return {
+    data: posts.map((post) => agentPost(post, workLens, origin)),
+    note: 'Jobs posted on Open Media. Apply on the employer’s page (listing.job.applyUrl) or by messaging the poster; Open Media never applies for anyone. Jobs on LinkedIn and other job boards are not included.',
+  };
 }
 
 export async function search(env: AgentEnv, origin: string, query: string) {
@@ -441,7 +470,14 @@ export class Account {
   }
 
   async exportData() {
-    return this.rpc<Record<string, unknown>>('open_media_export_account_data', {});
+    const exported = await this.rpc<Record<string, unknown>>('open_media_export_account_data', {});
+    // The professional profile also comes as a JSON Resume document, for resume tools (ADR 0018).
+    const profile = exported?.profile as { handle?: string; display_name?: string; professional?: unknown } | null | undefined;
+    try {
+      const professional = parseProfessional(profile?.professional);
+      if (profile?.handle && !isEmptyProfessional(professional)) return { ...exported, jsonResume: toJsonResume(professional, { name: profile.display_name ?? profile.handle, handle: profile.handle, url: `${this.origin}/v1/profiles/${profile.handle}` }) };
+    } catch { /* an unreadable profile is exported as stored */ }
+    return exported;
   }
 
   // Contact cards: the person's own address book, encrypted before storage (ADR 0013).
@@ -477,9 +513,90 @@ export class Account {
     return { linkedAccounts: clean, note: 'These links are public and declared by you; they are not proof of ownership.' };
   }
 
+  // Professional profiles and jobs (ADR 0018).
+  private async ownProfile() {
+    const [row] = await this.rest<{ handle: string; display_name: string; professional: unknown }[]>('GET', `/rest/v1/profiles?id=eq.${this.userId}&select=handle,display_name,professional`);
+    if (!row) throw new AgentError(404, 'no_profile', 'This account has no profile yet. Choose a name and handle with set_up_profile first.');
+    return { handle: row.handle, name: row.display_name, url: `${this.origin}/v1/profiles/${row.handle}/resume`, professional: parseProfessional(row.professional) };
+  }
+
+  async professional() {
+    const own = await this.ownProfile();
+    const resumeUrl = `${this.origin}/v1/profiles/${own.handle}/resume`;
+    const jsonResume = toJsonResume(own.professional, { ...own, url: resumeUrl });
+    return {
+      professional: own.professional, jsonResume, jsonResumeValid: validateJsonResume(jsonResume).valid, renderCvYaml: await renderCvYaml(jsonResume),
+      resumeUrl, links: { page: resumeUrl, jsonResume: `${resumeUrl}.json`, renderCv: `${resumeUrl}.yaml` },
+      note: 'Public, like the rest of the profile. jsonResume imports into Reactive Resume (file import, format JSON_RESUME) and other JSON Resume tools; renderCvYaml renders with RenderCV (rendercv render).',
+    };
+  }
+
+  async setProfessional(value: unknown) {
+    let profile;
+    try { profile = parseProfessional(value); } catch (error) { throw new AgentError(400, 'bad_request', error instanceof ProfessionalError ? error.message : 'Check the professional profile.'); }
+    await this.rpc('open_media_set_professional_profile', { p_professional: profile });
+    return { professional: profile, note: 'Saved. It shows on the person’s public profile.' };
+  }
+
+  /** Reads a JSON Resume or LinkedIn export into a profile. Saves only with save: true, after the person agreed. */
+  async importResume(body: Record<string, unknown>) {
+    let profile; let used: string[] = [];
+    try {
+      if (body.jsonResume !== undefined) { profile = fromJsonResume(body.jsonResume); used = ['JSON Resume']; }
+      else if (body.linkedInFiles && typeof body.linkedInFiles === 'object') {
+        const files = Object.fromEntries(Object.entries(body.linkedInFiles as Record<string, unknown>).filter(([, text]) => typeof text === 'string').map(([name, text]) => [name.slice(0, 120), (text as string).slice(0, 200_000)]));
+        ({ profile, used } = fromLinkedInExport(files));
+      } else throw new ProfessionalError('Give jsonResume (a JSON Resume document) or linkedInFiles ({"Profile.csv": "…", "Positions.csv": "…"}) from LinkedIn’s own data export.');
+    } catch (error) { throw new AgentError(400, 'bad_request', error instanceof ProfessionalError ? error.message : 'That file couldn’t be read.'); }
+    if (isEmptyProfessional(profile)) throw new AgentError(400, 'bad_request', 'Nothing usable was found. For LinkedIn, include Profile.csv and Positions.csv from Settings → Data privacy → Get a copy of your data.');
+    if (body.save === true) await this.rpc('open_media_set_professional_profile', { p_professional: profile });
+    return { professional: profile, read: used, saved: body.save === true, note: body.save === true ? 'Saved to the person’s public profile.' : 'Not saved yet. Show the person what was read; call again with save: true once they agree. Birth dates, addresses and contact details are never imported.' };
+  }
+
+  /** The job to tailor for: a job post by id, or a title and description the person pasted. */
+  private async jobFor(body: Record<string, unknown>) {
+    if (typeof body.postId === 'string' && body.postId) {
+      if (!uuid.test(body.postId)) throw new AgentError(404, 'not_found', 'Job post not found.');
+      const post = await callRpc<(UpstreamPost & { listing?: PostListing }) | null>(this.env, fetch, 'open_media_public_post', { p_post_id: body.postId });
+      if (!post?.listing || post.listing.kind !== 'job') throw new AgentError(404, 'not_found', 'That post isn’t a job. Find jobs with find_jobs.');
+      return { job: { title: post.listing.title, text: post.body, employer: typeof body.employer === 'string' ? body.employer : undefined }, poster: post.author?.handle, applyUrl: post.listing.job?.applyUrl };
+    }
+    const title = typeof body.title === 'string' ? body.title : '';
+    const text = typeof body.description === 'string' ? body.description : typeof body.text === 'string' ? body.text : '';
+    if (!title.trim() && !text.trim()) throw new AgentError(400, 'bad_request', 'Give postId (a job post on Open Media) or the job’s title and description.');
+    return { job: { title, text, employer: typeof body.employer === 'string' ? body.employer : undefined } };
+  }
+
+  private async careerLimit() {
+    if (!(await withinLimit(this.env.PUBLIC_API_RATE_LIMITER, `career:${this.userId}`))) throw new AgentError(429, 'rate_limited', 'Too many drafts in a short time. Wait a minute and try again.');
+  }
+
+  async tailor(body: Record<string, unknown>) {
+    await this.careerLimit();
+    const own = await this.ownProfile();
+    const { job } = await this.jobFor(body);
+    try { return { ...(await tailorProfile(own.professional, job, this.env)), saved: false }; }
+    catch (error) { throw error instanceof UserFacingError ? new AgentError(400, 'bad_request', error.message) : error; }
+  }
+
+  /** A message to apply with, built from the tailored profile. Nothing is sent. */
+  async draftApplication(body: Record<string, unknown>) {
+    await this.careerLimit();
+    const own = await this.ownProfile();
+    const { job, poster, applyUrl } = await this.jobFor(body);
+    let draft;
+    try { draft = await tailorProfile(own.professional, job, this.env); }
+    catch (error) { throw error instanceof UserFacingError ? new AgentError(400, 'bad_request', error.message) : error; }
+    return {
+      message: applicationMessage(draft, own.url), to: poster ? `@${poster}` : null, applyUrl: applyUrl ?? null, removed: draft.removed, source: draft.source, sent: false,
+      next: poster ? `Show the person this message. Only if they approve, send it with start_conversation (@${poster}) and send_message${applyUrl ? `, or they can apply at ${applyUrl}` : ''}.` : 'Show the person this message to use in their application. Nothing was sent.',
+    };
+  }
+
   // Products and services (ADR 0013, phase 3).
   async publishListing(body: Record<string, unknown>, clientId: string = crypto.randomUUID()) {
-    if (body.kind !== 'product' && body.kind !== 'service' && body.kind !== 'event') throw new AgentError(400, 'bad_request', 'kind must be product, service or event.');
+    if (body.kind !== 'product' && body.kind !== 'service' && body.kind !== 'event' && body.kind !== 'job') throw new AgentError(400, 'bad_request', 'kind must be product, service, event or job.');
+    if (body.employmentType !== undefined && !employmentTypes.includes(body.employmentType as never)) throw new AgentError(400, 'bad_request', `employmentType must be one of ${employmentTypes.join(', ')}.`);
     const startsAt = typeof body.startsAt === 'string' ? body.startsAt : undefined;
     const when = typeof body.when === 'string' ? body.when : undefined;
     if (body.kind === 'event' && !startsAt && !when) throw new AgentError(400, 'bad_request', 'Events need startsAt (ISO 8601, e.g. "2026-11-12T19:00:00-08:00") or when ("Nov 12 7pm").');
@@ -487,6 +604,7 @@ export class Account {
       kind: body.kind, title: String(body.title ?? ''), price: body.price === undefined || body.price === null ? undefined : String(body.price),
       currency: typeof body.currency === 'string' ? body.currency : undefined, location: typeof body.location === 'string' ? body.location : undefined, remote: body.remote === true,
       when: startsAt ? undefined : when, timezone: typeof body.timezone === 'string' ? body.timezone : undefined,
+      applyUrl: typeof body.applyUrl === 'string' ? body.applyUrl : undefined, employmentType: body.employmentType as EmploymentType | undefined,
     });
     if ('error' in checked && !startsAt) throw new AgentError(400, 'bad_request', checked.error);
     let listing = 'listing' in checked ? checked.listing : undefined;
@@ -962,11 +1080,11 @@ function registerPublicTools(server: McpServer, env: AgentEnv, origin: string) {
   server.registerResource('posts-view', postsViewUri, { title: 'Open Media posts', description: 'Shows posts from get_feed and search as a readable list with source links.', mimeType: mcpAppMimeType },
     async (uri) => ({ contents: [{ uri: uri.href, mimeType: mcpAppMimeType, text: postsViewHtml, _meta: { ui: { prefersBorder: true } } }] }));
   const sourceEnum = z.enum(sources);
-  tool(server, 'get_feed', { title: 'Read the feed', description: 'The mixed feed: Open Media plus Farcaster, Lens, Hive and DeSo public posts through a feed lens: raw (newest first, the default), relevant, or any shared lens id from list_feed_lenses. Each post includes its network, source link and “why” reasons, including the lens’s rules. Pass nextCursor back to read further.', input: { sources: z.array(sourceEnum).optional(), kind: z.enum(['feed', 'clips']).optional().describe('clips = short videos only'), mode: z.enum(['raw', 'relevant']).optional().describe('Older name for the built-in lenses; prefer lens'), lens: z.string().optional().describe('raw, relevant, or a shared lens id'), cursor: z.string().optional() }, readOnly: true, view: postsViewUri },
+  tool(server, 'get_feed', { title: 'Read the feed', description: 'The mixed feed: Open Media plus Farcaster, Lens, Hive and DeSo public posts through a feed lens: raw (newest first, the default), relevant, work (jobs, hiring and professional posts), or any shared lens id from list_feed_lenses. Each post includes its network, source link and “why” reasons, including the lens’s rules. Pass nextCursor back to read further.', input: { sources: z.array(sourceEnum).optional(), kind: z.enum(['feed', 'clips']).optional().describe('clips = short videos only'), mode: z.enum(['raw', 'relevant']).optional().describe('Older name for the built-in lenses; prefer lens'), lens: z.string().optional().describe('raw, relevant, work, or a shared lens id'), cursor: z.string().optional() }, readOnly: true, view: postsViewUri },
     async (args) => feed(env, origin, { sources: args.sources as Source[] | undefined, kind: args.kind as 'feed' | 'clips' | undefined, mode: args.mode as FeedMode | undefined, lens: typeof args.lens === 'string' ? (await lensCall(() => findLens(env, String(args.lens)))).lens : undefined, cursor: args.cursor as string | undefined }));
   // Feed lenses (ADR 0017): how the Feed is ordered, as inspectable manifests anyone can write and share.
-  tool(server, 'list_feed_lenses', { title: 'List feed lenses', description: 'The feed algorithms people can use: the built-in Raw and Relevant, and lenses people shared publicly, each with its rules in plain words, what it reads, how many installed it, and the manifest format for writing one.', input: { query: z.string().max(80).optional() }, readOnly: true }, (args) => listLenses(env, origin, args.query as string | undefined));
-  tool(server, 'get_feed_lens', { title: 'Get a feed lens', description: 'One lens by id (raw, relevant or a shared lens id): its manifest, rules in words, what it may read and what it can never read.', input: { id: z.string() }, readOnly: true }, async (args) => { const found = await lensCall(() => findLens(env, String(args.id))); return lensView(found.lens, origin, found.row); });
+  tool(server, 'list_feed_lenses', { title: 'List feed lenses', description: 'The feed algorithms people can use: the built-in Raw, Relevant and Work, and lenses people shared publicly, each with its rules in plain words, what it reads, how many installed it, and the manifest format for writing one.', input: { query: z.string().max(80).optional() }, readOnly: true }, (args) => listLenses(env, origin, args.query as string | undefined));
+  tool(server, 'get_feed_lens', { title: 'Get a feed lens', description: 'One lens by id (raw, relevant, work or a shared lens id): its manifest, rules in words, what it may read and what it can never read.', input: { id: z.string() }, readOnly: true }, async (args) => { const found = await lensCall(() => findLens(env, String(args.id))); return lensView(found.lens, origin, found.row); });
   tool(server, 'draft_feed_lens', { title: 'Write a feed lens from plain words', description: 'Turns what the person wants (“only videos about cooking from people I follow, no crypto”) into a lens manifest, saying what was understood and what was not. Nothing is saved. You may refine the manifest yourself before previewing or saving it.', input: { request: z.string().min(1).max(400) }, readOnly: true }, (args) => lensCall(() => draftLens(args.request, origin)));
   tool(server, 'preview_feed_lens', { title: 'Preview a feed lens', description: 'The public feed as a lens would show it, without saving anything. Give lens (an id), manifest (a lens object) or request (plain words). Each post carries its “why”.', input: { lens: z.string().optional(), manifest: z.record(z.string(), z.unknown()).optional(), request: z.string().max(400).optional(), sources: z.array(sourceEnum).optional(), kind: z.enum(['feed', 'clips']).optional() }, readOnly: true, view: postsViewUri }, (args) => previewLens(env, origin, args));
   tool(server, 'search', { title: 'Search everything public', description: 'Plain-language search across public posts on Open Media, Farcaster, Lens, Hive and DeSo, plus matching app settings. Understands phrases like “videos about ethereum on lens today” and says what it understood and how each network was searched.', input: { query: z.string().min(1).max(200) }, readOnly: true, view: postsViewUri },
@@ -977,6 +1095,8 @@ function registerPublicTools(server: McpServer, env: AgentEnv, origin: string) {
     (args) => personTimeline(env, origin, String(args.network), String(args.handle), args.cursor as string | undefined));
   tool(server, 'find_upcoming_events', { title: 'Find upcoming events', description: 'Upcoming public events from Luma, Meetup and Eventbrite in the San Francisco Bay Area (the only area covered so far), with the same event on several platforms shown once. Each has its date, place, price, organizer and the official registration link. Never claim the person is registered; they register on that page.', input: { area: z.string().optional().describe('south bay, peninsula, san francisco, east bay or bay area (default)'), days: z.number().int().min(1).max(14).optional(), query: z.string().max(120).optional().describe('Topic words, e.g. "ai founders" or "hiking"'), limit: z.number().int().min(1).max(50).optional() }, readOnly: true },
     async (args) => { try { return await upcomingEvents(env, { area: args.area as string | undefined, days: args.days as number | undefined, query: args.query as string | undefined, limit: args.limit as number | undefined }); } catch (error) { throw error instanceof EventsUnavailable ? new AgentError(400, 'bad_request', error.message) : error; } });
+  tool(server, 'find_jobs', { title: 'Find jobs', description: 'Open job posts on Open Media, newest first, with pay, place, remote, the kind of job and the employer’s apply link. Filter by words (role, skill, city) and remote. Only jobs posted on Open Media: LinkedIn and other job boards are not searched. Open Media never applies for anyone; to help the person apply, use draft_job_application with their account.', input: { query: z.string().max(80).optional(), remote: z.boolean().optional(), limit: z.number().int().min(1).max(50).optional() }, readOnly: true, view: postsViewUri },
+    (args) => jobs(env, origin, { query: args.query as string | undefined, remote: args.remote as boolean | undefined, limit: args.limit as number | undefined }));
   tool(server, 'list_networks', { title: 'List networks and capabilities', description: 'Every network Open Media connects to and exactly what works today: open networks, email, chat bridges running on this server, and networks that cannot be reached.', input: {}, readOnly: true }, () => networksDescription(env));
   tool(server, 'find_setting', { title: 'Find a setting', description: 'Find where a control lives in the Open Media app, e.g. “dark mode”, “stop posting to farcaster”, “export my data”.', input: { query: z.string().min(1).max(120) }, readOnly: true }, (args) => settingsLookup(String(args.query)));
   tool(server, 'get_listing_checks', { title: 'What was checked on a listing', description: 'For a public listing: whether it is clear or getting a closer look, how many verified people checked its claims, each claim with its outcome, and the public pages they cited.', input: { postId: z.string() }, readOnly: true }, (args) => listingChecks(env, String(args.postId)));
@@ -1002,6 +1122,16 @@ function registerAccountTools(server: McpServer, account: Account) {
   tool(server, 'save_contacts', { title: 'Save contacts', description: 'Create or replace contact cards (matched by id; up to 500 per call). Each card: {id (uuid), source: device|manual, name, nicknames[], phones[], emails[], notes, links[{ref, method: auto|confirmed, evidence, linkedAt}], rejected[], updatedAt}. Only link identities the person confirmed or that share an exact email or phone number. Confirm changes with the person first.', input: { cards: z.array(z.record(z.string(), z.unknown())).min(1).max(500) }, readOnly: false }, (args) => account.saveContacts(args.cards));
   tool(server, 'delete_contact', { title: 'Delete a contact', description: 'Delete one of the person’s contact cards. The people themselves are not affected.', input: { id: z.string() }, readOnly: false }, (args) => account.deleteContact(String(args.id)));
   tool(server, 'set_linked_accounts', { title: 'Set my accounts elsewhere', description: 'Replace the list of the person’s own Farcaster, Lens, Hive and DeSo accounts shown on their public profile (up to 8). This list is public. Confirm with the person first.', input: { accounts: z.array(z.object({ network: z.enum(authorNetworks as [string, ...string[]]), handle: z.string() })).max(8) }, readOnly: false }, (args) => account.setLinkedAccounts(args.accounts));
+
+  // Work: professional profile and jobs (ADR 0018)
+  const jobInput = { postId: z.string().optional().describe('A job post on Open Media, from find_jobs'), title: z.string().max(120).optional(), description: z.string().max(4000).optional().describe('The job description, if the job is elsewhere'), employer: z.string().max(120).optional() };
+  tool(server, 'get_professional_profile', { title: 'My professional profile', description: 'The work side of the person’s profile (headline, experience, education, skills, links, open to work or hiring), plus the same data as a JSON Resume document they can open in Reactive Resume, RenderCV and other resume tools.', input: {}, readOnly: true }, () => account.professional());
+  tool(server, 'set_professional_profile', { title: 'Save my professional profile', description: 'Replaces the work side of the person’s public profile: headline, summary, openTo (work, hiring or none), location, work [{name (employer), position, location, startDate "2021-04", endDate, summary, highlights}], education [{institution, area, studyType, startDate, endDate}], skills, languages, links [{label, url https}]. It is public. Only use facts the person gave you; show them the result and ask before saving.', input: { professional: z.record(z.string(), z.unknown()) }, readOnly: false }, (args) => account.setProfessional(args.professional));
+  tool(server, 'import_resume', { title: 'Import a resume or LinkedIn export', description: 'Reads a JSON Resume document (jsonResume) or the CSV files from LinkedIn’s own data export (linkedInFiles: {"Profile.csv": text, "Positions.csv": text, "Education.csv": text, "Skills.csv": text}) into a professional profile. LinkedIn has no API for this: the person downloads the export from LinkedIn (Settings → Data privacy → Get a copy of your data). Nothing is saved unless save is true; show the person what was read first. Birth dates, addresses and contact details are never imported.', input: { jsonResume: z.unknown().optional(), linkedInFiles: z.record(z.string(), z.string()).optional(), save: z.boolean().optional() }, readOnly: false }, (args) => account.importResume(args));
+  tool(server, 'tailor_resume', { title: 'Tailor my profile to a job', description: 'Drafts the person’s headline, summary, skill order and job highlights for one job, and a short cover note, using only what their profile already says. Anything the AI added that the profile doesn’t say is removed and listed in removed. Nothing is saved: to keep it, save it with set_professional_profile after the person agrees.', input: jobInput, readOnly: true }, (args) => account.tailor(args));
+  tool(server, 'draft_job_application', { title: 'Draft a job application message', description: 'Writes the message the person could send to apply for a job: a cover note and the facts from their profile that fit the job, plus who to send it to and the employer’s apply link. Nothing is sent. Only after the person approves the exact text, send it with start_conversation and send_message, or point them to the apply link. Never apply on other sites for them.', input: jobInput, readOnly: true }, (args) => account.draftApplication(args));
+  tool(server, 'publish_job', { title: 'Post a job', description: 'Publish a public job post: the role, pay (a number or range like "80000-120000", yearly or per hour as you write in the text), currency, place, remote, the kind of job (full_time, part_time, contract, internship, freelance; read from the title if left out) and an https link to the employer’s own application page. It shows in the Feed and the Work feed, and is checked in the background: job posts that charge applicants or ask for ID or bank details are hidden. Confirm the details with the person first.', input: { title: z.string().min(1).max(120), pay: z.string().max(40).optional(), currency: z.string().length(3).optional(), location: z.string().max(120).optional(), remote: z.boolean().optional(), employmentType: z.enum(['full_time', 'part_time', 'contract', 'internship', 'freelance']).optional(), applyUrl: z.string().max(500).optional(), text: z.string().max(maxPostLength).optional() }, readOnly: false },
+    (args) => account.publishListing({ ...args, kind: 'job', price: args.pay }));
 
   // Products and services
   tool(server, 'publish_listing', { title: 'Offer a product, service or event', description: 'Publish a public post offering a product, a service or an event, with a price (0 or "0" for free). Anyone can read it and message the person about it. Apps and software are products with a link to their official page (App Store, Google Play, GitHub, the maker’s site); never link to a file download. Confirm the title, price, time and text with the person first. The listing goes live at once and is checked in the background; if something needs fixing, Open Media messages the person. No payment happens here.', input: { kind: z.enum(['product', 'service', 'event']), title: z.string().min(1).max(120), price: z.string().max(20).optional().describe('e.g. "25" or "25.50"; leave out for "ask for price"'), currency: z.string().length(3).optional(), location: z.string().max(120).optional(), remote: z.boolean().optional().describe('Service available remotely, product can ship, or event is online'), startsAt: z.string().optional().describe('Events: ISO 8601 start with offset, e.g. 2026-11-12T19:00:00-08:00'), timezone: z.string().max(64).optional().describe('Events: IANA time zone, e.g. America/Los_Angeles'), text: z.string().max(maxPostLength).optional() }, readOnly: false }, (args) => account.publishListing(args));
@@ -1047,11 +1177,11 @@ function registerAccountTools(server: McpServer, account: Account) {
   tool(server, 'list_my_feed_lenses', { title: 'My feed lenses', description: 'The lenses the person saved (private and shared), with their rules in words. They appear in the person’s Feed picker on every device.', input: {}, readOnly: true }, () => account.lenses());
   tool(server, 'save_feed_lens', { title: 'Save or share a feed lens', description: 'Saves a lens to the person’s account (visibility private, the default) or shares it publicly (visibility public: anyone can read, install and fork it, under the person’s handle unless their account is private). Give lens (a manifest, e.g. from draft_feed_lens) or request (plain words). Saving the same id again updates it. Show the person the summary and rules first, and ask before sharing publicly.', input: { lens: z.record(z.string(), z.unknown()).optional(), request: z.string().max(400).optional(), visibility: z.enum(['private', 'public']).optional() }, readOnly: false }, (args) => account.saveLens(args));
   tool(server, 'install_feed_lens', { title: 'Install a shared feed lens', description: 'Copies a publicly shared lens into the person’s lenses (counted as an install for its author). The copy is theirs to change.', input: { id: z.string() }, readOnly: false }, (args) => account.installLens(args.id));
-  tool(server, 'delete_feed_lens', { title: 'Remove a feed lens', description: 'Removes one of the person’s lenses by its id (key). Copies others installed are not affected. Raw and Relevant cannot be removed.', input: { key: z.string() }, readOnly: false }, (args) => account.deleteLens(args.key));
-  tool(server, 'get_my_feed', { title: 'My feed through a lens', description: 'The feed the way the person’s app shows it: through raw, relevant, one of their lenses (by id), a shared lens id, a manifest or plain words, using who they follow when the lens asks for it.', input: { lens: z.string().optional(), manifest: z.record(z.string(), z.unknown()).optional(), request: z.string().max(400).optional(), sources: z.array(z.enum(sources)).optional(), kind: z.enum(['feed', 'clips']).optional(), cursor: z.string().optional() }, readOnly: true, view: postsViewUri },
+  tool(server, 'delete_feed_lens', { title: 'Remove a feed lens', description: 'Removes one of the person’s lenses by its id (key). Copies others installed are not affected. The built-in Raw, Relevant and Work cannot be removed.', input: { key: z.string() }, readOnly: false }, (args) => account.deleteLens(args.key));
+  tool(server, 'get_my_feed', { title: 'My feed through a lens', description: 'The feed the way the person’s app shows it: through raw, relevant, work, one of their lenses (by id), a shared lens id, a manifest or plain words, using who they follow when the lens asks for it.', input: { lens: z.string().optional(), manifest: z.record(z.string(), z.unknown()).optional(), request: z.string().max(400).optional(), sources: z.array(z.enum(sources)).optional(), kind: z.enum(['feed', 'clips']).optional(), cursor: z.string().optional() }, readOnly: true, view: postsViewUri },
     async (args) => {
       // The person's own saved lenses are found by key; anything else resolves as a public lens.
-      if (typeof args.lens === 'string' && !['raw', 'relevant'].includes(args.lens) && !/^[0-9a-f-]{36}$/i.test(args.lens)) {
+      if (typeof args.lens === 'string' && !builtInLenses.some((item) => item.id === args.lens) && !/^[0-9a-f-]{36}$/i.test(args.lens)) {
         const mine = await account.lenses();
         const saved = mine.data.find((item) => item.key === args.lens);
         if (!saved) throw new AgentError(404, 'not_found', 'No saved lens with that id. See list_my_feed_lenses.');
@@ -1122,8 +1252,8 @@ export function serverCard(origin: string) {
     version,
     documentation: `${origin}/llms.txt`,
     servers: [
-      { name: 'open-media', title: 'Open Media', url: `${origin}/open/mcp`, transport: 'streamable-http', authentication: { type: 'none' }, tools: ['get_feed', 'search', 'get_post', 'get_profile', 'list_feed_lenses', 'get_feed_lens', 'draft_feed_lens', 'preview_feed_lens', 'list_networks', 'find_setting', 'about_open_media'] },
-      { name: 'open-media-account', title: 'Open Media (your account)', url: `${origin}/me/mcp`, transport: 'streamable-http', authentication: { type: 'bearer', description: 'The person’s Open Media access token: sign in with request_sign_in_code and sign_in_with_code on the public server (or POST /v1/auth/email-code then /v1/auth/verify), or copy it from Settings → Developers and agents. It expires after about an hour; renew it with refresh_sign_in.' }, tools: ['get_me', 'set_up_profile', 'publish_post', 'delete_post', 'report_post', 'list_conversations', 'start_conversation', 'send_message', 'export_my_data', 'block_person', 'report_conversation', 'delete_my_account', 'list_email', 'list_mailboxes', 'connect_mailbox', 'sync_mailbox', 'send_email', 'remove_mailbox', 'list_chat_networks', 'list_bridged_chats', 'send_bridged_message', 'chat_network_sign_in_options', 'start_chat_network_sign_in', 'continue_chat_network_sign_in', 'disconnect_chat_network', 'cross_posting_status', 'list_my_feed_lenses', 'save_feed_lens', 'install_feed_lens', 'delete_feed_lens', 'get_my_feed', 'plus every public tool'] },
+      { name: 'open-media', title: 'Open Media', url: `${origin}/open/mcp`, transport: 'streamable-http', authentication: { type: 'none' }, tools: ['get_feed', 'search', 'get_post', 'get_profile', 'list_feed_lenses', 'get_feed_lens', 'draft_feed_lens', 'preview_feed_lens', 'find_jobs', 'list_networks', 'find_setting', 'about_open_media'] },
+      { name: 'open-media-account', title: 'Open Media (your account)', url: `${origin}/me/mcp`, transport: 'streamable-http', authentication: { type: 'bearer', description: 'The person’s Open Media access token: sign in with request_sign_in_code and sign_in_with_code on the public server (or POST /v1/auth/email-code then /v1/auth/verify), or copy it from Settings → Developers and agents. It expires after about an hour; renew it with refresh_sign_in.' }, tools: ['get_me', 'set_up_profile', 'publish_post', 'delete_post', 'report_post', 'list_conversations', 'start_conversation', 'send_message', 'export_my_data', 'block_person', 'report_conversation', 'delete_my_account', 'list_email', 'list_mailboxes', 'connect_mailbox', 'sync_mailbox', 'send_email', 'remove_mailbox', 'list_chat_networks', 'list_bridged_chats', 'send_bridged_message', 'chat_network_sign_in_options', 'start_chat_network_sign_in', 'continue_chat_network_sign_in', 'disconnect_chat_network', 'cross_posting_status', 'list_my_feed_lenses', 'save_feed_lens', 'install_feed_lens', 'delete_feed_lens', 'get_my_feed', 'get_professional_profile', 'set_professional_profile', 'import_resume', 'tailor_resume', 'draft_job_application', 'publish_job', 'plus every public tool'] },
       { name: 'open-media-events', title: 'Open Media Events', url: `${origin}/mcp`, transport: 'streamable-http', authentication: { type: 'oauth2', metadata: `${origin}/.well-known/oauth-authorization-server` } },
     ],
   };
@@ -1170,15 +1300,19 @@ function baseOpenApi(origin: string) {
         { name: 'sources', in: 'query', schema: { type: 'string' }, description: `Comma-separated: ${sources.join(', ')}. Default: all.` },
         { name: 'kind', in: 'query', schema: { type: 'string', enum: ['feed', 'clips'] } },
         { name: 'mode', in: 'query', schema: { type: 'string', enum: ['raw', 'relevant'] }, description: 'Older name for the built-in lenses; prefer lens.' },
-        { name: 'lens', in: 'query', schema: { type: 'string' }, description: 'raw, relevant, or a shared lens id from /v1/lenses (ADR 0017).' },
+        { name: 'lens', in: 'query', schema: { type: 'string' }, description: 'raw, relevant, work, or a shared lens id from /v1/lenses (ADR 0017).' },
         { name: 'cursor', in: 'query', schema: { type: 'string' }, description: 'nextCursor from a previous page.' },
       ], responses: { 200: ok('A page of posts', { type: 'object', properties: { data: { type: 'array', items: { $ref: '#/components/schemas/AgentPost' } }, unavailable: { type: 'array', items: { type: 'string' } }, nextCursor: { type: ['string', 'null'] }, next: { type: ['string', 'null'] } } }), 400: error } } },
       '/v1/search': { get: { summary: 'Plain-language search across public posts on every network, plus matching settings', parameters: [{ name: 'q', in: 'query', required: true, schema: { type: 'string', maxLength: 200 } }], responses: { 200: ok('Results with what was understood and how each network was searched'), 400: error } } },
       '/v1/networks': { get: { summary: 'Every network and connector, with what works today', responses: { 200: ok('Networks and capabilities') } } },
-      '/v1/lenses': { get: { summary: 'Feed lenses: the built-in Raw and Relevant and publicly shared lenses, with rules in plain words and the manifest format', parameters: [{ name: 'q', in: 'query', schema: { type: 'string', maxLength: 80 } }], responses: { 200: ok('Lenses') } } },
+      '/v1/lenses': { get: { summary: 'Feed lenses: the built-in Raw, Relevant and Work and publicly shared lenses, with rules in plain words and the manifest format', parameters: [{ name: 'q', in: 'query', schema: { type: 'string', maxLength: 80 } }], responses: { 200: ok('Lenses') } } },
       '/v1/lenses/{id}': { get: { summary: 'One feed lens: manifest, rules, what it reads and never reads', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: ok('The lens'), 404: error } } },
       '/v1/lenses/draft': { post: { summary: 'Write a lens from plain words; nothing is saved', requestBody: textBody('request', 400), responses: { 200: ok('The drafted lens with what was and was not understood'), 400: error } } },
       '/v1/lenses/preview': { post: { summary: 'The public feed through a lens (id, manifest or plain words); nothing is saved', requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { lens: { type: 'string' }, manifest: { type: 'object' }, request: { type: 'string', maxLength: 400 }, sources: { type: 'array', items: { type: 'string', enum: [...sources] } }, kind: { type: 'string', enum: ['feed', 'clips'] } } } } } }, responses: { 200: ok('Posts with their “why”'), 400: error, 404: error } } },
+      '/v1/profiles/{handle}/resume': { get: { summary: 'A public professional profile as a resume page, drawn by the JSON Resume “even” theme', parameters: [{ name: 'handle', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: { description: 'HTML resume page', content: { 'text/html': {} } }, 404: error } } },
+      '/v1/profiles/{handle}/resume.json': { get: { summary: 'The same resume as a JSON Resume document (imports into Reactive Resume and other JSON Resume tools)', parameters: [{ name: 'handle', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: ok('JSON Resume'), 404: error } } },
+      '/v1/profiles/{handle}/resume.yaml': { get: { summary: 'The same resume as RenderCV input (rendercv render), made by the JSON Resume project’s converter', parameters: [{ name: 'handle', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: { description: 'RenderCV YAML', content: { 'text/yaml': {} } }, 404: error } } },
+      '/v1/jobs': { get: { summary: 'Open job posts on Open Media (ADR 0018), newest first, with pay, place and the employer’s apply link. Open Media never applies for anyone.', parameters: [{ name: 'q', in: 'query', schema: { type: 'string', maxLength: 80 }, description: 'Words in the role, text or place' }, { name: 'remote', in: 'query', schema: { type: 'boolean' } }, { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 50 } }], responses: { 200: ok('Job posts') } } },
       '/v1/settings': { get: { summary: 'The searchable settings index', parameters: [{ name: 'q', in: 'query', schema: { type: 'string' } }], responses: { 200: ok('Matching settings') } } },
       '/v1/events/upcoming': { get: { summary: 'Upcoming public events (Luma, Meetup, Eventbrite) in the San Francisco Bay Area, de-duplicated across platforms, with official registration links', parameters: [{ name: 'area', in: 'query', schema: { type: 'string' } }, { name: 'days', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 14, default: 7 } }, { name: 'q', in: 'query', schema: { type: 'string' } }, { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 } }], responses: { 200: ok('Events, soonest first, with each provider’s status'), 400: error } } },
       '/v1/people/{network}/{handle}': { get: { summary: 'One person’s public posts in one timeline (Open Media profile plus the accounts they listed, or one open-network account)', parameters: [{ name: 'network', in: 'path', required: true, schema: { type: 'string', enum: ['open-media', ...authorNetworks] } }, { name: 'handle', in: 'path', required: true, schema: { type: 'string' } }, { name: 'cursor', in: 'query', schema: { type: 'string' } }], responses: { 200: ok('The person and their posts, newest first'), 400: error, 404: error } } },
@@ -1208,7 +1342,14 @@ function baseOpenApi(origin: string) {
       },
       '/v1/me/contacts/{id}': { delete: { summary: 'Delete one of your contact cards', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], responses: { 200: ok('Deleted'), 404: error, 401: error } } },
       '/v1/me/linked-accounts': { put: { summary: 'Set the open-network accounts shown on your public profile (public, up to 8)', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'array', maxItems: 8, items: { type: 'object', required: ['network', 'handle'], properties: { network: { type: 'string', enum: ['farcaster', 'lens', 'hive', 'deso'] }, handle: { type: 'string', pattern: '^[A-Za-z0-9._-]{1,64}$' } } } } } } }, responses: { 200: ok('Saved'), 400: error, 401: error } } },
-      '/v1/me/listings': { post: { summary: 'Offer a product, service or event as a public post (live at once, checked in the background)', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['kind', 'title'], properties: { kind: { type: 'string', enum: ['product', 'service', 'event'] }, title: { type: 'string', maxLength: 120 }, price: { type: 'string', description: 'e.g. "25.50"; "0" for free; omit for ask-for-price' }, currency: { type: 'string', pattern: '^[A-Z]{3}$' }, location: { type: 'string', maxLength: 120 }, remote: { type: 'boolean', description: 'Remote service, ships, or online event' }, startsAt: { type: 'string', format: 'date-time', description: 'Events only' }, when: { type: 'string', description: 'Events only, instead of startsAt: "Nov 12 7pm"' }, timezone: { type: 'string', description: 'Events: IANA time zone' }, text: { type: 'string' } } } } } }, responses: { 201: ok('The post with its listing'), 400: error, 401: error, 429: error } } },
+      '/v1/me/professional': {
+        get: { summary: 'Your professional profile, and the same data as a JSON Resume document', security: bearer, responses: { 200: ok('Professional profile'), 401: error } },
+        put: { summary: 'Replace your professional profile (public): headline, summary, openTo, location, work, education, skills, languages, links', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object' } } } }, responses: { 200: ok('Saved'), 400: error, 401: error } },
+      },
+      '/v1/me/professional/import': { post: { summary: 'Read a JSON Resume (jsonResume) or LinkedIn data-export CSVs (linkedInFiles) into a professional profile; saved only with save: true', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { jsonResume: { type: 'object' }, linkedInFiles: { type: 'object', additionalProperties: { type: 'string' } }, save: { type: 'boolean' } } } } } }, responses: { 200: ok('What was read'), 400: error, 401: error } } },
+      '/v1/me/career/tailor': { post: { summary: 'Draft your profile and a cover note for one job, from your own profile only; nothing is saved', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { postId: { type: 'string', format: 'uuid' }, title: { type: 'string' }, description: { type: 'string' }, employer: { type: 'string' } } } } } }, responses: { 200: ok('Draft, with anything removed listed'), 400: error, 401: error, 429: error } } },
+      '/v1/me/career/application': { post: { summary: 'Draft the message to apply for a job with; nothing is sent', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { postId: { type: 'string', format: 'uuid' }, title: { type: 'string' }, description: { type: 'string' }, employer: { type: 'string' } } } } } }, responses: { 200: ok('Message draft'), 400: error, 401: error, 429: error } } },
+      '/v1/me/listings': { post: { summary: 'Offer a product, service, event or job as a public post (live at once, checked in the background)', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['kind', 'title'], properties: { kind: { type: 'string', enum: ['product', 'service', 'event', 'job'] }, title: { type: 'string', maxLength: 120 }, price: { type: 'string', description: 'e.g. "25.50"; "0" for free; omit for ask-for-price. Jobs: pay or a range like "80000-120000"' }, employmentType: { type: 'string', enum: ['full_time', 'part_time', 'contract', 'internship', 'freelance'], description: 'Jobs only' }, applyUrl: { type: 'string', format: 'uri', description: 'Jobs only: the employer’s https application page' }, currency: { type: 'string', pattern: '^[A-Z]{3}$' }, location: { type: 'string', maxLength: 120 }, remote: { type: 'boolean', description: 'Remote service, ships, or online event' }, startsAt: { type: 'string', format: 'date-time', description: 'Events only' }, when: { type: 'string', description: 'Events only, instead of startsAt: "Nov 12 7pm"' }, timezone: { type: 'string', description: 'Events: IANA time zone' }, text: { type: 'string' } } } } } }, responses: { 201: ok('The post with its listing'), 400: error, 401: error, 429: error } } },
       '/v1/listings/{postId}/checks': { get: { summary: 'What was checked on a listing: state, claims, outcomes, how many verified people agreed and the pages they cited', parameters: [{ name: 'postId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], responses: { 200: ok('Checks'), 404: error } } },
       '/v1/transparency': { get: { summary: 'Monthly marketplace transparency counts (no personal data)', parameters: [{ name: 'months', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 24 } }], responses: { 200: ok('Counts per month') } } },
       '/v1/verification-tasks/next': { get: { summary: 'The next listing claim for a human-verified person’s agent to check', security: bearer, responses: { 200: ok('A task, or task: null'), 401: error, 403: error } } },
@@ -1428,6 +1569,12 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     }
     if (request.method === 'GET' && path === '/v1/search') return json(await search(env, origin, url.searchParams.get('q') ?? ''), 30);
     if (request.method === 'GET' && path === '/v1/lenses') return json(await listLenses(env, origin, url.searchParams.get('q')), 60);
+    const resumeMatch = request.method === 'GET' ? path.match(/^\/v1\/profiles\/([^/]+)\/resume(\.json|\.yaml)?$/) : null;
+    if (resumeMatch) return await publicResume(env, origin, decodeURIComponent(resumeMatch[1]), resumeMatch[2] === '.json' ? 'json' : resumeMatch[2] === '.yaml' ? 'yaml' : 'html');
+    if (request.method === 'GET' && path === '/v1/jobs') {
+      const remote = url.searchParams.get('remote');
+      return json(await jobs(env, origin, { query: url.searchParams.get('q') ?? undefined, remote: remote === 'true' ? true : remote === 'false' ? false : undefined, limit: Number(url.searchParams.get('limit') ?? 30) || 30 }), 30);
+    }
     const lensPath = path.match(/^\/v1\/lenses\/([^/]+)$/);
     if (request.method === 'GET' && lensPath) { const found = await lensCall(() => findLens(env, decodeURIComponent(lensPath[1]))); return json(lensView(found.lens, origin, found.row), 60); }
     if (request.method === 'POST' && (path === '/v1/lenses/draft' || path === '/v1/lenses/preview')) {
@@ -1488,6 +1635,11 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     if (request.method === 'DELETE' && contactMatch) return json(await account.deleteContact(decodeURIComponent(contactMatch[1])), 0);
     if (request.method === 'PUT' && path === '/v1/me/linked-accounts') return json(await account.setLinkedAccounts(Array.isArray(raw) ? raw : body.accounts), 0);
     if (request.method === 'POST' && path === '/v1/me/listings') return json(await account.publishListing(body, idempotencyKey), 0, 201);
+    if (request.method === 'GET' && path === '/v1/me/professional') return json(await account.professional(), 0);
+    if (request.method === 'PUT' && path === '/v1/me/professional') return json(await account.setProfessional(body), 0);
+    if (request.method === 'POST' && path === '/v1/me/professional/import') return json(await account.importResume(body), 0);
+    if (request.method === 'POST' && path === '/v1/me/career/tailor') return json(await account.tailor(body), 0);
+    if (request.method === 'POST' && path === '/v1/me/career/application') return json(await account.draftApplication(body), 0);
     const listingMatch = path.match(/^\/v1\/me\/listings\/([^/]+)$/);
     if (request.method === 'PATCH' && listingMatch) return json(await account.updateListing(decodeURIComponent(listingMatch[1]), body) as object, 0);
     const ratingMatch = path.match(/^\/v1\/me\/listings\/([^/]+)\/rating$/);

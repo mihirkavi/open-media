@@ -17,8 +17,10 @@ export type CheckSeverity = 'hold' | 'review';
 export interface CheckReason { code: string; message: string; fix: string; severity: CheckSeverity }
 
 export interface ListingForCheck {
-  kind: 'product' | 'service' | 'event';
+  kind: 'product' | 'service' | 'event' | 'job';
   title: string;
+  /** Jobs: the employer's application page. */
+  applyUrl?: string | null;
   body: string;
   priceMinor: number | null;
   currency: string;
@@ -46,6 +48,17 @@ export const restrictedCategories: Category[] = [
   { code: 'alcohol_tobacco', label: 'Alcohol, tobacco and vapes', severity: 'review', pattern: /\b(alcohol|whiske?y|vodka|tequila|rum|gin|liquor|spirits|cigarettes?|cigars?|vapes?|e-?cigs?|nicotine|tobacco|hookah)\b/i, fix: 'Alcohol, tobacco and vapes need a closer look, because local laws apply. Say how you check buyers’ age.' },
   { code: 'animals', label: 'Live animals', severity: 'review', pattern: /\b(puppy|puppies|kittens?|exotic (pets?|animals?|birds?)|live (animals?|birds?|reptiles?)|for adoption)\b/i, fix: 'Listings for live animals need a closer look. Include where the animal is from and your registration, if you have one.' },
   { code: 'gambling', label: 'Gambling', severity: 'review', pattern: /\b(casino|betting tips|sure bets?|fixed matches?|lottery tickets? for sale)\b/i, fix: 'Gambling offers need a closer look, because they are licensed in most places.' },
+];
+
+/**
+ * Job scams (ADR 0018): real employers never charge applicants, and never need ID numbers or bank
+ * details to consider an application. These hold a job post; the others get a closer look.
+ */
+export const jobScamRules: Category[] = [
+  { code: 'job_fee', label: 'Fees to apply or start a job', severity: 'hold', pattern: /\b(registration fee|application fee|applying fee|training fee|joining fee|processing fee|security deposit|refundable deposit|starter kit|pay (?:a |the |an )?(?:small )?(?:fee|deposit) (?:to|before)|buy (?:your own |the )?(?:equipment|kit|laptop) (?:first|before))\b/i, fix: 'Real employers never charge applicants. Remove any fee, deposit or required purchase.' },
+  { code: 'job_identity', label: 'Asking applicants for ID numbers or bank details', severity: 'hold', pattern: /\b(send (?:us )?(?:your|a (?:copy|photo|scan) of your) (?:passport|aadhaa?r|pan card|ssn|social security|national id|id card|driver'?s licen[cs]e|bank (?:details|statement|account))|bank (?:account|details) (?:to|before) (?:apply|start|join)|social security number (?:to|before) apply|otp (?:to|for) (?:verify|confirm))\b/i, fix: 'Don’t ask for ID numbers, bank details or one-time codes in a job post. Collect them only after an offer, through your HR or payroll system.' },
+  { code: 'job_too_good', label: 'Pay that is too good to be true', severity: 'review', pattern: /\b(?:earn|make) (?:up to )?[$₹€£]?\s?\d[\d,]*\s?(?:k\b)?\s?(?:per|a|\/)\s?(?:day|hour)\b[^\n]{0,80}\b(?:from home|no experience|no interview|easy|guaranteed)\b|\b(?:no experience|no interview)\b[^\n]{0,80}\b(?:earn|make) [$₹€£]?\s?\d/i, fix: 'Describe the real role and pay. Posts promising easy money get a closer look.' },
+  { code: 'job_off_platform', label: 'Applying only through private chat apps', severity: 'review', pattern: /\b(?:telegram|whatsapp|signal|wechat)\b[^\n]{0,30}\b(?:only|to apply|me|us|for details)\b|\b(?:apply|contact|message)\b[^\n]{0,20}\b(?:on|via|through) (?:telegram|whatsapp|signal|wechat)\b/i, fix: 'Let people apply through your site or by messaging you on Open Media. Private-chat-only hiring is a common scam pattern.' },
 ];
 
 /** Hosts that hide where a link really goes. */
@@ -125,7 +138,15 @@ export function ruleReasons(listing: ListingForCheck): CheckReason[] {
     const match = text.match(category.pattern);
     if (match) reasons.push({ code: category.code, severity: category.severity, message: `The listing mentions “${match[0]}” (${category.label.toLowerCase()}).`, fix: category.fix });
   }
-  for (const url of extractLinks(text)) reasons.push(...linkReasons(url));
+  for (const url of [...extractLinks(text), ...(listing.applyUrl ? [listing.applyUrl] : [])]) reasons.push(...linkReasons(url));
+  if (listing.kind === 'job') {
+    for (const rule of jobScamRules) {
+      const match = text.match(rule.pattern);
+      if (match) reasons.push({ code: rule.code, severity: rule.severity, message: `The job post says “${match[0]}” (${rule.label.toLowerCase()}).`, fix: rule.fix });
+    }
+    // Pay is a salary, not a sale, so the price and new-seller rules below don't apply.
+    return reasons;
+  }
   const majorUnits = listing.priceMinor === null ? 0 : listing.currency === 'JPY' ? listing.priceMinor : listing.priceMinor / 100;
   if (majorUnits > 50_000 && listing.currency !== 'JPY' && listing.currency !== 'INR') reasons.push({ code: 'high_price', severity: 'review', message: 'The price is unusually high for a listing here.', fix: 'Check the price. Large sales get a closer look before they are shown as checked.' });
   const brand = Object.keys(brands).find((name) => new RegExp(`\\bofficial\\b[^.\\n]{0,40}\\b${name}\\b|\\b${name}\\b[^.\\n]{0,40}\\bofficial\\b`, 'i').test(text));
@@ -191,6 +212,7 @@ export function verificationClaims(listing: Pick<ListingForCheck, 'kind' | 'titl
   const links = extractLinks(text);
   const claims: VerificationClaim[] = [];
   if (listing.kind === 'event') claims.push({ code: 'event_official', question: 'Is this event listed on an official page (the organizer’s own website or an event platform) with the same date, time and place?' });
+  if (listing.kind === 'job') claims.push({ code: 'job_official', question: 'Does the employer named in this job post list the same role on its own careers page or an established job board, and does the poster work there or recruit for them?' });
   if (links.some(isOfficialAppPage)) claims.push({ code: 'app_developer', question: 'Is the app or software on the linked official page published by this seller (same name, website or linked account)?' });
   else if (links.length) claims.push({ code: 'link_matches', question: 'Does the linked page describe what this listing offers, from the same seller, at a similar price?' });
   if (Object.keys(brands).some((brand) => new RegExp(`\\b${brand}\\b`, 'i').test(text)) || /\bofficial\b/i.test(text)) {

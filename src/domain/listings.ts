@@ -1,10 +1,21 @@
 /**
- * Structured posts (ADR 0013, phase 3): a product or service someone offers, and real-world events
- * read from public event listings. Both are ordinary Feed posts with typed details, so they keep
- * their author, source link and "Why this?" like every other post.
+ * Structured posts (ADR 0013, phase 3): a product or service someone offers, a job (ADR 0018), and
+ * real-world events read from public event listings. All are ordinary Feed posts with typed details,
+ * so they keep their author, source link and "Why this?" like every other post.
  */
 
-export type ListingKind = 'product' | 'service' | 'event';
+export type ListingKind = 'product' | 'service' | 'event' | 'job';
+export type EmploymentType = 'full_time' | 'part_time' | 'contract' | 'internship' | 'freelance';
+export const employmentTypes: EmploymentType[] = ['full_time', 'part_time', 'contract', 'internship', 'freelance'];
+
+/** What a job adds to a listing. The listing's price is the bottom of the pay range. */
+export interface JobDetails {
+  /** Top of the pay range in minor units, when a range is given. */
+  payMaxMinor?: number;
+  employmentType: EmploymentType;
+  /** The employer's own application page. Open Media never applies for anyone. */
+  applyUrl?: string;
+}
 export type ListingAvailability = 'available' | 'limited' | 'sold_out';
 
 export interface PostListing {
@@ -32,6 +43,8 @@ export interface PostListing {
   viaAgent?: boolean;
   /** Shown for large sellers, as the US INFORM Consumers Act requires. */
   seller?: SellerDisclosure;
+  /** Only for jobs. */
+  job?: JobDetails;
 }
 
 export interface ListingCheckNote { state: 'held' | 'review'; reason: string; fix?: string }
@@ -50,6 +63,10 @@ export interface ListingInput {
   location?: string;
   remote?: boolean;
   availability?: ListingAvailability;
+  /** Jobs: the employer's application page (https). */
+  applyUrl?: string;
+  /** Jobs: read from the title when not given ("Contract", "Intern", "Part-time"). */
+  employmentType?: EmploymentType;
 }
 
 export type EventAvailability = 'open' | 'closed' | 'sold_out' | 'waitlist' | 'approval_required' | 'unknown';
@@ -77,14 +94,16 @@ export const listingCurrencies = ['USD', 'EUR', 'GBP', 'INR', 'CAD', 'AUD', 'JPY
 const zeroDecimal = new Set(['JPY']);
 export const maxListingTitle = 120;
 export const maxPriceMinor = 100_000_000;
+/** Yearly pay can be far above any sale price (₹1 crore is 1,000,000,000 paise). */
+export const maxPayMinor = 100_000_000_000;
 
 /** Parses "25", "25.50" or "$1,200" into minor units; empty means "ask for a price". */
-export function parsePrice(value: string | undefined, currency: string): number | null | 'invalid' {
+export function parsePrice(value: string | undefined, currency: string, max: number = maxPriceMinor): number | null | 'invalid' {
   const cleaned = (value ?? '').replace(/[\s,$€£₹¥]/g, '');
   if (!cleaned) return null;
   if (!/^\d+(\.\d{1,2})?$/.test(cleaned)) return 'invalid';
   const minor = zeroDecimal.has(currency) ? Math.round(Number(cleaned)) : Math.round(Number(cleaned) * 100);
-  return minor > maxPriceMinor ? 'invalid' : minor;
+  return minor > max ? 'invalid' : minor;
 }
 
 export function formatPrice(minor: number | null, currency: string): string {
@@ -98,6 +117,45 @@ export function formatPrice(minor: number | null, currency: string): string {
   }
 }
 
+/** Reads a pay range such as "80,000-120,000" or "40–60" into minor units. */
+export function parsePayRange(value: string | undefined, currency: string): { min: number | null; max?: number } | 'invalid' {
+  const parts = (value ?? '').split(/\s*(?:-|–|—|to)\s*/i).map((part) => part.trim()).filter(Boolean);
+  if (parts.length > 2) return 'invalid';
+  const min = parsePrice(parts[0], currency, maxPayMinor);
+  if (min === 'invalid') return 'invalid';
+  if (parts.length < 2) return { min };
+  const max = parsePrice(parts[1], currency, maxPayMinor);
+  if (max === 'invalid' || max === null || min === null || max < min) return 'invalid';
+  return max === min ? { min } : { min, max };
+}
+
+/** A listing whose title starts "Hiring", "We're hiring" or "Job:" is a job, so posting one needs no extra choice. */
+export function isJobTitle(title: string): boolean {
+  return /^\s*(?:(?:we'?re|we are|now|i'?m|i am)\s+)?hiring\b|^\s*job\s*:/i.test(title);
+}
+
+/** The kind of job a title describes, so posting one needs no extra choice. */
+export function employmentTypeFrom(title: string): EmploymentType {
+  if (/\b(intern|internship)\b/i.test(title)) return 'internship';
+  if (/\b(contract|contractor)\b/i.test(title)) return 'contract';
+  if (/\bpart[- ]time\b/i.test(title)) return 'part_time';
+  if (/\b(freelance|freelancer)\b/i.test(title)) return 'freelance';
+  return 'full_time';
+}
+
+export const employmentLabels: Record<EmploymentType, string> = { full_time: 'Full-time', part_time: 'Part-time', contract: 'Contract', internship: 'Internship', freelance: 'Freelance' };
+
+/** An https link that is safe to open, or undefined. */
+export function applyLink(value: string | undefined): string | undefined | 'invalid' {
+  const text = value?.trim();
+  if (!text) return undefined;
+  try {
+    const url = new URL(text);
+    if (url.protocol !== 'https:' || url.username || url.password || text.length > 500) return 'invalid';
+    return url.toString();
+  } catch { return 'invalid'; }
+}
+
 /** Checks a listing before it is sent; the database checks the same rules again. */
 export function validateListing(input: ListingInput, now: Date = new Date()): { listing: PostListing } | { error: string } {
   const title = input.title.trim();
@@ -105,10 +163,18 @@ export function validateListing(input: ListingInput, now: Date = new Date()): { 
   if (title.length > maxListingTitle) return { error: `Titles can be up to ${maxListingTitle} characters.` };
   const currency = (input.currency ?? 'USD').toUpperCase();
   if (!/^[A-Z]{3}$/.test(currency)) return { error: 'Choose a currency.' };
-  const priceMinor = parsePrice(input.price, currency);
-  if (priceMinor === 'invalid') return { error: 'Enter a price like 25 or 25.50, or leave it empty.' };
   const location = input.location?.trim() || undefined;
   if (location && location.length > 120) return { error: 'Keep the location under 120 characters.' };
+  if (input.kind === 'job' || isJobTitle(title)) {
+    const pay = parsePayRange(input.price, currency);
+    if (pay === 'invalid') return { error: 'Enter pay like 90000 or a range like 80000-120000, or leave it empty.' };
+    const applyUrl = applyLink(input.applyUrl);
+    if (applyUrl === 'invalid') return { error: 'The apply link must be an https:// address on the employer’s site.' };
+    const job: JobDetails = { employmentType: input.employmentType ?? employmentTypeFrom(title), ...(pay.max !== undefined ? { payMaxMinor: pay.max } : {}), ...(applyUrl ? { applyUrl } : {}) };
+    return { listing: { kind: 'job', title, priceMinor: pay.min, currency, location, remote: Boolean(input.remote), availability: input.availability ?? 'available', job } };
+  }
+  const priceMinor = parsePrice(input.price, currency);
+  if (priceMinor === 'invalid') return { error: 'Enter a price like 25 or 25.50, or leave it empty.' };
   const listing: PostListing = { kind: input.kind, title, priceMinor, currency, location, remote: Boolean(input.remote), availability: input.availability ?? 'available' };
   if (input.when?.trim() || input.kind === 'event') {
     const when = parseEventTime(input.when ?? '', now);
@@ -194,6 +260,10 @@ export function parseEventTime(text: string, now: Date = new Date()): { startsAt
 }
 
 export function listingLine(listing: PostListing): string {
+  if (listing.kind === 'job') {
+    const pay = listing.priceMinor === null ? undefined : listing.job?.payMaxMinor ? `${formatPrice(listing.priceMinor, listing.currency)}–${formatPrice(listing.job.payMaxMinor, listing.currency)}` : formatPrice(listing.priceMinor, listing.currency);
+    return [employmentLabels[listing.job?.employmentType ?? 'full_time'], listing.location, listing.remote ? 'Remote' : undefined, pay, listing.availability === 'sold_out' ? 'No longer hiring' : undefined].filter(Boolean).join(' · ');
+  }
   if (listing.kind === 'event') {
     const place = listing.remote ? 'Online' : listing.location;
     return [listing.startsAt ? eventWhen({ startsAt: listing.startsAt, dateOnly: Boolean(listing.dateOnly), timezone: listing.timezone }) : undefined, place, listing.priceMinor === null ? undefined : formatPrice(listing.priceMinor, listing.currency), listing.availability === 'sold_out' ? 'Full' : listing.availability === 'limited' ? 'Few places left' : undefined].filter(Boolean).join(' · ');
@@ -204,7 +274,7 @@ export function listingLine(listing: PostListing): string {
 
 export function isListing(value: unknown): value is PostListing {
   const item = value as PostListing;
-  return Boolean(item) && (item.kind === 'product' || item.kind === 'service' || item.kind === 'event') && typeof item.title === 'string'
+  return Boolean(item) && (item.kind === 'product' || item.kind === 'service' || item.kind === 'event' || item.kind === 'job') && typeof item.title === 'string'
     && (item.priceMinor === null || Number.isInteger(item.priceMinor)) && typeof item.currency === 'string' && typeof item.remote === 'boolean';
 }
 

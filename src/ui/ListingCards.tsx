@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Switch, View } from 'react-native';
 
-import { eventPriceText, eventWhen, formatPrice, listingCurrencies, ListingInput, listingLine, ListingRating, parseEventTime, PostEvent, PostListing, providerName } from '../domain/listings';
+import { eventPriceText, eventWhen, formatPrice, isJobTitle, listingCurrencies, ListingInput, listingLine, ListingRating, parseEventTime, PostEvent, PostListing, providerName } from '../domain/listings';
 import { PostPaid } from '../domain/posts';
 import { safeHttpsUrl } from '../domain/networkPosts';
 import { ThemeColors } from '../theme';
@@ -24,7 +24,11 @@ export function ListingCard({ listing, onMessage, onRate, onBuy }: { listing: Po
   };
   const shown = rating.mine ?? Math.round(rating.average ?? 0);
   const event = listing.kind === 'event';
-  const kindName = event ? 'Event' : listing.kind === 'product' ? 'Product' : 'Service';
+  const job = listing.kind === 'job';
+  const kindName = event ? 'Event' : job ? 'Job' : listing.kind === 'product' ? 'Product' : 'Service';
+  const apply = job ? safeHttpsUrl(listing.job?.applyUrl ?? '') : undefined;
+  // A job is never paid for; applying happens on the employer's page or in a message.
+  const buy = job ? undefined : onBuy;
   // Plain lines, no controls (ADR 0016): what only the author sees, who checked it, who posted it, who sells it.
   const notes = [
     listing.check?.state === 'held' ? `Only you can see this: ${listing.check.reason}${listing.check.fix ? ` ${listing.check.fix}` : ''}` : undefined,
@@ -35,22 +39,28 @@ export function ListingCard({ listing, onMessage, onRate, onBuy }: { listing: Po
   ].filter(Boolean) as string[];
   return <View accessibilityLabel={`${kindName}: ${listing.title}, ${listingLine(listing)}`} style={styles.card}>
     <View style={styles.cardTop}>
-      <View style={styles.kind}><Ionicons name={event ? 'calendar-outline' : listing.kind === 'product' ? 'pricetag-outline' : 'construct-outline'} size={13} color={colors.textSecondary} /><Text style={styles.kindText}>{kindName}</Text></View>
-      {soldOut ? <Text style={styles.soldOut}>{event ? 'Full' : 'Sold out'}</Text> : null}
+      <View style={styles.kind}><Ionicons name={event ? 'calendar-outline' : job ? 'briefcase-outline' : listing.kind === 'product' ? 'pricetag-outline' : 'construct-outline'} size={13} color={colors.textSecondary} /><Text style={styles.kindText}>{kindName}</Text></View>
+      {soldOut ? <Text style={styles.soldOut}>{event ? 'Full' : job ? 'Filled' : 'Sold out'}</Text> : null}
     </View>
     <Text style={styles.title}>{listing.title}</Text>
     <Text style={styles.line}>{listingLine(listing)}</Text>
     {notes.map((note) => <Text key={note} style={styles.small}>{note}</Text>)}
-    {rating.count || onRate ? <View style={styles.stars}>
+    {!job && (rating.count || onRate) ? <View style={styles.stars}>
       {[1, 2, 3, 4, 5].map((stars) => <Pressable key={stars} accessibilityRole="button" accessibilityLabel={`Rate ${stars} ${stars === 1 ? 'star' : 'stars'}`} accessibilityState={{ selected: rating.mine === stars, disabled: !onRate }} disabled={!onRate} onPress={() => rate(stars)} hitSlop={4}>
         <Ionicons name={stars <= shown ? 'star' : 'star-outline'} size={16} color={rating.mine ? colors.text : colors.textSecondary} />
       </Pressable>)}
       <Text style={styles.small}>{rating.count ? `${rating.average?.toFixed(1)} · ${rating.count} ${rating.count === 1 ? 'rating' : 'ratings'}${rating.mine ? ' · yours' : ''}` : 'No ratings yet'}</Text>
     </View> : null}
     {note ? <Text accessibilityLiveRegion="polite" style={styles.small}>{note}</Text> : null}
-    {(onMessage || onBuy) && !soldOut ? <View style={styles.actions}>
-      {onBuy && listing.priceMinor ? <Pressable accessibilityRole="button" accessibilityHint="Shows the price and fees before you pay" onPress={onBuy} style={styles.primary}><Text style={styles.primaryText}>{event ? 'Get a place' : listing.kind === 'product' ? 'Buy' : 'Pay'}</Text></Pressable> : null}
-      {onMessage ? <Pressable accessibilityRole="button" onPress={onMessage} style={onBuy && listing.priceMinor ? styles.secondary : styles.primary}><Ionicons name="chatbubble-outline" size={15} color={onBuy && listing.priceMinor ? colors.text : colors.surface} /><Text style={onBuy && listing.priceMinor ? styles.secondaryText : styles.primaryText}>{event ? 'Ask the organizer' : listing.kind === 'product' ? 'Message seller' : 'Ask about this'}</Text></Pressable> : null}
+    {job && !soldOut && (apply || onMessage) ? <View style={styles.actions}>
+      {/* One action, as on every listing: the employer's own page when there is one, otherwise a message. */}
+      <Pressable accessibilityRole={apply ? 'link' : 'button'} accessibilityHint={apply ? 'Opens the employer’s application page' : undefined} onPress={apply ? () => { Linking.openURL(apply).catch(() => undefined); } : onMessage} style={styles.primary}>
+        <Ionicons name={apply ? 'open-outline' : 'chatbubble-outline'} size={15} color={colors.surface} /><Text style={styles.primaryText}>{apply ? 'Apply' : 'Message the poster'}</Text>
+      </Pressable>
+    </View> : null}
+    {!job && (onMessage || buy) && !soldOut ? <View style={styles.actions}>
+      {buy && listing.priceMinor ? <Pressable accessibilityRole="button" accessibilityHint="Shows the price and fees before you pay" onPress={buy} style={styles.primary}><Text style={styles.primaryText}>{event ? 'Get a place' : listing.kind === 'product' ? 'Buy' : 'Pay'}</Text></Pressable> : null}
+      {onMessage ? <Pressable accessibilityRole="button" onPress={onMessage} style={buy && listing.priceMinor ? styles.secondary : styles.primary}><Ionicons name="chatbubble-outline" size={15} color={buy && listing.priceMinor ? colors.text : colors.surface} /><Text style={buy && listing.priceMinor ? styles.secondaryText : styles.primaryText}>{event ? 'Ask the organizer' : listing.kind === 'product' ? 'Message seller' : 'Ask about this'}</Text></Pressable> : null}
     </View> : null}
   </View>;
 }
@@ -86,7 +96,9 @@ export function ListingFields({ value, onChange, onRemove, disabled }: { value: 
   const set = (change: Partial<ListingInput>) => onChange({ ...value, ...change });
   // Saying when it starts is what makes a listing an event; there is no separate event button.
   const when = value.when?.trim() ? parseEventTime(value.when) : null;
-  const event = Boolean(when && when !== 'past');
+  // Starting the title with “Hiring” makes it a job, as saying when it starts makes an event.
+  const job = value.kind === 'job' || isJobTitle(value.title);
+  const event = !job && Boolean(when && when !== 'past');
   return <View style={styles.fields}>
     <View style={styles.row}>
       {(['product', 'service'] as const).map((kind) => <Pressable key={kind} accessibilityRole="radio" accessibilityState={{ checked: value.kind === kind }} disabled={disabled} onPress={() => set({ kind })} style={[styles.chip, value.kind === kind && styles.chipOn]}>
@@ -94,22 +106,23 @@ export function ListingFields({ value, onChange, onRemove, disabled }: { value: 
       </Pressable>)}
       <Pressable accessibilityRole="button" accessibilityLabel="Remove listing details" disabled={disabled} onPress={onRemove} style={styles.remove}><Ionicons name="close" size={18} color={colors.textSecondary} /></Pressable>
     </View>
-    <TextInput accessibilityLabel="What you’re offering" value={value.title} onChangeText={(title) => set({ title })} maxLength={120} placeholder={event ? 'What’s the event?' : value.kind === 'product' ? 'What are you selling?' : 'What service do you offer?'} placeholderTextColor={colors.textTertiary} style={styles.input} editable={!disabled} />
+    <TextInput accessibilityLabel="What you’re offering" value={value.title} onChangeText={(title) => set({ title })} maxLength={120} placeholder={event ? 'What’s the event?' : value.kind === 'product' ? 'What are you selling? (or “Hiring: …” for a job)' : 'What service do you offer? (or “Hiring: …” for a job)'} placeholderTextColor={colors.textTertiary} style={styles.input} editable={!disabled} />
     <View style={styles.row}>
-      <TextInput accessibilityLabel="Price" value={value.price ?? ''} onChangeText={(price) => set({ price })} keyboardType="decimal-pad" placeholder="Price (optional)" placeholderTextColor={colors.textTertiary} style={[styles.input, styles.grow]} editable={!disabled} />
+      <TextInput accessibilityLabel={job ? 'Pay' : 'Price'} value={value.price ?? ''} onChangeText={(price) => set({ price })} keyboardType={job ? 'default' : 'decimal-pad'} placeholder={job ? 'Pay (optional): 80000-120000' : 'Price (optional)'} placeholderTextColor={colors.textTertiary} style={[styles.input, styles.grow]} editable={!disabled} />
       <View style={styles.currencies}>
         {listingCurrencies.slice(0, 4).map((currency) => <Pressable key={currency} accessibilityRole="radio" accessibilityState={{ checked: (value.currency ?? 'USD') === currency }} disabled={disabled} onPress={() => set({ currency })} style={[styles.chipSmall, (value.currency ?? 'USD') === currency && styles.chipOn]}>
           <Text style={[styles.chipText, (value.currency ?? 'USD') === currency && styles.chipTextOn]}>{currency}</Text>
         </Pressable>)}
       </View>
     </View>
-    <TextInput accessibilityLabel="When it starts, for an event" value={value.when ?? ''} onChangeText={(text) => set({ when: text })} maxLength={60} placeholder="When, for an event (optional): Nov 12 7pm" placeholderTextColor={colors.textTertiary} style={styles.input} editable={!disabled} />
-    {value.when?.trim() ? <Text accessibilityLiveRegion="polite" style={styles.small}>{when === 'past' ? 'That time has passed.' : when ? `Event · ${eventWhen({ startsAt: when.startsAt, dateOnly: when.dateOnly })}` : 'Try a date and time like “Nov 12 7pm” or “tomorrow 6:30pm”.'}</Text> : null}
+    {job ? <TextInput accessibilityLabel="Apply link" value={value.applyUrl ?? ''} onChangeText={(applyUrl) => set({ applyUrl })} maxLength={500} autoCapitalize="none" keyboardType="url" placeholder="Apply link on your site (optional): https://…" placeholderTextColor={colors.textTertiary} style={styles.input} editable={!disabled} />
+      : <TextInput accessibilityLabel="When it starts, for an event" value={value.when ?? ''} onChangeText={(text) => set({ when: text })} maxLength={60} placeholder="When, for an event (optional): Nov 12 7pm" placeholderTextColor={colors.textTertiary} style={styles.input} editable={!disabled} />}
+    {!job && value.when?.trim() ? <Text accessibilityLiveRegion="polite" style={styles.small}>{when === 'past' ? 'That time has passed.' : when ? `Event · ${eventWhen({ startsAt: when.startsAt, dateOnly: when.dateOnly })}` : 'Try a date and time like “Nov 12 7pm” or “tomorrow 6:30pm”.'}</Text> : null}
     <View style={styles.row}>
       <TextInput accessibilityLabel="Where" value={value.location ?? ''} onChangeText={(location) => set({ location })} maxLength={120} placeholder="City or neighbourhood (optional)" placeholderTextColor={colors.textTertiary} style={[styles.input, styles.grow]} editable={!disabled} />
-      <View style={styles.toggle}><Text style={styles.small}>{event ? 'Online' : value.kind === 'service' ? 'Remote' : 'Ships'}</Text><Switch accessibilityLabel={event ? 'Online event' : value.kind === 'service' ? 'Available remotely' : 'Can ship'} value={Boolean(value.remote)} onValueChange={(remote) => set({ remote })} disabled={disabled} trackColor={{ false: colors.border, true: colors.text }} thumbColor={colors.surface} /></View>
+      <View style={styles.toggle}><Text style={styles.small}>{event ? 'Online' : value.kind === 'service' || job ? 'Remote' : 'Ships'}</Text><Switch accessibilityLabel={event ? 'Online event' : job ? 'Remote role' : value.kind === 'service' ? 'Available remotely' : 'Can ship'} value={Boolean(value.remote)} onValueChange={(remote) => set({ remote })} disabled={disabled} trackColor={{ false: colors.border, true: colors.text }} thumbColor={colors.surface} /></View>
     </View>
-    <Text style={styles.small}>Shown in the Feed with your post, and checked automatically against the listing rules. If something needs fixing, Open Media messages you. People can message you about it, and pay in the app once you set up payments in Profile. Never send money outside a method you trust.</Text>
+    {job ? <Text style={styles.small}>{'Shown in the Feed and the Work feed with your post, and checked automatically against the job rules: never ask applicants for money, ID numbers or bank details. People apply on your link or by messaging you.'}</Text> : <Text style={styles.small}>Shown in the Feed with your post, and checked automatically against the listing rules. If something needs fixing, Open Media messages you. People can message you about it, and pay in the app once you set up payments in Profile. Never send money outside a method you trust.</Text>}
   </View>;
 }
 
