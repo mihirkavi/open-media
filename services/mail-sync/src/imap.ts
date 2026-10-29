@@ -17,7 +17,36 @@ function clientFor(input: MailAccountInput): ImapFlow {
   });
   // Late socket errors (e.g. a timeout after a failed login) must not crash the process.
   client.on('error', () => undefined);
+  keepReadingQueuedResponses(client);
   return client;
+}
+
+type ImapFlowInternals = {
+  reader: () => Promise<void>;
+  isClosed: boolean;
+  socketReadable?: () => void;
+  streamer?: { readableLength: number };
+};
+
+/**
+ * ImapFlow ignores 'readable' while its reader loop runs and clears that flag a
+ * tick after the loop ends. On Workers, process.nextTick is a microtask, so the
+ * event for the second line of a reply (iCloud sends "* CAPABILITY" and "2 OK"
+ * together) fires inside that window and is lost, and sign-in hangs until the
+ * socket timeout. When a loop ends, read again if a reply is already waiting.
+ */
+function keepReadingQueuedResponses(client: ImapFlow): void {
+  const internals = client as unknown as ImapFlowInternals;
+  const reader = internals.reader.bind(client);
+  internals.reader = async () => {
+    try { await reader(); }
+    finally {
+      // A macrotask runs after ImapFlow's own flag has been cleared.
+      setTimeout(() => {
+        if (!internals.isClosed && (internals.streamer?.readableLength ?? 0) > 0) internals.socketReadable?.();
+      }, 0);
+    }
+  };
 }
 
 export async function testImap(input: MailAccountInput): Promise<void> {
