@@ -264,7 +264,7 @@ Open Media starts as an app, but the goal is bigger than any single app, network
     </td>
     <td width="50%" valign="top">
       <h4>🛡️ Safety without censorship-by-default</h4>
-      <p><em>Filtering is normal; global deletion is exceptional.</em> You, your communities and your region choose filters, including filters from independent moderation providers. Report counts are signals weighed by credibility, never an automatic delete button that a mob can abuse.</p>
+      <p><em>You choose what to filter out. Removing a post for everyone is rare.</em> Filters can come from you, your communities, your region or independent moderation providers. Report counts are signals weighed by credibility, never an automatic delete button that a mob can abuse.</p>
     </td>
   </tr>
   <tr>
