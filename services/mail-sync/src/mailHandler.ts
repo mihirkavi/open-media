@@ -9,7 +9,7 @@ import { Bridges, BridgesEnv } from './bridges.js';
 import { decryptSecret, encryptSecret } from './crypto.js';
 import { createSignedKeyRequest, FarcasterSignerEnv, farcasterPublishingConfigured, forwardSignedMessage, parseEd25519PublicKey } from './farcasterSigner.js';
 import { UserFacingError } from './errors.js';
-import { syncImap, syncLimits, testImap } from './imap.js';
+import { syncImap, testImap } from './imap.js';
 import { resolveMailHost } from './networkSafety.js';
 import { handleAgentRequest, isAgentPath } from './agentApi.js';
 import { handlePublicApiRequest, isPublicApiPath } from './publicApi.js';
@@ -51,6 +51,8 @@ const schema = z.object({
     security: z.enum(['tls', 'starttls']),
   }).optional(),
 });
+/** How long a long-polling sync waits for new mail before answering; browsers keep requests this long. */
+const mailWaitMs = 25_000;
 const mailPorts = new Set([993, 143, 995, 110, 465, 587, 2525]);
 const address = z.email().max(320);
 const sendSchema = z.object({
@@ -111,9 +113,14 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
       const account = await repository.findAccount(session.userId, syncMatch[1]);
       if (!account) return json(404, { error: 'Mailbox not found.' }, headers);
       const input = await connectionInput({ ...account, password: decryptSecret(account.encryptedSecret, env.MAIL_CREDENTIALS_KEY) }, env);
-      // IMAP saves batch by batch as it goes, so attachments never pile up in memory.
+      // IMAP downloads only new mail and saves batch by batch, so attachments never pile up in
+      // memory. With ?wait=1 it then waits briefly for new mail, so the app can long-poll.
       const messages = account.protocol === 'imap'
-        ? await syncImap(input, syncLimits, (batch) => repository.saveMessages(session.userId, account.id, batch))
+        ? await syncImap(input, {
+          save: (batch) => repository.saveMessages(session.userId, account.id, batch),
+          known: (ids) => repository.knownMessageIds(account.id, ids),
+          waitMs: url.searchParams.get('wait') === '1' ? mailWaitMs : undefined,
+        })
         : await syncPop3(input);
       if (account.protocol !== 'imap') await repository.saveMessages(session.userId, account.id, messages);
       // File bytes stay on the server; clients read stored mail through the database.

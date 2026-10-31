@@ -91,6 +91,15 @@ const sourceBatchBytes = 12 * 1024 * 1024;
 /** Saves one parsed batch, attachment bytes included, before the next batch is downloaded. */
 export type SaveBatch = (messages: SyncedMessage[]) => Promise<void>;
 
+export interface SyncOptions {
+  limits?: { INBOX: number; Sent: number };
+  save?: SaveBatch;
+  /** Which of these Message-IDs are already stored, so only new mail is downloaded. */
+  known?: (sourceMessageIds: string[]) => Promise<Set<string>>;
+  /** When nothing new arrived, wait up to this long for new INBOX mail (IMAP IDLE) and fetch it. */
+  waitMs?: number;
+}
+
 /** A save failure: unlike a dropped connection, it must not be reported as a partial sync. */
 class SaveFailed {
   constructor(readonly cause: unknown) {}
@@ -107,8 +116,12 @@ class SaveFailed {
  * With `save`, each batch is stored as soon as it is parsed and its attachment bytes are then
  * dropped. A Worker has 128 MB: holding every attachment of every message until the end ran out
  * of memory, and Cloudflare ended the request without a reply ("Can't reach the mail service").
+ *
+ * With `known`, only mail that isn't stored yet is downloaded, so a sync with nothing new takes
+ * about a second. With `waitMs`, the request then stays open in IDLE, so the app sees new mail
+ * moments after it arrives, like a chat.
  */
-export async function syncImap(input: MailAccountInput, limits = syncLimits, save?: SaveBatch): Promise<SyncedMessage[]> {
+export async function syncImap(input: MailAccountInput, { limits = syncLimits, save, known, waitMs }: SyncOptions = {}): Promise<SyncedMessage[]> {
   const client = clientFor(input);
   const messages: SyncedMessage[] = [];
   const started = Date.now();
@@ -120,7 +133,15 @@ export async function syncImap(input: MailAccountInput, limits = syncLimits, sav
     const sent = folders.find((folder) => folder.specialUse === '\\Sent')?.path;
     for (const [path, mailbox, limit] of [['INBOX', 'INBOX', limits.INBOX], ...(sent ? [[sent, 'Sent', limits.Sent] as const] : [])] as const) {
       stage = mailbox;
-      await fetchRecent(client, path, mailbox, limit, messages, save);
+      await fetchRecent(client, path, mailbox, limit, messages, save, known);
+    }
+    if (waitMs && !messages.length) {
+      stage = 'wait';
+      const opened = await client.mailboxOpen('INBOX', { readOnly: true });
+      if (await newMailIn(client, opened.exists, waitMs)) {
+        stage = 'INBOX';
+        await fetchRecent(client, 'INBOX', 'INBOX', limits.INBOX, messages, save, known);
+      }
     }
     logSync('done', started, messages.length);
     return messages;
@@ -132,21 +153,40 @@ export async function syncImap(input: MailAccountInput, limits = syncLimits, sav
   } finally { await logoutQuietly(client); }
 }
 
+/** Waits in IDLE until the open mailbox grows past `exists`, or `ms` pass, or the connection closes. */
+function newMailIn(client: ImapFlow, exists: number, ms: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const finish = (arrived: boolean) => {
+      clearTimeout(timer);
+      client.off('exists', onExists);
+      client.off('close', onClose);
+      resolve(arrived);
+    };
+    const onExists = (update: { count: number }) => { if (update.count > exists) finish(true); };
+    const onClose = () => finish(false);
+    const timer = setTimeout(() => finish(false), ms);
+    client.on('exists', onExists);
+    client.on('close', onClose);
+    client.idle().catch(() => finish(false));
+  });
+}
+
 /** One line per sync for Workers Logs: the step, timing and counts, never addresses or content. */
 function logSync(stage: string, started: number, count: number, error?: unknown): void {
   const detail = error as { code?: string; message?: string } | undefined;
   console.log(JSON.stringify({ event: 'imap_sync', stage, ms: Date.now() - started, messages: count, ...(error ? { errorCode: detail?.code, error: detail?.message?.slice(0, 120) } : {}) }));
 }
 
-async function fetchRecent(client: ImapFlow, path: string, mailbox: string, limit: number, into: SyncedMessage[], save?: SaveBatch): Promise<void> {
+async function fetchRecent(client: ImapFlow, path: string, mailbox: string, limit: number, into: SyncedMessage[], save?: SaveBatch, known?: SyncOptions['known']): Promise<void> {
   const opened = await client.mailboxOpen(path, { readOnly: true });
   if (!opened.exists) return;
   const first = Math.max(1, opened.exists - limit + 1);
   // Headers and sizes first. They are small, so the stream never waits on our work.
-  const items: FetchMessageObject[] = [];
-  for await (const item of client.fetch(`${first}:*`, { uid: true, envelope: true, internalDate: true, size: true })) items.push(item);
+  const fetched: FetchMessageObject[] = [];
+  for await (const item of client.fetch(`${first}:*`, { uid: true, envelope: true, internalDate: true, size: true })) fetched.push(item);
+  const stored = known ? await known(fetched.map((item) => messageIdOf(item, mailbox))) : new Set<string>();
   // Newest first, so a sync that is cut short keeps the most recent mail.
-  items.sort((a, b) => b.uid - a.uid);
+  const items = fetched.filter((item) => !stored.has(messageIdOf(item, mailbox))).sort((a, b) => b.uid - a.uid);
   for (const batch of batches(items)) {
     const wanted = batch.filter((item) => (item.size ?? 0) <= maxSourceBytes).map((item) => item.uid);
     const sources = new Map<number, Buffer>();
@@ -183,14 +223,25 @@ function batches(items: FetchMessageObject[]): FetchMessageObject[][] {
   return groups;
 }
 
+function messageIdOf(item: FetchMessageObject, mailbox: string): string {
+  return item.envelope?.messageId ?? `imap-${mailbox}-${item.uid}`;
+}
+
+/** "Name <address>" when the sender gave a name, so chats show "Coursera", not the address. */
+function formatAddress({ name, address }: { name?: string; address?: string }): string {
+  const display = name?.replace(/["<>\r\n]/g, '').trim();
+  if (!address) return display ?? '';
+  return display && display.toLowerCase() !== address.toLowerCase() ? `"${display}" <${address}>` : address;
+}
+
 async function toSyncedMessage(item: FetchMessageObject, source: Buffer | undefined, mailbox: string): Promise<SyncedMessage> {
   const parsed = source ? await simpleParser(source) : undefined;
   const fromAddress = item.envelope?.from?.[0]?.address ?? '';
   const brand = parsed && mailbox !== 'Sent' ? await verifySender(fromAddress, parsed.headerLines) : { verified: false };
   return {
-    sourceMessageId: item.envelope?.messageId ?? `imap-${mailbox}-${item.uid}`,
+    sourceMessageId: messageIdOf(item, mailbox),
     mailbox, subject: item.envelope?.subject ?? '',
-    from: item.envelope?.from?.map((address) => address.address ?? address.name ?? '').filter(Boolean).join(', ') ?? '',
+    from: item.envelope?.from?.map(formatAddress).filter(Boolean).join(', ') ?? '',
     to: item.envelope?.to?.map((address) => address.address ?? address.name ?? '').filter(Boolean) ?? [],
     sentAt: new Date(item.envelope?.date ?? item.internalDate ?? Date.now()).toISOString(),
     text: parsed?.text?.slice(0, 50_000) ?? '',

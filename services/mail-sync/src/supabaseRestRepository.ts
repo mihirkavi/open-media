@@ -86,6 +86,16 @@ export class SupabaseRestRepository {
     return await this.rpc<boolean>('open_media_delete_mail_account', { p_account_id: accountId });
   }
 
+  /** The given Message-IDs that are already stored for this mailbox. Empty if the lookup fails, so sync falls back to downloading. */
+  async knownMessageIds(accountId: string, sourceMessageIds: string[]): Promise<Set<string>> {
+    if (!sourceMessageIds.length) return new Set();
+    try {
+      return new Set(await this.rpc<string[]>('open_media_mail_known_message_ids', { p_account_id: accountId, p_source_message_ids: sourceMessageIds.slice(0, 200) }));
+    } catch {
+      return new Set();
+    }
+  }
+
   async saveMessages(userId: string, accountId: string, messages: SyncedMessage[]): Promise<void> {
     const stored = new Set(messages.some((message) => message.attachments?.length)
       ? await this.rpc<string[]>('open_media_mail_messages_with_attachments', { p_account_id: accountId })

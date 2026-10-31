@@ -60,3 +60,13 @@ test('links an email reply to the message it quotes', () => {
   assert.equal(conversation.messages[1].replyToMessageId, conversation.messages[0].id);
   assert.equal(conversation.messages[0].replyToMessageId, undefined);
 });
+
+test('a sender stored without a name shows the company, not the address', () => {
+  const [bare] = normalizeStoredEmail([mail({ from: 'Coursera@m.learn.coursera.org' })]);
+  assert.equal(bare.participants[0].name, 'Coursera');
+  const [named] = normalizeStoredEmail([
+    mail({ sourceMessageId: '<old@x>', from: '"Bank of America" <onlinebanking@ealerts.bankofamerica.com>', sentAt: '2026-10-01T09:00:00Z' }),
+    mail({ sourceMessageId: '<new@x>', from: 'onlinebanking@ealerts.bankofamerica.com', sentAt: '2026-10-01T10:00:00Z' }),
+  ]);
+  assert.equal(named.participants[0].name, 'Bank of America', 'an older message’s name is used when the newest has none');
+});

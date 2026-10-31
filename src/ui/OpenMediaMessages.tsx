@@ -220,7 +220,7 @@ export function OpenMediaMessages({
                     {conversation.unreadCount ? (
                       <View style={styles.unread} />
                     ) : null}
-                    <Text style={styles.rowTime}>{formatListTime(new Date(conversation.lastMessageAt))}</Text>
+                    <Text numberOfLines={1} style={styles.rowTime}>{formatListTime(new Date(conversation.lastMessageAt))}</Text>
                   </View>
                   <Text numberOfLines={2} style={styles.preview}>
                     {conversation.preview}
@@ -282,6 +282,8 @@ export function OpenMediaMessages({
   );
 }
 
+interface PendingMessage { id: string; conversationId: string; body: string; replyTo?: Message; failed?: string }
+
 function MessageThread({
   conversation,
   blocked,
@@ -309,7 +311,8 @@ function MessageThread({
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  // Messages show the moment you send them, like a chat, and leave once the real one arrives.
+  const [pending, setPending] = useState<PendingMessage[]>([]);
   const [safetyOpen, setSafetyOpen] = useState(false);
   const [safetyStatus, setSafetyStatus] = useState("");
   // Like iMessage, a thread opens at the newest message.
@@ -340,22 +343,25 @@ function MessageThread({
   };
   const byId = useMemo(() => new Map(conversation.messages.map((message) => [message.id, message])), [conversation.messages]);
   const senderLabel = (message: Message) => message.direction === "outbound" ? "You" : (otherPerson?.name ?? "Them");
-  const submit = async () => {
-    if (!body.trim()) return;
-    setBusy(true);
-    setError("");
+  const deliver = async (item: PendingMessage) => {
+    setPending((items) => items.map((other) => (other.id === item.id ? { ...other, failed: undefined } : other)));
     try {
-      await onSend(conversation.id, body, replyTo);
-      setBody("");
-      setReplyTo(undefined);
+      await onSend(item.conversationId, item.body, item.replyTo);
+      setPending((items) => items.filter((other) => other.id !== item.id));
     } catch (reason) {
-      setError(
-        reason instanceof Error ? reason.message : "Message could not be sent.",
-      );
-    } finally {
-      setBusy(false);
+      const failed = reason instanceof Error ? reason.message : "Message could not be sent.";
+      setPending((items) => items.map((other) => (other.id === item.id ? { ...other, failed } : other)));
     }
   };
+  const submit = () => {
+    if (!body.trim()) return;
+    const item: PendingMessage = { id: `pending-${Date.now()}`, conversationId: conversation.id, body: body.trim(), replyTo };
+    setBody("");
+    setReplyTo(undefined);
+    setPending((items) => [...items, item]);
+    deliver(item);
+  };
+  const waiting = pending.filter((item) => item.conversationId === conversation.id);
   return (
     <View ref={threadRef} style={[styles.thread, keyboardInset ? { paddingBottom: keyboardInset } : null]}>
       <View style={styles.threadHeader}>
@@ -391,7 +397,7 @@ function MessageThread({
               : throughMatrix
               ? "Matrix · local development sandbox"
               : conversation.email
-                ? `${otherPerson?.verifiedDomain ? `Verified sender · ${otherPerson.verifiedDomain}` : `Email · ${conversation.email.address}`} · via ${conversation.email.accountEmail}${conversation.email.canSend ? "" : " (receive only)"}`
+                ? emailMeta(conversation, otherPerson)
                 : canSend
                   ? "Open Media · private to conversation members"
                   : "Imported conversation · reply unavailable"}
@@ -419,7 +425,7 @@ function MessageThread({
         contentContainerStyle={styles.threadContent}
         onContentSizeChange={() => threadScroll.current?.scrollToEnd({ animated: false })}
       >
-        {conversation.messages.length ? (
+        {conversation.messages.length || waiting.length ? (
           layoutThread(conversation.messages).map((item) =>
             item.kind === "time" ? (
               <Text key={item.key} style={styles.timeSeparator}>
@@ -485,6 +491,28 @@ function MessageThread({
                 ) : null}
               </View>
             ),
+          ).concat(
+            waiting.map((item) => (
+              <View key={item.id} style={[styles.messageWrap, styles.outboundWrap, styles.groupStart]}>
+                <View style={[styles.bubble, styles.outboundBubble, styles.outboundTail, item.failed ? styles.failedBubble : styles.sendingBubble]}>
+                  {item.replyTo ? (
+                    <View style={[styles.quote, styles.quoteOutbound]}>
+                      <Text style={[styles.quoteName, styles.quoteNameOutbound]}>{senderLabel(item.replyTo)}</Text>
+                      <Text numberOfLines={2} style={[styles.quoteText, styles.quoteTextOutbound]}>{quoteText(item.replyTo)}</Text>
+                    </View>
+                  ) : null}
+                  <Text style={[styles.message, styles.outboundMessage]}>{item.body}</Text>
+                </View>
+                {item.failed ? (
+                  <Pressable accessibilityRole="button" accessibilityHint={item.failed} onPress={() => deliver(item)} style={styles.deliveryLine}>
+                    <Ionicons name="alert-circle" size={13} color={colors.danger} />
+                    <Text accessibilityLiveRegion="assertive" style={styles.deliveryFailed}>Not sent. Tap to try again.</Text>
+                  </Pressable>
+                ) : (
+                  <Text style={styles.deliveryStatus}>Sending…</Text>
+                )}
+              </View>
+            )),
           )
         ) : (
           <View style={styles.threadEmpty}>
@@ -498,14 +526,6 @@ function MessageThread({
       </ScrollView>
       {canSend ? (
         <View style={styles.composerWrap}>
-          {error ? (
-            <Text
-              accessibilityLiveRegion="assertive"
-              style={styles.composerError}
-            >
-              {error}
-            </Text>
-          ) : null}
           {replyTo ? (
             <View style={styles.replyBanner}>
               <View style={styles.replyBar} />
@@ -528,7 +548,7 @@ function MessageThread({
               onChangeText={setBody}
               placeholder={
                 conversation.email
-                  ? `Reply by email from ${conversation.email.accountEmail}`
+                  ? "Reply by email"
                   : bridged
                     ? `Message on ${bridgedName}`
                     : throughMatrix
@@ -541,18 +561,11 @@ function MessageThread({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Send message"
-              disabled={busy || !body.trim()}
+              disabled={!body.trim()}
               onPress={submit}
-              style={[
-                styles.send,
-                (busy || !body.trim()) && styles.sendDisabled,
-              ]}
+              style={[styles.send, !body.trim() && styles.sendDisabled]}
             >
-              {busy ? (
-                <ActivityIndicator size="small" color={colors.surface} />
-              ) : (
-                <Ionicons name="arrow-up" size={19} color={colors.surface} />
-              )}
+              <Ionicons name="arrow-up" size={19} color={colors.surface} />
             </Pressable>
           </View>
         </View>
@@ -832,6 +845,15 @@ function VerifiedBadge({ domain }: { domain: string }) {
   );
 }
 
+/** "Verified sender · coursera.org · via you@…", without repeating an address that is already the title. */
+function emailMeta(conversation: Conversation, person?: Person): string {
+  const email = conversation.email!;
+  const who = person?.verifiedDomain
+    ? `Verified sender · ${person.verifiedDomain}`
+    : email.address.toLowerCase() === conversationTitle(conversation).toLowerCase() ? "Email" : email.address;
+  return `${who} · via ${email.accountEmail}${email.canSend ? "" : " (receive only)"}`;
+}
+
 /** One line of a message for quotes and the reply banner. */
 function quoteText(message: Message): string {
   const text = message.channel === "email" ? formatEmailBody(message.body).plain : message.body;
@@ -1025,13 +1047,13 @@ function EmailBody({ message }: { message: Message }) {
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const formatted = useMemo(() => formatEmailBody(message.body), [message.body]);
-  const long = formatted.plain.length > 700 || formatted.plain.split("\n").length > 14;
+  const long = formatted.plain.length > 600 || formatted.plain.split("\n").length > 10;
   const [expanded, setExpanded] = useState(false);
   const outbound = message.direction === "outbound";
   return (
     <View>
       <Text
-        numberOfLines={long && !expanded ? 14 : undefined}
+        numberOfLines={long && !expanded ? 10 : undefined}
         style={[styles.message, outbound && styles.outboundMessage]}
       >
         {formatted.segments.map((segment, index) =>
@@ -1209,7 +1231,7 @@ function createStyles(colors: ThemeColors) {
       borderRadius: 14,
     },
     rowActive: { backgroundColor: colors.chrome },
-    rowTime: { marginLeft: "auto", color: colors.textTertiary, fontSize: 12 },
+    rowTime: { marginLeft: "auto", paddingLeft: 6, flexShrink: 0, color: colors.textTertiary, fontSize: 12, fontVariant: ["tabular-nums"] },
     avatarFrame: { overflow: "hidden", backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
     avatar: {
       width: 40,
@@ -1217,15 +1239,15 @@ function createStyles(colors: ThemeColors) {
       borderRadius: 20,
       alignItems: "center",
       justifyContent: "center",
-      backgroundColor: colors.text,
+      backgroundColor: colors.bubble,
     },
-    avatarText: { color: colors.surface, fontSize: 12, fontWeight: "700" },
+    avatarText: { color: colors.textSecondary, fontSize: 12, fontWeight: "700", letterSpacing: 0.3 },
     avatarImage: { backgroundColor: colors.chrome },
     emailLink: { color: colors.text, textDecorationLine: "underline", fontWeight: "600" },
     showMore: { marginTop: 8, color: colors.textSecondary, fontSize: 13, fontWeight: "700" },
     rowCopy: { flex: 1, minWidth: 0 },
     rowTitleLine: { flexDirection: "row", alignItems: "center", gap: 7 },
-    rowTitle: { color: colors.text, fontSize: 15, fontWeight: "600" },
+    rowTitle: { flexShrink: 1, color: colors.text, fontSize: 15, fontWeight: "600" },
     unread: {
       width: 7,
       height: 7,
@@ -1393,7 +1415,11 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.text,
     },
     sendDisabled: { opacity: 0.3 },
-    composerError: { marginBottom: 6, color: colors.danger, fontSize: 12 },
+    sendingBubble: { opacity: 0.6 },
+    failedBubble: { opacity: 0.45 },
+    deliveryStatus: { marginTop: 3, marginRight: 6, alignSelf: "flex-end", color: colors.textTertiary, fontSize: 11 },
+    deliveryLine: { minHeight: 24, marginTop: 2, flexDirection: "row", alignItems: "center", alignSelf: "flex-end", gap: 4 },
+    deliveryFailed: { color: colors.danger, fontSize: 12, fontWeight: "600" },
     disabledComposer: {
       minHeight: 58,
       paddingHorizontal: 18,

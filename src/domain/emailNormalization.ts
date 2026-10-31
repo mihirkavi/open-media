@@ -44,7 +44,9 @@ export function normalizeStoredEmail(messages: StoredMailMessage[]): Conversatio
     const latest = ordered.at(-1)!;
     const replyTarget = latestInbound ?? latest;
     const verified = [...inboundItems].reverse().find((item) => item.senderVerified);
-    const name = (latestInbound && extractName(latestInbound.from)) || (company ? brandName(company) : replyTarget.address);
+    // The newest name the sender gave; mail stored as a bare address falls back to the company or address.
+    const givenName = [...inboundItems].reverse().map((item) => extractName(item.from)).find(Boolean);
+    const name = givenName || (company ? brandName(company) : replyTarget.address);
     const source: MessageSource = /@(icloud|me|mac)\.com$/i.test(replyTarget.accountEmail) ? 'icloud' : /@(gmail|googlemail)\.com$/i.test(replyTarget.accountEmail) ? 'gmail' : 'imap';
     const personId = `mail-person-${stableID(key)}`;
     const conversationId = `mail-conversation-${stableID(key)}`;
@@ -100,7 +102,8 @@ function attachmentPreview(message: StoredMailMessage): string {
   return images === count ? (count === 1 ? 'Photo' : `${count} photos`) : (count === 1 ? 'Attachment' : `${count} attachments`);
 }
 function brandName(organization: string): string { const label = organization.split('.')[0]; return label.charAt(0).toUpperCase() + label.slice(1); }
-function extractName(value: string): string { return value.replace(/<[^>]+>/, '').trim().replace(/^['"]|['"]$/g, '').trim(); }
+/** The display name in "Name <address>", or '' when there is only an address. */
+function extractName(value: string): string { const name = value.replace(/<[^>]+>/, '').trim().replace(/^['"]|['"]$/g, '').trim(); return name.includes('@') ? '' : name; }
 function initialsFor(name: string): string { return name.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || '?'; }
 function stableID(value: string): string { let hash = 2166136261; for (let index = 0; index < value.length; index += 1) hash = Math.imul(hash ^ value.charCodeAt(index), 16777619); return (hash >>> 0).toString(36); }
 function colorFor(value: string): string { const colors = ['#7B61FF','#EB5757','#F2994A','#27AE60','#2F80ED','#9B51E0']; return colors[parseInt(stableID(value), 36) % colors.length]; }

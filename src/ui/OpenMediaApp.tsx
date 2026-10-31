@@ -7,7 +7,6 @@ import {
   listMailAccounts,
   listStoredMail,
   sendMail,
-  syncMailAccount,
 } from "../connectors/mailApiConnector";
 import {
   loadMatrixConversations,
@@ -28,6 +27,7 @@ import {
 import { deletePost, reportPost } from "../data/postService";
 import { bridgedSourceOf, loadBridgedConversations, sendBridgedMessage } from "../connectors/bridgesConnector";
 import { normalizeStoredEmail, replySubject } from "../domain/emailNormalization";
+import { useLiveMail } from "./useLiveMail";
 import { profileHandleFromPath } from "../domain/profileFields";
 import { Conversation, Message } from "../domain/models";
 import { useFeedLenses } from "./useFeedLenses";
@@ -175,32 +175,12 @@ export function OpenMediaApp({
       // Email is additive; Open Media chats still load if mail storage is unavailable.
     }
   }, [messageMode]);
-  // Show stored email right away, then fetch new mail from every mailbox in the background.
+  // Show stored email right away; new mail then arrives live while the app is open.
+  const [mailAccountsVersion, setMailAccountsVersion] = useState(0);
   useEffect(() => {
-    if (messageMode !== "open_media") return;
-    let active = true;
-    let syncing = false;
-    const syncAll = async () => {
-      if (syncing) return;
-      syncing = true;
-      try {
-        for (const account of await listMailAccounts()) {
-          if (!active) return;
-          await syncMailAccount(account.id).catch(() => undefined);
-        }
-      } catch {
-        // The mail service may be unreachable; stored email is still shown.
-      }
-      syncing = false;
-      if (active) await refreshMail();
-    };
-    refreshMail().then(syncAll);
-    const timer = setInterval(syncAll, 5 * 60_000);
-    return () => {
-      active = false;
-      clearInterval(timer);
-    };
-  }, [messageMode, refreshMail]);
+    refreshMail();
+  }, [refreshMail]);
+  useLiveMail(messageMode === "open_media", mailAccountsVersion, refreshMail);
   const refreshMessages = useCallback(async () => {
     const sequence = ++refreshSequence.current;
     try {
@@ -311,6 +291,7 @@ export function OpenMediaApp({
   );
   const onMailSynced = () => {
     refreshMail();
+    setMailAccountsVersion((version) => version + 1);
   };
 
   // Unified profiles (ADR 0013): any name or avatar opens the person, over the current screen.

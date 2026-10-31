@@ -66,8 +66,9 @@ export async function disconnectMailAccount(accountId: string): Promise<void> {
   await request(`/v1/mail-accounts/${encodeURIComponent(accountId)}`, { method: 'DELETE' }, 'Could not disconnect this mailbox.');
 }
 
-export async function syncMailAccount(accountId: string): Promise<SyncedMailMessage[]> {
-  const payload = await request<{ messages?: SyncedMailMessage[] }>(`/v1/mail-accounts/${encodeURIComponent(accountId)}/sync`, { method: 'POST' }, 'Mailbox sync failed.');
+/** Fetches new mail. With `wait`, the service holds the request open briefly and answers as soon as new mail arrives. */
+export async function syncMailAccount(accountId: string, { wait = false, signal }: { wait?: boolean; signal?: AbortSignal } = {}): Promise<SyncedMailMessage[]> {
+  const payload = await request<{ messages?: SyncedMailMessage[] }>(`/v1/mail-accounts/${encodeURIComponent(accountId)}/sync${wait ? '?wait=1' : ''}`, { method: 'POST', signal }, 'Mailbox sync failed.');
   return payload.messages ?? [];
 }
 
@@ -122,7 +123,7 @@ export async function attachmentURL(storagePath: string): Promise<string> {
 }
 
 /** Authenticated call to the Open Media service (mail, bridged chats). */
-export async function request<T = unknown>(path: string, init: { method?: string; body?: unknown }, fallbackError: string): Promise<T> {
+export async function request<T = unknown>(path: string, init: { method?: string; body?: unknown; signal?: AbortSignal }, fallbackError: string): Promise<T> {
   const token = await getAPIAccessToken();
   let response: Response;
   try {
@@ -133,8 +134,10 @@ export async function request<T = unknown>(path: string, init: { method?: string
         ...(token ? { authorization: `Bearer ${token}` } : {}),
       },
       body: init.body ? JSON.stringify(init.body) : undefined,
+      signal: init.signal,
     });
-  } catch {
+  } catch (error) {
+    if (init.signal?.aborted) throw error;
     throw new Error(`Can’t reach the Open Media mail service at ${getAPIURL()}. If you’re running locally, start everything with \`npm run local\`.`);
   }
   const payload = await response.json().catch(() => ({})) as T & { error?: string | { message?: string } };

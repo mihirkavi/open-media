@@ -33,6 +33,7 @@ export function formatEmailBody(raw: string): FormattedEmailBody {
     .replace(invisible, '')
     .replace(/ /g, ' ')
     .replace(/\t+/g, ' ');
+  text = stripStyleRules(text);
 
   // Drop quoted history: the first "On … wrote:" / forwarded header, or a trailing block of "> " lines.
   const lines = text.split('\n');
@@ -47,6 +48,8 @@ export function formatEmailBody(raw: string): FormattedEmailBody {
 
   text = text
     .split('\n')
+    // Rows of ***, ===, --- or ___ are layout dividers in machine-made text.
+    .map((line) => (/^\s*([*=_~#-])\1{3,}\s*$/.test(line) ? '' : line))
     .map((line) => dedupeRepeatedLabel(line.replace(/ {2,}/g, ' ').trim()))
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
@@ -61,6 +64,22 @@ export function formatEmailBody(raw: string): FormattedEmailBody {
 export function emailPreview(raw: string, fallback = ''): string {
   const { plain } = formatEmailBody(raw);
   return plain.split('\n').map((line) => line.trim()).find((line) => line.length > 1) ?? fallback;
+}
+
+/**
+ * Some senders paste their stylesheet into the plain-text version ("body, td { font-family: … }").
+ * Removes rule blocks whose body is CSS declarations, innermost first so @media wrappers go too.
+ * A rule's selector must start a line or follow another rule's brace, so ordinary sentences are kept.
+ */
+function stripStyleRules(text: string): string {
+  // A selector list may wrap after its commas ("h1, h2,\nol, li {").
+  const rule = /(^|[{}])[ \t]*(?:[^{}\n;]*,[ \t]*\n)*[^{}\n;]*\{\s*(?:[\w-]+\s*:[^{};]*;?\s*)*\}/gm;
+  let previous;
+  do {
+    previous = text;
+    text = text.replace(rule, '$1');
+  } while (text !== previous);
+  return text.replace(/^\s*\}+\s*$/gm, '');
 }
 
 function fold(value: string): string {

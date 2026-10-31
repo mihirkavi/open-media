@@ -35,3 +35,24 @@ test('previews use the first readable line', () => {
   assert.equal(emailPreview('​\n\nHey! Want lunch? ( https://x.example/y )\nMore'), 'Hey! Want lunch?');
   assert.equal(emailPreview('', 'Subject'), 'Subject');
 });
+
+test('stylesheets left in the plain-text version are removed', () => {
+  const raw = [
+    'Learn in-demand skills from Google experts by enrolling today',
+    'body, table, td, th, h1, h2, h3, div, span, strong, b, i, p, ul,',
+    'ol, li, a { font-family: Helvetica, sans-serif !important;} sup {',
+    'font-size: 100% !important; } .nudge-component-icon-column {',
+    'padding-left: 12px !important; padding-right: 32px !important; }',
+    '@media only screen and (max-width: 600px) { .mobile-only { display: none !important; } }',
+    'Coursera Google Career Certificates',
+  ].join('\n');
+  assert.equal(formatEmailBody(raw).plain, 'Learn in-demand skills from Google experts by enrolling today\n\nCoursera Google Career Certificates');
+});
+
+test('sentences with braces are not mistaken for CSS', () => {
+  assert.equal(formatEmailBody('Use {name} in the template.\nSee you {soon}!').plain, 'Use {name} in the template.\nSee you {soon}!');
+});
+
+test('rows of asterisks and equals signs become paragraph breaks', () => {
+  assert.equal(formatEmailBody('Top\n*********************\nBuild skills\n=====\nEnd').plain, 'Top\n\nBuild skills\n\nEnd');
+});
