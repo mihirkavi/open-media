@@ -41,6 +41,14 @@
 </p>
 
 <p align="center">
+  <a href=".github/assets/film/open-media-film.mp4"><img alt="A preview of the Open Media film: one app for every network, one feed, your own rules for what you see, and a Why this? card that explains every post" src=".github/assets/film/preview.gif" width="100%"></a>
+</p>
+
+<p align="center">
+  <a href=".github/assets/film/open-media-film.mp4"><strong>▶ Watch the film</strong></a> (64 seconds, with sound) · also on <a href="https://openmedia.site">openmedia.site</a>
+</p>
+
+<p align="center">
   <img alt="Open Media on desktop and phone: a mixed feed from several networks, a short-video Clip and a people-first inbox" src=".github/assets/hero.jpg" width="100%">
 </p>
 

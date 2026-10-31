@@ -1,0 +1,464 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Open Media Film</title>
+<style>
+@font-face { font-family: Inter; src: url(a/Inter_400Regular.ttf); font-weight: 400; }
+@font-face { font-family: Inter; src: url(a/Inter_500Medium.ttf); font-weight: 500; }
+@font-face { font-family: Inter; src: url(a/Inter_600SemiBold.ttf); font-weight: 600; }
+@font-face { font-family: Inter; src: url(a/Inter_700Bold.ttf); font-weight: 700; }
+@font-face { font-family: Inter; src: url(a/Inter_800ExtraBold.ttf); font-weight: 800; }
+@font-face { font-family: Serif; src: url(a/InstrumentSerif_400Regular.ttf); font-style: normal; }
+@font-face { font-family: Serif; src: url(a/InstrumentSerif_400Regular_Italic.ttf); font-style: italic; }
+:root { --paper: #F2F1ED; --ink: #111111; --grey: #6B6B6B; --line: #DCDAD3; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1920px; height: 1080px; overflow: hidden; background: #000; }
+body { font-family: Inter, sans-serif; color: var(--ink); -webkit-font-smoothing: antialiased; }
+#stage { position: absolute; inset: 0; overflow: hidden; background: #000; }
+.scene { position: absolute; inset: 0; opacity: 0; overflow: hidden; }
+.dark { background: #000; color: #F2F1ED; }
+.light { background: radial-gradient(120% 95% at 50% 30%, #F8F7F3 0%, #F2F1ED 55%, #E8E6E0 100%); color: var(--ink); }
+.dark::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: radial-gradient(110% 85% at 50% 50%, transparent 55%, rgba(0,0,0,.55) 100%); }
+#grain { position: absolute; inset: -64px; pointer-events: none; z-index: 50; mix-blend-mode: overlay; }
+.abs { position: absolute; }
+.center { position: absolute; left: 0; right: 0; text-align: center; }
+.h1 { font-weight: 700; font-size: 132px; letter-spacing: -0.045em; line-height: 1.0; }
+.h2 { font-weight: 700; font-size: 104px; letter-spacing: -0.042em; line-height: 1.02; }
+.sub { font-weight: 500; font-size: 34px; letter-spacing: -0.012em; line-height: 1.35; color: var(--grey); }
+.dark .sub { color: #9A9A96; }
+.serif { font-family: Serif; font-weight: 400; letter-spacing: -0.02em; }
+.w { display: inline-block; will-change: transform, opacity, filter; }
+.pill { display: inline-flex; align-items: center; gap: 12px; height: 64px; padding: 0 30px; border-radius: 32px; font-weight: 600; font-size: 28px; letter-spacing: -0.01em; }
+.pill.on { background: var(--ink); color: var(--paper); }
+.pill.off { background: #fff; color: var(--ink); box-shadow: 0 1px 0 rgba(0,0,0,.04), 0 10px 30px rgba(0,0,0,.06); }
+.chip { position: absolute; left: 0; top: 0; padding: 18px 30px; border-radius: 40px; border: 1.5px solid rgba(242,241,237,.22); color: #E9E8E3; font-weight: 600; font-size: 30px; letter-spacing: -0.01em; white-space: nowrap; background: rgba(255,255,255,.04); }
+.phone { position: absolute; width: 420px; height: 914px; border-radius: 70px; background: #0B0B0B; padding: 14px; box-shadow: 0 60px 120px rgba(0,0,0,.18), 0 18px 40px rgba(0,0,0,.12), inset 0 0 0 2px #2a2a2a; }
+.phone .screen { width: 100%; height: 100%; border-radius: 57px; overflow: hidden; position: relative; background: #fff; }
+.phone .screen img { position: absolute; left: 0; top: 74px; width: 100%; height: calc(100% - 74px); object-fit: cover; object-position: top center; }
+.phone .island { position: absolute; top: 28px; left: 50%; width: 118px; height: 34px; margin-left: -59px; background: #000; border-radius: 20px; z-index: 3; }
+.phone .clock { position: absolute; top: 33px; left: 50px; font-weight: 600; font-size: 19px; z-index: 3; letter-spacing: -0.01em; }
+.phone .bars { position: absolute; top: 36px; right: 46px; width: 58px; height: 14px; z-index: 3; display: flex; gap: 4px; align-items: flex-end; }
+.phone .bars i { display: block; width: 4px; background: currentColor; border-radius: 1px; }
+.phone .bars b { display: block; margin-left: 8px; width: 28px; height: 13px; border: 1.5px solid currentColor; border-radius: 4px; position: relative; opacity: .9; }
+.phone .bars b::after { content: ''; position: absolute; inset: 2px; right: 5px; background: currentColor; border-radius: 1px; }
+.card { position: absolute; background: #fff; border-radius: 36px; box-shadow: 0 50px 100px rgba(0,0,0,.10), 0 10px 30px rgba(0,0,0,.06); }
+.caret { display: inline-block; width: 3px; height: 1.05em; background: var(--ink); vertical-align: -0.15em; margin-left: 3px; }
+.check { display: inline-flex; width: 34px; height: 34px; border-radius: 17px; background: var(--ink); color: var(--paper); font-size: 20px; align-items: center; justify-content: center; font-weight: 700; }
+</style>
+</head>
+<body>
+<div id="stage">
+
+  <!-- 1. Cold open -->
+  <section class="scene dark" id="s1">
+    <div class="center h1" style="top: 400px;">
+      <span class="w">Every</span> <span class="w">app</span> <span class="w">owns</span> <span class="w">a</span> <span class="w">piece</span> <span class="w">of</span> <span class="w serif" style="font-style: italic; font-size: 156px; letter-spacing: -0.02em;">you.</span>
+    </div>
+  </section>
+
+  <!-- 2. Scattered + 3. converge -->
+  <section class="scene dark" id="s2">
+    <div id="chips"></div>
+    <div class="center h2" style="top: 470px;" id="s2lines">
+      <div class="abs" style="left:0;right:0;"><span class="w">Friends here.</span></div>
+      <div class="abs" style="left:0;right:0;"><span class="w">Work there.</span></div>
+      <div class="abs" style="left:0;right:0;"><span class="w">Messages everywhere.</span></div>
+    </div>
+    <img id="logoWhite" class="abs" src="a/logo-dark.png" style="width: 220px; left: 850px; top: 430px; opacity: 0;">
+    <div id="ring" class="abs" style="left: 960px; top: 540px; width: 0; height: 0; border-radius: 50%; border: 2px solid rgba(242,241,237,.5); opacity: 0;"></div>
+  </section>
+
+  <!-- Light wipe with brand -->
+  <section class="scene light" id="s3">
+    <img id="logoBlack" class="abs" src="a/logo-light.png" style="width: 220px; left: 850px; top: 430px;">
+    <div class="center" id="wordmark" style="top: 690px; font-weight: 700; font-size: 84px; letter-spacing: -0.04em;"><span class="w">Open Media</span></div>
+  </section>
+
+  <!-- 4. Tagline -->
+  <section class="scene light" id="s4">
+    <div class="center serif" style="top: 250px; font-size: 176px; line-height: 1.08;">
+      <div><span class="w">Post everywhere.</span></div>
+      <div><span class="w">Message everyone.</span></div>
+      <div><span class="w" style="font-style: italic;">One app.</span></div>
+    </div>
+  </section>
+
+  <!-- 5. Feed -->
+  <section class="scene light" id="s5">
+    <div class="abs" style="left: 190px; top: 330px; width: 820px;">
+      <div class="h1"><span class="w">One feed.</span></div>
+      <div class="sub" style="margin-top: 34px; width: 700px;"><span class="w">Public posts from every open network, together in one calm stream. Readable without an account.</span></div>
+      <div id="netPills" style="margin-top: 52px; display: flex; flex-wrap: wrap; gap: 16px; width: 760px;">
+        <span class="pill on w">Open Media</span><span class="pill off w">Farcaster</span><span class="pill off w">Lens</span><span class="pill off w">Hive</span><span class="pill off w">DeSo</span>
+      </div>
+    </div>
+    <div class="phone" id="phoneFeed" style="left: 1230px; top: 83px;"><div class="island"></div><div class="clock">9:41</div><div class="bars"><i style="height:5px"></i><i style="height:8px"></i><i style="height:11px"></i><i style="height:14px"></i><b></b></div><div class="screen"><img src="a/phone1.png"></div></div>
+  </section>
+
+  <!-- 6. Your rules -->
+  <section class="scene light" id="s6">
+    <div class="center h2" style="top: 120px;"><span class="w">Your feed.</span> <span class="w">Your rules.</span></div>
+    <div class="center sub" style="top: 250px;"><span class="w">No secret algorithm. Every post can tell you why it's there.</span></div>
+    <div class="abs" id="ctrlCol" style="left: 170px; top: 430px; width: 760px;">
+      <div style="font-weight: 600; font-size: 26px; color: var(--grey); letter-spacing: .08em; margin-bottom: 22px;" class="w">CHOOSE HOW IT'S SORTED</div>
+      <div class="w" id="seg" style="position: relative; display: inline-flex; background: #E6E4DE; border-radius: 44px; padding: 8px; height: 88px;">
+        <div id="segKnob" class="abs" style="top: 8px; left: 8px; height: 72px; width: 220px; border-radius: 36px; background: var(--ink);"></div>
+        <div class="segLbl" style="position: relative; width: 220px; text-align: center; line-height: 72px; font-weight: 700; font-size: 30px;">Relevant</div>
+        <div class="segLbl" style="position: relative; width: 160px; text-align: center; line-height: 72px; font-weight: 700; font-size: 30px;">Raw</div>
+        <div class="segLbl" style="position: relative; width: 230px; text-align: center; line-height: 72px; font-weight: 700; font-size: 30px;">Your lens</div>
+      </div>
+      <div class="w" id="lensBox" style="margin-top: 40px; width: 740px; min-height: 150px; background: #fff; border-radius: 30px; padding: 30px 36px; box-shadow: 0 30px 60px rgba(0,0,0,.07);">
+        <div style="font-weight: 600; font-size: 22px; color: var(--grey); letter-spacing: .06em; margin-bottom: 12px;">DESCRIBE YOUR FEED</div>
+        <div id="lensText" style="font-weight: 500; font-size: 36px; letter-spacing: -0.015em; line-height: 1.3;"></div>
+      </div>
+    </div>
+    <div class="card" id="whyCard" style="left: 1010px; top: 420px; width: 760px; padding: 44px 50px;">
+      <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 30px;">
+        <div style="font-weight: 700; font-size: 34px; letter-spacing: -0.02em;">Why you're seeing this</div>
+        <div style="font-weight: 600; font-size: 24px; color: var(--grey); text-decoration: underline;">Why this?</div>
+      </div>
+      <div class="whyRow w" style="display:flex; gap: 18px; align-items:center; font-size: 30px; font-weight: 500; margin-bottom: 18px;"><span class="check">✓</span>Newest public post on Hive</div>
+      <div class="whyRow w" style="display:flex; gap: 18px; align-items:center; font-size: 30px; font-weight: 500; margin-bottom: 18px;"><span class="check">✓</span>Posted recently</div>
+      <div class="whyRow w" style="display:flex; gap: 18px; align-items:center; font-size: 30px; font-weight: 500; margin-bottom: 30px;"><span class="check">✓</span>Selected by Relevant</div>
+      <div class="whyRow w" style="border-top: 1.5px solid var(--line); padding-top: 26px; font-size: 26px; color: var(--grey); line-height: 1.4;"><b style="color: var(--ink);">Not used:</b> private messages, exact location, sensitive-trait inference.</div>
+    </div>
+  </section>
+
+  <!-- 7. Messages -->
+  <section class="scene light" id="s7">
+    <div class="phone" id="phoneMsg" style="left: 300px; top: 83px;"><div class="island"></div><div class="clock">9:41</div><div class="bars"><i style="height:5px"></i><i style="height:8px"></i><i style="height:11px"></i><i style="height:14px"></i><b></b></div><div class="screen"><img src="a/phone3.png"></div></div>
+    <div class="abs" style="left: 850px; top: 300px; width: 1040px;">
+      <div class="h1" style="font-size: 106px;"><span class="w">Every conversation.</span></div>
+      <div class="h1" style="font-size: 106px; color: #A3A19B;"><span class="w">One inbox.</span></div>
+      <div class="sub" style="margin-top: 40px; width: 780px;"><span class="w">Chats and email side by side, organised by person, not by app. Reply to an email like a text.</span></div>
+      <div id="msgPills" style="margin-top: 46px; display: flex; flex-wrap: wrap; gap: 14px; width: 860px;">
+        <span class="pill off w">Chats</span><span class="pill off w">Gmail</span><span class="pill off w">iCloud</span><span class="pill off w">Any IMAP</span><span class="pill off w">WhatsApp bridge</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 8. Compose -->
+  <section class="scene light" id="s8">
+    <div class="center h2" style="top: 110px;"><span class="w">Write once.</span> <span class="w">Publish everywhere.</span></div>
+    <div class="card" id="composer" style="left: 410px; top: 300px; width: 1100px; height: 330px; padding: 52px 56px;">
+      <div style="display:flex; gap: 30px; align-items: flex-start;">
+        <div style="flex: none; width: 78px; height: 78px; border-radius: 39px; background: var(--ink); color: var(--paper); font-weight: 700; font-size: 30px; display:flex; align-items:center; justify-content:center;">T</div>
+        <div id="composeText" style="font-weight: 500; font-size: 42px; letter-spacing: -0.02em; line-height: 1.3; padding-top: 14px; min-height: 60px;"></div>
+      </div>
+      <div style="position: absolute; left: 56px; right: 56px; bottom: 44px; display: flex; justify-content: space-between; align-items: center;">
+        <div style="font-size: 26px; color: var(--grey); font-weight: 500;">Sharing to <b style="color: var(--ink);" id="shareCount">Open Media only</b></div>
+        <div id="postBtn" style="background: var(--ink); color: var(--paper); font-weight: 700; font-size: 30px; padding: 22px 52px; border-radius: 44px;">Post</div>
+      </div>
+    </div>
+    <svg class="abs" id="fanSvg" width="1920" height="1080" style="left:0; top:0;"></svg>
+    <div id="fanPills"></div>
+  </section>
+
+  <!-- 9. Clips -->
+  <section class="scene dark" id="s9">
+    <img id="clipBg" class="abs" src="a/phone2.png" style="left: -10%; top: -40%; width: 120%; filter: blur(50px) brightness(.45) saturate(1.2);">
+    <div class="abs" style="left: 170px; top: 360px;">
+      <div class="h1" style="font-size: 200px; color: #fff;"><span class="w">Clips.</span></div>
+      <div class="sub" style="margin-top: 26px; width: 560px; color: rgba(255,255,255,.75);"><span class="w">Short videos, full screen, from every network. The same post, in Feed or in Clips.</span></div>
+    </div>
+    <div class="phone" id="phoneClip" style="left: 1150px; top: 83px; box-shadow: 0 60px 140px rgba(0,0,0,.6), inset 0 0 0 2px #333;"><div class="island"></div><div class="clock">9:41</div><div class="bars"><i style="height:5px"></i><i style="height:8px"></i><i style="height:11px"></i><i style="height:14px"></i><b></b></div><div class="screen"><img src="a/phone2.png"></div></div>
+  </section>
+
+  <!-- 10. Montage -->
+  <section class="scene" id="s10">
+    <div id="mont" class="center" style="top: 0; height: 1080px; display:flex; align-items:center; justify-content:center; font-weight: 800; font-size: 260px; letter-spacing: -0.055em;"></div>
+  </section>
+
+  <!-- 11. Mission -->
+  <section class="scene light" id="s11">
+    <div class="center" style="top: 230px; font-weight: 600; font-size: 26px; letter-spacing: .22em; color: var(--grey);"><span class="w">THE IDEA</span></div>
+    <div class="center serif" style="top: 330px; font-size: 148px; line-height: 1.12;">
+      <div><span class="w">Apps are doorways.</span></div>
+      <div><span class="w" style="font-style: italic;">The person is the constant.</span></div>
+    </div>
+    <div class="center sub" style="top: 760px; font-size: 36px;"><span class="w">Your identity, audience and feed belong to you.<br>Export everything. Leave anytime. Take it all with you.</span></div>
+  </section>
+
+  <!-- 12. End card -->
+  <section class="scene dark" id="s12">
+    <img id="endLogo" class="abs" src="a/logo-dark.png" style="width: 150px; left: 885px; top: 250px;">
+    <div class="center" style="top: 430px; font-weight: 700; font-size: 118px; letter-spacing: -0.045em; color: #F2F1ED;"><span class="w">Open Media</span></div>
+    <div class="center serif" style="top: 580px; font-size: 62px; color: #F2F1ED;"><span class="w">Post everywhere. Message everyone. <i>One app.</i></span></div>
+    <div class="center" style="top: 740px; font-weight: 500; font-size: 28px; color: #8E8D89; letter-spacing: -0.005em;"><span class="w">Free and open source&nbsp;&nbsp;·&nbsp;&nbsp;iPhone, Android and the web</span></div>
+    <div class="center" style="top: 810px; font-weight: 700; font-size: 40px; color: #F2F1ED; letter-spacing: -0.02em;"><span class="w">openmedia.site</span></div>
+  </section>
+
+  <div id="grain"></div>
+</div>
+
+<script>
+const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+const p = (t, a, b) => clamp((t - a) / (b - a));
+const lerp = (a, b, k) => a + (b - a) * k;
+const outExpo = k => k >= 1 ? 1 : 1 - Math.pow(2, -10 * k);
+const outCubic = k => 1 - Math.pow(1 - k, 3);
+const inCubic = k => k * k * k;
+const inOut = k => k < .5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+const outBack = k => { const c = 1.4; return 1 + (c + 1) * Math.pow(k - 1, 3) + c * Math.pow(k - 1, 2); };
+const $ = s => document.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+
+// Apple-style reveal: rise, unblur, fade in; optional exit.
+function rise(el, t, t0, { d = 1.0, dist = 46, blur = 14, out = null, outDist = -30 } = {}) {
+  const k = outExpo(p(t, t0, t0 + d));
+  let o = k, y = (1 - k) * dist, b = (1 - k) * blur;
+  if (out) { const q = inOut(p(t, out[0], out[1])); o *= 1 - q; y += q * outDist; b += q * 10; }
+  el.style.opacity = o;
+  el.style.transform = `translateY(${y}px)`;
+  el.style.filter = b > 0.05 ? `blur(${b}px)` : 'none';
+}
+function show(id, t, a, b, fadeIn = 0, fadeOut = 0) {
+  const el = document.getElementById(id);
+  let o = t >= a && t < b ? 1 : 0;
+  if (o && fadeIn) o = Math.min(o, p(t, a, a + fadeIn));
+  if (o && fadeOut) o = Math.min(o, 1 - p(t, b - fadeOut, b));
+  el.style.opacity = o;
+  el.style.visibility = o > 0 ? 'visible' : 'hidden';
+  return o > 0;
+}
+function typed(el, text, t, t0, cps, caretOn = true) {
+  const n = Math.floor(clamp((t - t0) * cps, 0, text.length));
+  const blink = (Math.floor(t * 2.2) % 2 === 0) || n < text.length;
+  el.innerHTML = text.slice(0, n).replace(/ /g, ' ') + (caretOn && t >= t0 - 0.4 ? `<span class="caret" style="opacity:${blink ? 1 : 0}"></span>` : '');
+}
+
+// ---- Chips for the scattered world
+const NETWORKS = ['Farcaster', 'Lens', 'Hive', 'DeSo', 'Gmail', 'iCloud', 'WhatsApp', 'Signal', 'Instagram', 'LinkedIn', 'Bluesky', 'Slack', 'Discord', 'Messenger', 'X', 'Fastmail', 'Google Messages', 'Yahoo Mail'];
+let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const chips = NETWORKS.map((name, i) => {
+  const el = document.createElement('div'); el.className = 'chip'; el.textContent = name;
+  $('#chips').appendChild(el);
+  return { el, vx: (rnd() - .5) * 40, vy: (rnd() - .5) * 26, delay: rnd() * 2.2, depth: .6 + rnd() * .6 };
+});
+const layoutSeed = seed;
+function layoutChips() {
+  seed = layoutSeed;
+  const placed = [];
+  chips.forEach(c => {
+    c.w = c.el.offsetWidth; c.h = c.el.offsetHeight;
+    for (let tries = 0; tries < 4000; tries++) {
+      const x = 120 + c.w / 2 + rnd() * (1680 - c.w), y = 110 + rnd() * 860;
+      const w = c.w * c.depth + 60, h = c.h * c.depth + 50;
+      if (x > 260 && x < 1660 && y > 390 && y < 690) continue;
+      if (placed.some(q => Math.abs(q.x - x) < (q.w + w) / 2 && Math.abs(q.y - y) < (q.h + h) / 2)) continue;
+      c.x = x; c.y = y; placed.push({ x, y, w, h }); break;
+    }
+  });
+}
+layoutChips();
+
+// ---- Fan-out pills for publishing
+const FAN = ['Open Media', 'Farcaster', 'Lens', 'Hive', 'DeSo'];
+const fanPills = FAN.map((name, i) => {
+  const el = document.createElement('div'); el.className = 'pill on abs';
+  el.innerHTML = `<span class="check" style="background: var(--paper); color: var(--ink); width: 30px; height: 30px; font-size: 17px;">✓</span>${name}`;
+  $('#fanPills').appendChild(el);
+  return el;
+});
+const fanSlots = FAN.map((_, i) => 210 + i * 315);
+const fanPaths = FAN.map((_, i) => {
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  const x0 = 960, y0 = 630, x1 = fanSlots[i] + 120, y1 = 820;
+  path.setAttribute('d', `M ${x0} ${y0} C ${x0} ${y0 + 110}, ${x1} ${y1 - 120}, ${x1} ${y1}`);
+  path.setAttribute('fill', 'none'); path.setAttribute('stroke', '#111'); path.setAttribute('stroke-width', '2.5');
+  $('#fanSvg').appendChild(path);
+  const len = path.getTotalLength(); path.style.strokeDasharray = len; path.dataset.len = len;
+  return path;
+});
+
+// Film grain: a few fixed noise tiles, picked and offset per frame so every render is identical.
+const grainTiles = [0, 1, 2, 3].map(k => {
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d'), img = g.createImageData(256, 256);
+  for (let i = 0; i < img.data.length; i += 4) { const v = rnd() * 255; img.data[i] = img.data[i + 1] = img.data[i + 2] = v; img.data[i + 3] = 255; }
+  g.putImageData(img, 0, 0); return c.toDataURL();
+});
+const grainOn = new URLSearchParams(location.search).get('grain') !== '0';
+function grain(t) {
+  const f = Math.round(t * 30), el = $('#grain');
+  if (!grainOn) { el.style.opacity = 0; return; }
+  el.style.backgroundImage = `url(${grainTiles[f % 4]})`;
+  el.style.backgroundPosition = `${(f * 97) % 256}px ${(f * 61) % 256}px`;
+  const dark = $('#stage').style.background.includes('rgb(0') || $('#stage').style.background === '#000';
+  el.style.opacity = dark ? .10 : .07;
+}
+
+const MONTAGE = ['Search.', 'People.', 'Email.', 'Lenses.', 'Work.', 'Events.', 'Agents.', 'Open source.'];
+
+window.seek = function (t) {
+  $('#stage').style.background = (t > 14.6 && t < 45.4) || (t > 52.9 && t < 58.7) ? 'var(--paper)' : '#000';
+  grain(t);
+  // 1. Cold open 0–6
+  if (show('s1', t, 0, 6.0, 0, 0.6)) {
+    const words = $$('#s1 .w');
+    const starts = [0.5, 0.75, 1.3, 1.55, 1.8, 2.5, 2.75];
+    words.forEach((w, i) => rise(w, t, starts[i], { d: 1.1, out: [5.0, 5.8] }));
+  }
+
+  // 2. Scattered 6–13.6
+  if (show('s2', t, 5.9, 14.8, 0.3, 0)) {
+    const conv = inCubic(p(t, 11.6, 12.9));
+    chips.forEach(c => {
+      const life = t - 6;
+      let x = c.x + c.vx * life * c.depth, y = c.y + c.vy * life * c.depth;
+      x = lerp(x, 960, conv); y = lerp(y, 540, conv);
+      const fin = outCubic(p(t, 6.1 + c.delay, 7.3 + c.delay));
+      const s = lerp(lerp(.85, 1, fin) * c.depth, .2, conv);
+      c.el.style.transform = `translate(${x - c.w / 2}px, ${y - c.h / 2}px) scale(${s})`;
+      c.el.style.opacity = fin * (1 - p(t, 12.5, 12.95)) * lerp(.5, 1, (c.depth - .6) / .6);
+      c.el.style.filter = c.depth < .8 ? `blur(${(0.8 - c.depth) * 8}px)` : 'none';
+    });
+    const lines = $$('#s2lines .w');
+    rise(lines[0], t, 6.4, { out: [8.0, 8.4] });
+    rise(lines[1], t, 8.4, { out: [10.0, 10.4] });
+    rise(lines[2], t, 10.4, { out: [11.5, 11.9] });
+    // logo pop on black
+    const lk = outBack(p(t, 12.85, 13.6));
+    const lw = $('#logoWhite');
+    lw.style.opacity = p(t, 12.85, 13.05);
+    lw.style.transform = `scale(${lerp(.3, 1, lk)}) rotate(${lerp(-40, 0, outExpo(p(t, 12.85, 13.8)))}deg)`;
+    const rk = outExpo(p(t, 12.9, 14.2)), ring = $('#ring'), R = lerp(0, 900, rk);
+    ring.style.width = ring.style.height = `${R * 2}px`; ring.style.left = `${960 - R}px`; ring.style.top = `${540 - R}px`;
+    ring.style.opacity = (1 - rk) * (t > 12.9 ? 1 : 0);
+  }
+
+  // 3. Light wipe and wordmark 13.9–16.4
+  if (show('s3', t, 13.9, 16.6, 0, 0.5)) {
+    const s3 = $('#s3');
+    const r = lerp(0, 1200, inOut(p(t, 13.9, 14.7)));
+    s3.style.clipPath = `circle(${r}px at 960px 540px)`;
+    const lb = $('#logoBlack');
+    lb.style.transform = `translateY(${-70 * outExpo(p(t, 14.6, 15.6))}px) rotate(${lerp(0, 360, inOut(p(t, 14.2, 15.6)))}deg)`;
+    rise($('#wordmark .w'), t, 14.9, { d: 1.1, dist: 30 });
+    $('#wordmark').style.transform = `translateY(-70px)`;
+  }
+
+  // 4. Tagline 16.2–20.2
+  if (show('s4', t, 16.2, 20.3, 0.3, 0.3)) {
+    const ws = $$('#s4 .w');
+    [16.4, 17.2, 18.0].forEach((s, i) => rise(ws[i], t, s, { d: 1.2, dist: 60, out: [19.6, 20.2] }));
+  }
+
+  // 5. Feed 20–27.2
+  if (show('s5', t, 20.0, 27.3, 0.3, 0.35)) {
+    const ws = $$('#s5 > div > div > .w, #s5 .h1 .w, #s5 .sub .w');
+    rise($('#s5 .h1 .w'), t, 20.4, { out: [26.6, 27.2] });
+    rise($('#s5 .sub .w'), t, 20.9, { out: [26.6, 27.2] });
+    $$('#netPills .w').forEach((w, i) => rise(w, t, 21.8 + i * 0.22, { d: .8, dist: 24, out: [26.6, 27.2] }));
+    // pills light up one by one as networks join
+    $$('#netPills .w').forEach((w, i) => { if (i > 0) { const on = t > 23.4 + i * 0.35; w.className = `pill ${on ? 'on' : 'off'} w`; } });
+    const ph = $('#phoneFeed'), k = outExpo(p(t, 20.0, 21.6));
+    const drift = (t - 20) * -6;
+    ph.style.transform = `perspective(2200px) translateY(${lerp(700, 0, k) + drift}px) rotateY(${lerp(-28, -10, k) + (t - 20) * 1.2}deg) rotateX(${lerp(14, 3, k)}deg) rotate(${lerp(6, 0, k)}deg)`;
+    ph.querySelector('img').style.transform = `translateY(${-30 * inOut(p(t, 22, 27))}px) scale(1.04)`;
+  }
+
+  // 6. Your rules 27.2–34.2
+  if (show('s6', t, 27.2, 34.3, 0.3, 0.35)) {
+    const hw = $$('#s6 .h2 .w');
+    rise(hw[0], t, 27.4, { out: [33.6, 34.2] }); rise(hw[1], t, 27.75, { out: [33.6, 34.2] });
+    rise($('#s6 .sub .w'), t, 28.2, { out: [33.6, 34.2] });
+    const colW = $$('#ctrlCol > .w');
+    colW.forEach((w, i) => rise(w, t, 28.4 + i * 0.2, { out: [33.6, 34.2] }));
+    // knob: Relevant -> Raw -> Your lens
+    const k1 = inOut(p(t, 29.5, 29.85)), k2 = inOut(p(t, 30.3, 30.65));
+    const knob = $('#segKnob');
+    const left = lerp(lerp(8, 228, k1), 388, k2), width = lerp(lerp(220, 160, k1), 230, k2);
+    knob.style.left = `${left}px`; knob.style.width = `${width}px`;
+    const lbls = $$('#s6 .segLbl'); const act = k2 > .5 ? 2 : k1 > .5 ? 1 : 0;
+    lbls.forEach((l, i) => l.style.color = i === act ? 'var(--paper)' : 'var(--ink)');
+    typed($('#lensText'), 'Only videos from people I follow. No crypto.', t, 30.9, 26, t < 33.0);
+    const card = $('#whyCard');
+    const ck = outExpo(p(t, 31.0, 32.2));
+    card.style.opacity = ck * (1 - inOut(p(t, 33.6, 34.2)));
+    card.style.transform = `translateX(${lerp(120, 0, ck)}px)`;
+    $$('#whyCard .whyRow').forEach((r, i) => rise(r, t, 31.5 + i * 0.3, { d: .7, dist: 18 }));
+  }
+
+  // 7. Messages 34.2–40.2
+  if (show('s7', t, 34.2, 40.3, 0.3, 0.35)) {
+    const ph = $('#phoneMsg'), k = outExpo(p(t, 34.2, 35.8));
+    ph.style.transform = `perspective(2200px) translateY(${lerp(700, 0, k) - (t - 34.2) * 6}px) rotateY(${lerp(28, 10, k) - (t - 34.2) * 1.2}deg) rotateX(${lerp(14, 3, k)}deg) rotate(${lerp(-6, 0, k)}deg)`;
+    const hs = $$('#s7 .h1 .w');
+    rise(hs[0], t, 34.6, { out: [39.6, 40.2] }); rise(hs[1], t, 35.1, { out: [39.6, 40.2] });
+    rise($('#s7 .sub .w'), t, 35.7, { out: [39.6, 40.2] });
+    $$('#msgPills .w').forEach((w, i) => rise(w, t, 36.5 + i * 0.22, { d: .8, dist: 24, out: [39.6, 40.2] }));
+  }
+
+  // 8. Compose 40.2–45.2
+  if (show('s8', t, 40.2, 45.3, 0.3, 0.35)) {
+    const hw = $$('#s8 .h2 .w');
+    rise(hw[0], t, 40.4, { out: [44.7, 45.2] }); rise(hw[1], t, 40.75, { out: [44.7, 45.2] });
+    const comp = $('#composer'), ck = outExpo(p(t, 40.4, 41.4)), cOut = inOut(p(t, 44.7, 45.2));
+    comp.style.opacity = ck * (1 - cOut); comp.style.transform = `translateY(${lerp(60, 0, ck)}px)`;
+    typed($('#composeText'), 'Hello from Open Media: one post, every network.', t, 41.0, 36, t < 42.6);
+    const press = p(t, 42.55, 42.7) - p(t, 42.7, 42.9);
+    $('#postBtn').style.transform = `scale(${1 - 0.08 * press})`;
+    $('#shareCount').textContent = t > 42.6 ? 'every connected network' : 'Open Media only';
+    fanPaths.forEach((path, i) => {
+      const k = inOut(p(t, 42.8 + i * 0.08, 43.6 + i * 0.08));
+      path.style.strokeDashoffset = path.dataset.len * (1 - k);
+      path.style.opacity = 1 - cOut;
+    });
+    fanPills.forEach((el, i) => {
+      const k = outBack(p(t, 43.3 + i * 0.09, 43.9 + i * 0.09));
+      el.style.left = `${fanSlots[i] + 120 - el.offsetWidth / 2}px`; el.style.top = '820px';
+      el.style.opacity = clamp(k * 1.5) * (1 - cOut); el.style.transform = `scale(${lerp(.4, 1, k)})`;
+    });
+  }
+
+  // 9. Clips 45.2–49
+  if (show('s9', t, 45.2, 49.0, 0.25, 0)) {
+    const bg = $('#clipBg'); bg.style.transform = `scale(${1.1 + (t - 45.2) * 0.03})`;
+    const ph = $('#phoneClip'), k = outExpo(p(t, 45.2, 46.6));
+    ph.style.transform = `perspective(2200px) translateY(${lerp(600, 0, k)}px) rotateY(${lerp(-20, -6, k)}deg) scale(${lerp(.9, 1, k) + (t - 45.2) * 0.008})`;
+    ph.querySelector('img').style.transform = `scale(${1.03 + (t - 45.2) * 0.02})`;
+    rise($('#s9 .h1 .w'), t, 45.5, { dist: 60 });
+    rise($('#s9 .sub .w'), t, 46.1);
+  }
+
+  // 10. Montage 49–53 on the beat
+  if (show('s10', t, 49.0, 53.0)) {
+    const i = clamp(Math.floor((t - 49) / 0.5), 0, MONTAGE.length - 1);
+    const s10 = $('#s10'), m = $('#mont');
+    const darkBg = i % 2 === 0;
+    s10.style.background = darkBg ? '#000' : 'var(--paper)';
+    m.style.color = darkBg ? '#F2F1ED' : 'var(--ink)';
+    m.textContent = MONTAGE[i];
+    const local = (t - 49) - i * 0.5;
+    const k = outExpo(clamp(local / 0.35));
+    m.style.transform = `scale(${lerp(1.12, 1, k)})`;
+    m.style.fontSize = MONTAGE[i].length > 8 ? '220px' : '260px';
+  }
+
+  // 11. Mission 53–58.6
+  if (show('s11', t, 53.0, 58.6, 0.2, 0.5)) {
+    const ws = $$('#s11 .w');
+    rise(ws[0], t, 53.3, { dist: 20 });
+    rise(ws[1], t, 53.7, { d: 1.4, dist: 60 });
+    rise(ws[2], t, 55.0, { d: 1.4, dist: 60 });
+    rise(ws[3], t, 56.4, { d: 1.2 });
+    $('#s11').style.transform = `scale(${1 + (t - 53) * 0.006})`;
+  }
+
+  // 12. End card 58.6–64
+  if (show('s12', t, 58.6, 64.0, 0.3, 0.8)) {
+    const lk = outExpo(p(t, 58.8, 60.0));
+    const lg = $('#endLogo');
+    lg.style.opacity = p(t, 58.8, 59.3);
+    lg.style.transform = `scale(${lerp(.6, 1, lk)}) rotate(${lerp(-90, 0, lk)}deg)`;
+    const ws = $$('#s12 .w');
+    [59.3, 59.9, 60.6, 61.0].forEach((s, i) => rise(ws[i], t, s, { d: 1.2 }));
+  }
+};
+window.ready = (async () => { await document.fonts.ready; await Promise.all($$('img').map(i => i.decode().catch(() => {}))); layoutChips(); return true; })();
+seek(parseFloat(new URLSearchParams(location.search).get('t') || '0'));
+</script>
+</body>
+</html>

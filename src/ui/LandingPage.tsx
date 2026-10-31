@@ -1,11 +1,12 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo } from 'react';
-import { Image, Linking, Platform, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Linking, Platform, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import { agentInterfaces, honestStatus, mission, philosophy, principles, promises, roadmap, roadmapLabels, sourceRepository, surfaces, tagline } from '../domain/about';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { BrandMark } from './BrandMark';
+import { LandingFilm } from './LandingFilm';
 import { Text } from './Text';
 
 export type PublicPage = 'landing' | 'feed' | 'mission' | 'developers';
@@ -39,7 +40,7 @@ export function LandingPage({ onNavigate, onSignIn }: { onNavigate: (page: Publi
         <Text style={styles.heroNote}>Free · No ads by default · Works on iPhone, Android and the web</Text>
       </View>
       <View style={styles.heroImageFrame}>
-        <Image accessibilityLabel="Open Media on a laptop and two phones: a mixed feed, a short-video clip and a people-first inbox" source={require('../../assets/landing/hero.jpg')} style={styles.heroImage} resizeMode="cover" />
+        <LandingFilm />
       </View>
     </View>
 
@@ -202,8 +203,7 @@ export function createStyles(colors: ThemeColors, wide: boolean, medium: boolean
     heroItalic: { ...serif, fontStyle: 'italic' },
     heroLead: { marginTop: 24, maxWidth: 640, color: colors.textSecondary, fontSize: medium ? 19 : 17, lineHeight: medium ? 30 : 27, textAlign: 'center' },
     heroNote: { marginTop: 20, color: colors.textTertiary, fontSize: 13, textAlign: 'center' },
-    heroImageFrame: { marginTop: wide ? 64 : 40, width: '100%', aspectRatio: 1800 / 1013, borderRadius: wide ? 24 : 16, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, backgroundColor: colors.chrome },
-    heroImage: { width: '100%', height: '100%' },
+    heroImageFrame: { marginTop: wide ? 64 : 40, width: '100%', aspectRatio: 16 / 9, borderRadius: wide ? 24 : 16, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, backgroundColor: colors.chrome },
     ctaRow: { marginTop: 28, flexDirection: 'row', flexWrap: 'wrap', justifyContent: wide ? 'flex-start' : 'center', gap: 12 },
     kicker: { color: colors.textTertiary, fontSize: 12, fontWeight: '600', letterSpacing: 1.2, textTransform: 'uppercase' },
     quote: { ...serif, marginTop: 20, maxWidth: 980, color: colors.text, fontSize: wide ? 64 : medium ? 48 : 38, lineHeight: wide ? 70 : medium ? 54 : 44, letterSpacing: wide ? -1.2 : -0.6 },
