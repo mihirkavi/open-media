@@ -19,7 +19,7 @@ export type PublicPage = 'landing' | 'feed' | 'mission' | 'developers';
  */
 export function LandingPage({ onNavigate, onSignIn }: { onNavigate: (page: PublicPage) => void; onSignIn: () => void }) {
   const { colors } = useOpenMediaTheme();
-  const { width } = useWindowDimensions();
+  const { width, height: windowHeight } = useWindowDimensions();
   const wide = width >= 960;
   const medium = width >= 640;
   const styles = useMemo(() => createStyles(colors, wide, medium), [colors, wide, medium]);
@@ -39,12 +39,12 @@ export function LandingPage({ onNavigate, onSignIn }: { onNavigate: (page: Publi
         </View>
         <Text style={styles.heroNote}>Free · No ads by default · Works on iPhone, Android and the web</Text>
       </View>
-      <View style={styles.heroImageFrame}>
-        <LandingFilm />
-      </View>
     </View>
 
-    <View style={styles.rule} />
+    {/* The film runs edge to edge, as tall as the screen allows without cropping its type. */}
+    <View style={[styles.film, { height: Math.min(width * 9 / 16, windowHeight) }]}>
+      <LandingFilm />
+    </View>
     <View style={styles.section}>
       <Text style={styles.kicker}>The idea</Text>
       <Text accessibilityRole="header" style={styles.quote}>“{philosophy.line}”</Text>
@@ -203,7 +203,7 @@ export function createStyles(colors: ThemeColors, wide: boolean, medium: boolean
     heroItalic: { ...serif, fontStyle: 'italic' },
     heroLead: { marginTop: 24, maxWidth: 640, color: colors.textSecondary, fontSize: medium ? 19 : 17, lineHeight: medium ? 30 : 27, textAlign: 'center' },
     heroNote: { marginTop: 20, color: colors.textTertiary, fontSize: 13, textAlign: 'center' },
-    heroImageFrame: { marginTop: wide ? 64 : 40, width: '100%', aspectRatio: 16 / 9, borderRadius: wide ? 24 : 16, overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, backgroundColor: colors.chrome },
+    film: { width: '100%', overflow: 'hidden', backgroundColor: '#000' },
     ctaRow: { marginTop: 28, flexDirection: 'row', flexWrap: 'wrap', justifyContent: wide ? 'flex-start' : 'center', gap: 12 },
     kicker: { color: colors.textTertiary, fontSize: 12, fontWeight: '600', letterSpacing: 1.2, textTransform: 'uppercase' },
     quote: { ...serif, marginTop: 20, maxWidth: 980, color: colors.text, fontSize: wide ? 64 : medium ? 48 : 38, lineHeight: wide ? 70 : medium ? 54 : 44, letterSpacing: wide ? -1.2 : -0.6 },
