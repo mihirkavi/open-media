@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useMemo } from 'react';
-import { Linking, Platform, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AccessibilityInfo, Animated, Linking, Platform, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import { agentInterfaces, honestStatus, mission, philosophy, principles, promises, roadmap, roadmapLabels, sourceRepository, surfaces, tagline } from '../domain/about';
 import { ThemeColors } from '../theme';
@@ -25,7 +25,24 @@ export function LandingPage({ onNavigate, onSignIn }: { onNavigate: (page: Publi
   const styles = useMemo(() => createStyles(colors, wide, medium), [colors, wide, medium]);
   const apiURL = process.env.EXPO_PUBLIC_OPEN_MEDIA_PUBLIC_API_URL;
 
-  return <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
+  // The film fills the screen. On a landscape screen it takes the full height (trimming a little
+  // from the sides); on a portrait one it keeps its 16:9 shape so its type is never cut off.
+  const filmHeight = width / windowHeight >= 1.5 ? windowHeight : Math.min(width * 9 / 16, windowHeight);
+  // As it scrolls into view it grows from an inset card to the full screen, the way Apple's
+  // product pages do. Reduced motion skips the growth.
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const [filmTop, setFilmTop] = useState(0);
+  const [reduceMotion, setReduceMotion] = useState(false);
+  useEffect(() => {
+    AccessibilityInfo.isReduceMotionEnabled().then(setReduceMotion).catch(() => undefined);
+    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
+    return () => subscription.remove();
+  }, []);
+  const grow = reduceMotion ? new Animated.Value(1) : scrollY.interpolate({ inputRange: [filmTop - windowHeight, filmTop], outputRange: [0, 1], extrapolate: 'clamp' });
+  const filmScale = grow.interpolate({ inputRange: [0, 1], outputRange: [wide ? 0.84 : 0.92, 1] });
+  const filmRadius = grow.interpolate({ inputRange: [0, 1], outputRange: [wide ? 32 : 18, 0] });
+
+  return <Animated.ScrollView style={styles.screen} contentContainerStyle={styles.content} scrollEventThrottle={16} onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: false })}>
     <PublicNav current="landing" onNavigate={onNavigate} onSignIn={onSignIn} />
 
     <View style={styles.section}>
@@ -41,10 +58,9 @@ export function LandingPage({ onNavigate, onSignIn }: { onNavigate: (page: Publi
       </View>
     </View>
 
-    {/* The film runs edge to edge, as tall as the screen allows without cropping its type. */}
-    <View style={[styles.film, { height: Math.min(width * 9 / 16, windowHeight) }]}>
+    <Animated.View onLayout={(event) => setFilmTop(event.nativeEvent.layout.y)} style={[styles.film, { height: filmHeight, borderRadius: filmRadius, transform: [{ scale: filmScale }] }]}>
       <LandingFilm />
-    </View>
+    </Animated.View>
     <View style={styles.section}>
       <Text style={styles.kicker}>The idea</Text>
       <Text accessibilityRole="header" style={styles.quote}>“{philosophy.line}”</Text>
@@ -137,7 +153,7 @@ export function LandingPage({ onNavigate, onSignIn }: { onNavigate: (page: Publi
     </View>
 
     <PublicFooter onNavigate={onNavigate} />
-  </ScrollView>;
+  </Animated.ScrollView>;
 }
 
 /** The top bar shared by the landing, mission and developer pages. */
