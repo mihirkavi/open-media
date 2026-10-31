@@ -200,7 +200,8 @@ export async function openSocket(connection: SmtpConnection): Promise<SmtpSocket
 async function openWorkersSocket(connection: SmtpConnection): Promise<SmtpSocket> {
   const { connect } = await import('cloudflare:sockets');
   const secureTransport = connection.allowPlaintext ? 'off' : connection.security === 'tls' ? 'on' : 'starttls';
-  let socket = connect({ hostname: connection.address, port: connection.port }, { secureTransport, allowHalfOpen: false });
+  // Connect by the server's own name, so the certificate is always checked against it.
+  let socket = connect({ hostname: connection.allowPlaintext ? connection.address : connection.host, port: connection.port }, { secureTransport, allowHalfOpen: false });
   let reader = socket.readable.getReader();
   let writer = socket.writable.getWriter();
   return {
