@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Image, Keyboard, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from "react-native";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { AccessibilityInfo, ActivityIndicator, Animated, Easing, Image, Keyboard, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from "react-native";
 import { PersonLink, PersonTarget } from "./people";
 import { Text, TextInput } from "./Text";
 
@@ -15,7 +15,7 @@ import { ThemeColors } from "../theme";
 import { useOpenMediaTheme } from "../themeContext";
 import { SourceMarker, sourceLabel } from "./SourceMarker";
 import type { MessageMode } from "./OpenMediaApp";
-import { VerifiedTick } from "./VerifiedTick";
+import { VerifiedTick, verifiedBlue } from "./VerifiedTick";
 
 interface Props {
   conversations: Conversation[];
@@ -75,6 +75,7 @@ export function OpenMediaMessages({
   if (compact && selected)
     return (
       <MessageThread
+        key={selected.id}
         conversation={selected}
         blocked={selected.participants.some((person) =>
           blockedUserIds.includes(person.id),
@@ -200,8 +201,9 @@ export function OpenMediaMessages({
                 accessibilityRole="button"
                 accessibilityLabel={`${conversationTitle(conversation)}. ${conversation.preview}`}
                 onPress={() => setSelectedId(conversation.id)}
-                style={[
+                style={({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) => [
                   styles.row,
+                  (hovered || pressed) && styles.rowHover,
                   selected?.id === conversation.id && styles.rowActive,
                 ]}
               >
@@ -263,6 +265,7 @@ export function OpenMediaMessages({
         <View style={styles.threadPane}>
           {selected ? (
             <MessageThread
+              key={selected.id}
               conversation={selected}
               blocked={selected.participants.some((person) =>
                 blockedUserIds.includes(person.id),
@@ -279,6 +282,73 @@ export function OpenMediaMessages({
         </View>
       ) : null}
     </View>
+  );
+}
+
+/** One line of composer text; the field grows in these steps. */
+const composerLineHeight = 22;
+
+function useReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    AccessibilityInfo.isReduceMotionEnabled().then(setReduced).catch(() => undefined);
+    const subscription = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduced);
+    return () => subscription.remove();
+  }, []);
+  return reduced;
+}
+
+/** A new message rises and fades in, the way chat apps show arrivals. */
+function Appear({ animate, style, children }: React.PropsWithChildren<{ animate: boolean; style: object }>) {
+  const progress = useRef(new Animated.Value(animate ? 0 : 1)).current;
+  useEffect(() => {
+    if (!animate) return;
+    Animated.timing(progress, { toValue: 1, duration: 280, easing: Easing.bezier(0.2, 0.8, 0.2, 1), useNativeDriver: Platform.OS !== "web" }).start();
+  }, []);
+  return (
+    <Animated.View
+      style={[
+        style,
+        {
+          opacity: progress,
+          transform: [
+            { translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) },
+            { scale: progress.interpolate({ inputRange: [0, 1], outputRange: [0.96, 1] }) },
+          ],
+        },
+      ]}
+    >
+      {children}
+    </Animated.View>
+  );
+}
+
+/** The send button wakes up with a small spring once there is something to send. */
+function SendButton({ ready, reduceMotion, onPress }: { ready: boolean; reduceMotion: boolean; onPress: () => void }) {
+  const { colors } = useOpenMediaTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const progress = useRef(new Animated.Value(ready ? 1 : 0)).current;
+  useEffect(() => {
+    const native = Platform.OS !== "web";
+    if (reduceMotion) progress.setValue(ready ? 1 : 0);
+    else Animated.spring(progress, { toValue: ready ? 1 : 0, speed: 22, bounciness: 9, useNativeDriver: native }).start();
+  }, [ready, reduceMotion]);
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel="Send message" accessibilityState={{ disabled: !ready }} disabled={!ready} onPress={onPress}>
+      {({ pressed }) => (
+        <Animated.View
+          style={[
+            styles.send,
+            {
+              opacity: progress.interpolate({ inputRange: [0, 1], outputRange: [0.28, 1] }),
+              transform: [{ scale: progress.interpolate({ inputRange: [0, 1], outputRange: [0.86, pressed ? 0.92 : 1] }) }],
+            },
+          ]}
+        >
+          <Ionicons name="arrow-up" size={19} color={colors.surface} />
+        </Animated.View>
+      )}
+    </Pressable>
   );
 }
 
@@ -356,12 +426,41 @@ function MessageThread({
   const submit = () => {
     if (!body.trim()) return;
     const item: PendingMessage = { id: `pending-${Date.now()}`, conversationId: conversation.id, body: body.trim(), replyTo };
+    // The stored copy replaces this bubble in place, without moving in a second time.
+    sentBodies.add(item.body);
     setBody("");
     setReplyTo(undefined);
     setPending((items) => [...items, item]);
     deliver(item);
   };
   const waiting = pending.filter((item) => item.conversationId === conversation.id);
+  // Only messages that arrive while the thread is open move in; the history is already there.
+  const reduceMotion = useReducedMotion();
+  const openedWith = useRef(new Set(conversation.messages.map((message) => message.id))).current;
+  const sentBodies = useRef(new Set<string>()).current;
+  const arrives = (message: Message) =>
+    !reduceMotion && !openedWith.has(message.id) && !(message.direction === "outbound" && sentBodies.has(message.body.trim()));
+  const scrolledOnce = useRef(false);
+  const [inputHeight, setInputHeight] = useState(composerLineHeight);
+  const fitComposer = (height: number) => setInputHeight(Math.min(Math.max(height, composerLineHeight), composerLineHeight * 6));
+  // A web text box never reports shrinking, so measure it from zero whenever the text changes.
+  useLayoutEffect(() => {
+    const node = composerInput.current as unknown as HTMLTextAreaElement | null;
+    if (Platform.OS !== "web" || !node?.style) return;
+    const previous = node.style.height;
+    node.style.height = "0px";
+    fitComposer(node.scrollHeight);
+    node.style.height = previous;
+  }, [body]);
+  const [focused, setFocused] = useState(false);
+  // On the web, Enter sends and Shift+Enter starts a new line, like other chat apps.
+  const onComposerKey = (event: { nativeEvent: { key: string; shiftKey?: boolean; isComposing?: boolean }; preventDefault: () => void }) => {
+    const { key, shiftKey, isComposing } = event.nativeEvent;
+    if (Platform.OS === "web" && key === "Enter" && !shiftKey && !isComposing) {
+      event.preventDefault();
+      submit();
+    }
+  };
   return (
     <View ref={threadRef} style={[styles.thread, keyboardInset ? { paddingBottom: keyboardInset } : null]}>
       <View style={styles.threadHeader}>
@@ -423,7 +522,10 @@ function MessageThread({
       <ScrollView
         ref={threadScroll}
         contentContainerStyle={styles.threadContent}
-        onContentSizeChange={() => threadScroll.current?.scrollToEnd({ animated: false })}
+        onContentSizeChange={() => {
+          threadScroll.current?.scrollToEnd({ animated: scrolledOnce.current && !reduceMotion });
+          scrolledOnce.current = true;
+        }}
       >
         {conversation.messages.length || waiting.length ? (
           layoutThread(conversation.messages).map((item) =>
@@ -432,8 +534,9 @@ function MessageThread({
                 {item.label}
               </Text>
             ) : (
-              <View
+              <Appear
                 key={item.key}
+                animate={arrives(item.message)}
                 style={[
                   styles.messageWrap,
                   item.message.direction === "outbound" && styles.outboundWrap,
@@ -489,11 +592,11 @@ function MessageThread({
                     <SourceMarker source={item.message.source} showLabel />
                   </View>
                 ) : null}
-              </View>
+              </Appear>
             ),
           ).concat(
             waiting.map((item) => (
-              <View key={item.id} style={[styles.messageWrap, styles.outboundWrap, styles.groupStart]}>
+              <Appear key={item.id} animate={!reduceMotion} style={[styles.messageWrap, styles.outboundWrap, styles.groupStart]}>
                 <View style={[styles.bubble, styles.outboundBubble, styles.outboundTail, item.failed ? styles.failedBubble : styles.sendingBubble]}>
                   {item.replyTo ? (
                     <View style={[styles.quote, styles.quoteOutbound]}>
@@ -511,7 +614,7 @@ function MessageThread({
                 ) : (
                   <Text style={styles.deliveryStatus}>Sending…</Text>
                 )}
-              </View>
+              </Appear>
             )),
           )
         ) : (
@@ -538,14 +641,20 @@ function MessageThread({
               </Pressable>
             </View>
           ) : null}
-          <View style={styles.composer}>
+          <View style={[styles.composer, focused && styles.composerFocused]}>
             <TextInput
               ref={composerInput}
               accessibilityLabel="Message"
+              accessibilityHint={Platform.OS === "web" ? "Enter sends; Shift+Enter adds a line" : undefined}
               maxLength={8000}
               multiline
               value={body}
               onChangeText={setBody}
+              onKeyPress={onComposerKey}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+              // Grows with what you type, from one line up to six.
+              onContentSizeChange={(event) => Platform.OS !== "web" && fitComposer(event.nativeEvent.contentSize.height)}
               placeholder={
                 conversation.email
                   ? "Reply by email"
@@ -556,17 +665,9 @@ function MessageThread({
                     : "Message"
               }
               placeholderTextColor={colors.textTertiary}
-              style={styles.composerInput}
+              style={[styles.composerInput, { height: inputHeight }]}
             />
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Send message"
-              disabled={!body.trim()}
-              onPress={submit}
-              style={[styles.send, !body.trim() && styles.sendDisabled]}
-            >
-              <Ionicons name="arrow-up" size={19} color={colors.surface} />
-            </Pressable>
+            <SendButton ready={Boolean(body.trim())} reduceMotion={reduceMotion} onPress={submit} />
           </View>
         </View>
       ) : (
@@ -833,14 +934,15 @@ function Avatar({ initials, imageUrls = [], size = 40 }: { initials: string; ima
   );
 }
 
-/** Double check for senders that passed DMARC and publish a BIMI mark certificate (people get VerifiedTick). */
+/** The blue tick for senders that passed DMARC and publish a BIMI mark certificate. */
 function VerifiedBadge({ domain }: { domain: string }) {
   return (
     <Ionicons
+      accessibilityRole="image"
       accessibilityLabel={`Verified sender: ${domain}`}
-      name="checkmark-done-circle"
-      size={16}
-      color="#1D9BF0"
+      name="checkmark-circle"
+      size={15}
+      color={verifiedBlue}
     />
   );
 }
@@ -1230,7 +1332,8 @@ function createStyles(colors: ThemeColors) {
       gap: 12,
       borderRadius: 14,
     },
-    rowActive: { backgroundColor: colors.chrome },
+    rowHover: { backgroundColor: colors.chrome },
+    rowActive: { backgroundColor: colors.bubble },
     rowTime: { marginLeft: "auto", paddingLeft: 6, flexShrink: 0, color: colors.textTertiary, fontSize: 12, fontVariant: ["tabular-nums"] },
     avatarFrame: { overflow: "hidden", backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
     avatar: {
@@ -1386,25 +1489,31 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.surface,
     },
     composer: {
-      minHeight: 48,
+      minHeight: 46,
       flexDirection: "row",
       alignItems: "flex-end",
       gap: 8,
-      padding: 5,
-      paddingLeft: 14,
-      borderRadius: 24,
+      paddingVertical: 4,
+      paddingRight: 4,
+      paddingLeft: 16,
+      borderRadius: 23,
       backgroundColor: colors.chrome,
       borderWidth: 1,
       borderColor: colors.border,
+      // @ts-expect-error web-only style
+      transitionProperty: "border-color, background-color",
+      transitionDuration: "160ms",
     },
+    composerFocused: { borderColor: colors.textTertiary, backgroundColor: colors.surface },
     composerInput: {
       flex: 1,
-      maxHeight: 120,
-      minHeight: 36,
-      paddingVertical: 8,
+      marginVertical: 8,
+      paddingVertical: 0,
       color: colors.text,
-      fontSize: 14,
+      fontSize: 15,
+      lineHeight: composerLineHeight,
       outlineStyle: "none",
+      resize: "none",
     } as object,
     send: {
       width: 38,
@@ -1414,8 +1523,7 @@ function createStyles(colors: ThemeColors) {
       justifyContent: "center",
       backgroundColor: colors.text,
     },
-    sendDisabled: { opacity: 0.3 },
-    sendingBubble: { opacity: 0.6 },
+    sendingBubble: { opacity: 0.72 },
     failedBubble: { opacity: 0.45 },
     deliveryStatus: { marginTop: 3, marginRight: 6, alignSelf: "flex-end", color: colors.textTertiary, fontSize: 11 },
     deliveryLine: { minHeight: 24, marginTop: 2, flexDirection: "row", alignItems: "center", alignSelf: "flex-end", gap: 4 },

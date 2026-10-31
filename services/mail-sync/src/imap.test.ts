@@ -205,12 +205,14 @@ test('a failed save fails the sync instead of looking like a partial one', async
   } finally { mailbox.close(); }
 });
 
-test('sync downloads only mail that is not stored yet, and keeps the sender name', async () => {
+test('sync downloads only new mail, plus mail saved without the sender name', async () => {
   const { syncImap } = await import('./imap.js');
   const mailbox = await fakeMailbox({ count: 30 });
   try {
-    const stored = new Set(Array.from({ length: 10 }, (_, index) => `<m${30 - index}@example.test>`));
-    const messages = await syncImap(mailbox.input, { limits: { INBOX: 25, Sent: 0 }, known: async (ids) => new Set(ids.filter((id) => stored.has(id))) });
+    // m30–m21 are stored with the sender's name; m20 was stored before names were kept.
+    const stored = new Map(Array.from({ length: 10 }, (_, index) => [`<m${30 - index}@example.test>`, `"Sender" <s${30 - index}@example.test>`]));
+    stored.set('<m20@example.test>', 's20@example.test');
+    const messages = await syncImap(mailbox.input, { limits: { INBOX: 25, Sent: 0 }, known: async (ids) => new Map(ids.filter((id) => stored.has(id)).map((id) => [id, stored.get(id)!])) });
     assert.equal(messages.length, 15);
     assert.equal(messages[0].subject, 'Test 20');
     assert.equal(messages[0].from, '"Sender" <s20@example.test>');
@@ -221,7 +223,7 @@ test('sync downloads only mail that is not stored yet, and keeps the sender name
 test('a waiting sync returns new mail moments after it arrives, with nextTick as on Workers', async () => {
   const { syncImap } = await import('./imap.js');
   const mailbox = await fakeMailbox({ count: 3 });
-  const everything = async (ids: string[]) => new Set(ids.filter((id) => id !== '<m4@example.test>'));
+  const everything = async (ids: string[]) => new Map(ids.filter((id) => id !== '<m4@example.test>').map((id) => [id, `"Sender" <s${id.match(/\d+/)![0]}@example.test>`]));
   const nextTick = process.nextTick;
   process.nextTick = ((callback: (...args: unknown[]) => void, ...args: unknown[]) => queueMicrotask(() => callback(...args))) as typeof process.nextTick;
   try {
@@ -241,7 +243,7 @@ test('a waiting sync with no new mail answers empty when the wait ends', async (
   const mailbox = await fakeMailbox({ count: 3 });
   try {
     const started = Date.now();
-    const messages = await syncImap(mailbox.input, { limits: { INBOX: 3, Sent: 0 }, known: async (ids) => new Set(ids), waitMs: 400 });
+    const messages = await syncImap(mailbox.input, { limits: { INBOX: 3, Sent: 0 }, known: async (ids) => new Map(ids.map((id) => [id, `"Sender" <s${id.match(/\d+/)![0]}@example.test>`])), waitMs: 400 });
     assert.deepEqual(messages, []);
     assert.ok(Date.now() - started >= 400);
   } finally { mailbox.close(); }

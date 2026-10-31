@@ -4,6 +4,8 @@ import { Image, Platform, Pressable, StyleSheet, View, useWindowDimensions } fro
 import { Text } from "./Text";
 
 import {
+  apiConfigured,
+  getAPIURL,
   listMailAccounts,
   listStoredMail,
   sendMail,
@@ -47,7 +49,6 @@ import { PeopleProvider, PersonTarget, useContactsStore } from "./people";
 import { PersonProfile } from "./PersonProfile";
 import { encounterForConversation } from "../domain/people";
 import { loadPublicPerson } from "../data/peopleService";
-import { apiConfigured } from "../connectors/mailApiConnector";
 
 export type PrimaryDestination = "feed" | "clips" | "messages";
 export type Destination =
@@ -165,7 +166,7 @@ export function OpenMediaApp({
         accounts.filter((account) => account.canSend).map((account) => account.id),
       );
       setMailConversations(
-        normalizeStoredEmail(stored).map((conversation) =>
+        normalizeStoredEmail(stored, { iconService: apiConfigured() ? getAPIURL() : undefined }).map((conversation) =>
           conversation.email
             ? { ...conversation, email: { ...conversation.email, canSend: sending.has(conversation.email.accountId) } }
             : conversation,

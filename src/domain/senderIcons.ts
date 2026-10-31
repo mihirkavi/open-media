@@ -13,15 +13,15 @@ export function isPersonalMailDomain(domain: string): boolean {
 }
 
 /**
- * Pictures to try for an email sender, best first: the verified BIMI logo, then
- * the company's own site icon (organization domains only). The avatar falls
- * back to initials when none load.
+ * Pictures to try for an email sender, best first: the verified BIMI logo (a vector, sharp at
+ * any size), then the company's largest site icon through Open Media's icon service
+ * (`iconService`, the API origin), which refuses blurry ones. Organization domains only; the
+ * avatar falls back to initials when none load.
  */
-export function senderIconUrls(address: string, bimiLogoUrl?: string): string[] {
+export function senderIconUrls(address: string, bimiLogoUrl?: string, iconService?: string): string[] {
   const urls = bimiLogoUrl ? [bimiLogoUrl] : [];
   const domain = address.split('@')[1]?.toLowerCase();
-  if (!domain || !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) return urls;
+  if (!domain || !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain) || isPersonalMailDomain(domain) || !iconService) return urls;
   const organization = domain.split('.').slice(-2).join('.');
-  if (isPersonalMailDomain(domain)) return urls;
-  return [...urls, `https://${organization}/apple-touch-icon.png`, `https://www.${organization}/apple-touch-icon.png`, `https://www.${organization}/favicon.ico`];
+  return [...urls, `${iconService.replace(/\/$/, '')}/v1/sender-icons/${organization}`];
 }

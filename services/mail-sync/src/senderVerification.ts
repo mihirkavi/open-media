@@ -34,13 +34,33 @@ const BIMI_EKU = '1.3.6.1.5.5.7.3.31';
 const cache = new Map<string, { expires: number; brand: Promise<DomainBrand> }>();
 const cacheMs = 6 * 60 * 60 * 1000;
 
-/** The DMARC result the receiving server recorded, from the topmost Authentication-Results header. */
+/**
+ * The DMARC result the receiving server recorded. Receivers prepend Authentication-Results, so the
+ * topmost header is theirs; some (iCloud) write several, one per check (bimi.icloud.com,
+ * dmarc.icloud.com, …). Only headers from the same organization as the topmost one count, so a
+ * header the sender added further down can never vouch for itself.
+ */
 export function receivedDmarc(headerLines: ReadonlyArray<{ readonly key: string; readonly line: string }>): { result: string; domain: string } | undefined {
-  const top = headerLines.find((header) => header.key === 'authentication-results');
-  if (!top) return undefined;
-  const value = top.line.replace(/^authentication-results:\s*/i, '').replace(/\r?\n[ \t]+/g, ' ');
-  const match = value.match(/\bdmarc=([a-z]+)\b[^;]*?\bheader\.from=([a-z0-9.-]+)/i);
-  return match ? { result: match[1].toLowerCase(), domain: match[2].toLowerCase() } : undefined;
+  const results = headerLines
+    .filter((header) => header.key === 'authentication-results')
+    .map((header) => header.line.replace(/^authentication-results:\s*/i, '').replace(/\r?\n[ \t]+/g, ' '));
+  if (!results.length) return undefined;
+  const receiver = organizationOf(authservId(results[0]));
+  for (const value of results) {
+    if (organizationOf(authservId(value)) !== receiver) continue;
+    const match = value.match(/\bdmarc=([a-z]+)\b[^;]*?\bheader\.from=([a-z0-9.-]+)/i);
+    if (match) return { result: match[1].toLowerCase(), domain: match[2].toLowerCase() };
+  }
+  return undefined;
+}
+
+/** "dmarc.icloud.com" from "dmarc.icloud.com; dmarc=pass …". */
+function authservId(value: string): string {
+  return value.split(';')[0].trim().split(/\s+/)[0].toLowerCase();
+}
+
+function organizationOf(host: string): string {
+  return host.split('.').slice(-2).join('.');
 }
 
 export async function verifySender(

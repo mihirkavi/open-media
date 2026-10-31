@@ -21,6 +21,17 @@ test('reads DMARC only from the topmost Authentication-Results header', () => {
   assert.equal(receivedDmarc([]), undefined);
 });
 
+test('reads DMARC from iCloud, which writes one Authentication-Results header per check', () => {
+  const icloud = [
+    auth('bimi.icloud.com; bimi=declined header.d=bankofamerica.com'),
+    auth('dmarc.icloud.com; dmarc=pass header.from=ealerts.bankofamerica.com'),
+    auth('dkim-verifier.icloud.com; dkim=pass header.d=ealerts.bankofamerica.com'),
+  ];
+  assert.deepEqual(receivedDmarc(icloud), { result: 'pass', domain: 'ealerts.bankofamerica.com' });
+  // A header from anyone other than the receiver's own organization is never trusted.
+  assert.equal(receivedDmarc([auth('bimi.icloud.com; bimi=declined'), auth('mx.attacker.example; dmarc=pass header.from=paypal.com')]), undefined);
+});
+
 test('requires DMARC pass for the exact From domain', async () => {
   const network = fakeNetwork({ '_dmarc.brand.example': 'v=DMARC1; p=reject', 'default._bimi.brand.example': 'v=BIMI1; l=https://brand.example/logo.svg; a=https://brand.example/vmc.pem' });
   assert.deepEqual(await verifySender('news@brand.example', [auth('mx; dmarc=pass header.from=other.example')], network), { verified: false });

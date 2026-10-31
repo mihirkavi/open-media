@@ -94,8 +94,8 @@ export type SaveBatch = (messages: SyncedMessage[]) => Promise<void>;
 export interface SyncOptions {
   limits?: { INBOX: number; Sent: number };
   save?: SaveBatch;
-  /** Which of these Message-IDs are already stored, so only new mail is downloaded. */
-  known?: (sourceMessageIds: string[]) => Promise<Set<string>>;
+  /** Stored senders for these Message-IDs, so only new mail (or mail saved without the sender's name) is downloaded. */
+  known?: (sourceMessageIds: string[]) => Promise<Map<string, string>>;
   /** When nothing new arrived, wait up to this long for new INBOX mail (IMAP IDLE) and fetch it. */
   waitMs?: number;
 }
@@ -184,9 +184,10 @@ async function fetchRecent(client: ImapFlow, path: string, mailbox: string, limi
   // Headers and sizes first. They are small, so the stream never waits on our work.
   const fetched: FetchMessageObject[] = [];
   for await (const item of client.fetch(`${first}:*`, { uid: true, envelope: true, internalDate: true, size: true })) fetched.push(item);
-  const stored = known ? await known(fetched.map((item) => messageIdOf(item, mailbox))) : new Set<string>();
-  // Newest first, so a sync that is cut short keeps the most recent mail.
-  const items = fetched.filter((item) => !stored.has(messageIdOf(item, mailbox))).sort((a, b) => b.uid - a.uid);
+  const stored = known ? await known(fetched.map((item) => messageIdOf(item, mailbox))) : new Map<string, string>();
+  // New mail, plus mail saved before senders' names were kept: downloading it again adds the
+  // name and re-checks the verified badge. Newest first, so a sync cut short keeps recent mail.
+  const items = fetched.filter((item) => stored.get(messageIdOf(item, mailbox)) !== senderOf(item)).sort((a, b) => b.uid - a.uid);
   for (const batch of batches(items)) {
     const wanted = batch.filter((item) => (item.size ?? 0) <= maxSourceBytes).map((item) => item.uid);
     const sources = new Map<number, Buffer>();
@@ -227,6 +228,10 @@ function messageIdOf(item: FetchMessageObject, mailbox: string): string {
   return item.envelope?.messageId ?? `imap-${mailbox}-${item.uid}`;
 }
 
+function senderOf(item: FetchMessageObject): string {
+  return item.envelope?.from?.map(formatAddress).filter(Boolean).join(', ') ?? '';
+}
+
 /** "Name <address>" when the sender gave a name, so chats show "Coursera", not the address. */
 function formatAddress({ name, address }: { name?: string; address?: string }): string {
   const display = name?.replace(/["<>\r\n]/g, '').trim();
@@ -241,7 +246,7 @@ async function toSyncedMessage(item: FetchMessageObject, source: Buffer | undefi
   return {
     sourceMessageId: messageIdOf(item, mailbox),
     mailbox, subject: item.envelope?.subject ?? '',
-    from: item.envelope?.from?.map(formatAddress).filter(Boolean).join(', ') ?? '',
+    from: senderOf(item),
     to: item.envelope?.to?.map((address) => address.address ?? address.name ?? '').filter(Boolean) ?? [],
     sentAt: new Date(item.envelope?.date ?? item.internalDate ?? Date.now()).toISOString(),
     text: parsed?.text?.slice(0, 50_000) ?? '',

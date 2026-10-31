@@ -10,6 +10,7 @@ import { decryptSecret, encryptSecret } from './crypto.js';
 import { createSignedKeyRequest, FarcasterSignerEnv, farcasterPublishingConfigured, forwardSignedMessage, parseEd25519PublicKey } from './farcasterSigner.js';
 import { UserFacingError } from './errors.js';
 import { syncImap, testImap } from './imap.js';
+import { findSenderIcon, isIconDomain } from './senderIcons.js';
 import { resolveMailHost } from './networkSafety.js';
 import { handleAgentRequest, isAgentPath } from './agentApi.js';
 import { handlePublicApiRequest, isPublicApiPath } from './publicApi.js';
@@ -62,6 +63,29 @@ const sendSchema = z.object({
   inReplyTo: z.string().max(998).refine((value) => !/[\r\n]/.test(value)).optional(),
 });
 
+/** Icons are images from other sites: never sniffed, and an SVG opened directly is sandboxed. */
+const iconHeaders = {
+  'access-control-allow-origin': '*',
+  'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+  'x-content-type-options': 'nosniff',
+};
+
+async function senderIconResponse(request: Request, domain: string, env: MailEnv): Promise<Response> {
+  if (!isIconDomain(domain)) return new Response(null, { status: 404, headers: iconHeaders });
+  const cache = typeof caches === 'undefined' ? undefined : (caches as unknown as { default: Cache }).default;
+  const key = new Request(new URL(`/v1/sender-icons/${domain}`, request.url).toString());
+  const cached = await cache?.match(key);
+  if (cached) return cached;
+  const limiter = env.PUBLIC_API_RATE_LIMITER;
+  if (limiter && !(await limiter.limit({ key: `icon:${request.headers.get('cf-connecting-ip') ?? 'local'}` })).success) return new Response(null, { status: 429, headers: iconHeaders });
+  const icon = await findSenderIcon(domain);
+  const response = icon
+    ? new Response(new Uint8Array(icon.bytes), { headers: { ...iconHeaders, 'content-type': icon.contentType, 'cache-control': 'public, max-age=604800' } })
+    : new Response(null, { status: 404, headers: { ...iconHeaders, 'cache-control': 'public, max-age=86400' } });
+  await cache?.put(key, response.clone());
+  return response;
+}
+
 export async function handleMailRequest(request: Request, env: MailEnv): Promise<Response> {
   // Programs and AI agents: discovery, the mixed feed, search, MCP servers and the account API.
   if (isAgentPath(new URL(request.url).pathname, request.method)) return handleAgentRequest(request, env, (inner) => handleMailRequest(inner, env));
@@ -84,6 +108,10 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
       if (!env.AI) return json(503, { error: 'AI summaries aren’t available on this server.' }, headers);
       return json(200, await runSearchAssist(await readJSON(request), env), headers);
     }
+
+    // Sharp company logos for email senders (public site icons, cached; no account data).
+    const iconMatch = request.method === 'GET' && url.pathname.match(/^\/v1\/sender-icons\/([^/]+)$/);
+    if (iconMatch) return await senderIconResponse(request, iconMatch[1].toLowerCase(), env);
 
     // Unknown paths are a 404 for everyone, so agents learn a URL is wrong rather than that they need a token.
     if (!/^\/v1\/(mail-accounts|bridges|cross-posting)(\/|$)/.test(url.pathname)) return json(404, { error: 'Not found. Start at /llms.txt or /docs.' }, headers);
@@ -118,7 +146,7 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
       const messages = account.protocol === 'imap'
         ? await syncImap(input, {
           save: (batch) => repository.saveMessages(session.userId, account.id, batch),
-          known: (ids) => repository.knownMessageIds(account.id, ids),
+          known: (ids) => repository.knownSenders(account.id, ids),
           waitMs: url.searchParams.get('wait') === '1' ? mailWaitMs : undefined,
         })
         : await syncPop3(input);

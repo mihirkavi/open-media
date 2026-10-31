@@ -3,13 +3,12 @@ import test from 'node:test';
 
 import { senderIconUrls } from './senderIcons';
 
-test('prefers the verified logo, then the company site icon', () => {
-  assert.deepEqual(senderIconUrls('hello@news.vivino.com', 'https://images.vivino.com/logo.svg'), [
+test('prefers the verified logo, then the sharp company icon from the icon service', () => {
+  assert.deepEqual(senderIconUrls('hello@news.vivino.com', 'https://images.vivino.com/logo.svg', 'https://api.openmedia.site'), [
     'https://images.vivino.com/logo.svg',
-    'https://vivino.com/apple-touch-icon.png',
-    'https://www.vivino.com/apple-touch-icon.png',
-    'https://www.vivino.com/favicon.ico',
+    'https://api.openmedia.site/v1/sender-icons/vivino.com',
   ]);
+  assert.deepEqual(senderIconUrls('hello@news.vivino.com'), [], 'no blurry favicon.ico fallback without the service');
 });
 
 test('people on personal mail providers get initials, not the provider logo', () => {

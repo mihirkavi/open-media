@@ -22,7 +22,7 @@ export function correspondentKey(address: string, verified = false): { key: stri
  * people-first conversations: one per person, or one per company for company
  * mail, with both directions in order.
  */
-export function normalizeStoredEmail(messages: StoredMailMessage[]): Conversation[] {
+export function normalizeStoredEmail(messages: StoredMailMessage[], { iconService }: { iconService?: string } = {}): Conversation[] {
   const groups = new Map<string, { key: string; company?: string; items: Array<StoredMailMessage & { address: string }> }>();
   for (const message of messages) {
     const own = message.accountEmail.toLowerCase();
@@ -55,7 +55,7 @@ export function normalizeStoredEmail(messages: StoredMailMessage[]): Conversatio
       id: personId, name, initials: initialsFor(name), avatarColor: colorFor(key),
       identities: addresses.map((value) => ({ id: `mail-identity-${stableID(value)}`, personId, kind: 'email' as const, value, source, label: replyTarget.accountEmail, verifiedByUser: false })),
       ...(verified ? { verifiedDomain: verified.address.split('@')[1] } : {}),
-      avatarUrls: senderIconUrls(replyTarget.address, verified?.senderLogoUrl),
+      avatarUrls: senderIconUrls(replyTarget.address, verified?.senderLogoUrl, iconService),
     };
     return {
       id: conversationId,

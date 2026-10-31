@@ -86,13 +86,14 @@ export class SupabaseRestRepository {
     return await this.rpc<boolean>('open_media_delete_mail_account', { p_account_id: accountId });
   }
 
-  /** The given Message-IDs that are already stored for this mailbox. Empty if the lookup fails, so sync falls back to downloading. */
-  async knownMessageIds(accountId: string, sourceMessageIds: string[]): Promise<Set<string>> {
-    if (!sourceMessageIds.length) return new Set();
+  /** Stored senders for the given Message-IDs. Empty if the lookup fails, so sync falls back to downloading. */
+  async knownSenders(accountId: string, sourceMessageIds: string[]): Promise<Map<string, string>> {
+    if (!sourceMessageIds.length) return new Map();
     try {
-      return new Set(await this.rpc<string[]>('open_media_mail_known_message_ids', { p_account_id: accountId, p_source_message_ids: sourceMessageIds.slice(0, 200) }));
+      const rows = await this.rpc<Array<{ source_message_id: string; sender: string }>>('open_media_mail_known_senders', { p_account_id: accountId, p_source_message_ids: sourceMessageIds.slice(0, 200) });
+      return new Map(rows.map((row) => [row.source_message_id, row.sender]));
     } catch {
-      return new Set();
+      return new Map();
     }
   }
 
