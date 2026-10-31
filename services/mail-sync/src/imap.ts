@@ -4,7 +4,7 @@ import { simpleParser } from 'mailparser';
 import { UserFacingError } from './errors.js';
 import { collectAttachments, collectRemoteImages } from './mailMedia.js';
 import { verifySender } from './senderVerification.js';
-import { MailAccountInput, SyncedMessage } from './types.js';
+import { MailAccountInput, StoredPeople, SyncedMessage } from './types.js';
 
 function clientFor(input: MailAccountInput): ImapFlow {
   const client = new ImapFlow({
@@ -94,8 +94,8 @@ export type SaveBatch = (messages: SyncedMessage[]) => Promise<void>;
 export interface SyncOptions {
   limits?: { INBOX: number; Sent: number };
   save?: SaveBatch;
-  /** Stored senders for these Message-IDs, so only new mail (or mail saved without the sender's name) is downloaded. */
-  known?: (sourceMessageIds: string[]) => Promise<Map<string, string>>;
+  /** Stored sender and recipients for these Message-IDs, so only new mail (or mail saved before names and Cc were kept) is downloaded. */
+  known?: (sourceMessageIds: string[]) => Promise<Map<string, StoredPeople>>;
   /** When nothing new arrived, wait up to this long for new INBOX mail (IMAP IDLE) and fetch it. */
   waitMs?: number;
 }
@@ -184,10 +184,10 @@ async function fetchRecent(client: ImapFlow, path: string, mailbox: string, limi
   // Headers and sizes first. They are small, so the stream never waits on our work.
   const fetched: FetchMessageObject[] = [];
   for await (const item of client.fetch(`${first}:*`, { uid: true, envelope: true, internalDate: true, size: true })) fetched.push(item);
-  const stored = known ? await known(fetched.map((item) => messageIdOf(item, mailbox))) : new Map<string, string>();
-  // New mail, plus mail saved before senders' names were kept: downloading it again adds the
-  // name and re-checks the verified badge. Newest first, so a sync cut short keeps recent mail.
-  const items = fetched.filter((item) => stored.get(messageIdOf(item, mailbox)) !== senderOf(item)).sort((a, b) => b.uid - a.uid);
+  const stored = known ? await known(fetched.map((item) => messageIdOf(item, mailbox))) : new Map<string, StoredPeople>();
+  // New mail, plus mail saved before names and Cc were kept: downloading it again adds them and
+  // re-checks the verified badge. Newest first, so a sync cut short keeps recent mail.
+  const items = fetched.filter((item) => !samePeople(stored.get(messageIdOf(item, mailbox)), item)).sort((a, b) => b.uid - a.uid);
   for (const batch of batches(items)) {
     const wanted = batch.filter((item) => (item.size ?? 0) <= maxSourceBytes).map((item) => item.uid);
     const sources = new Map<number, Buffer>();
@@ -232,6 +232,17 @@ function senderOf(item: FetchMessageObject): string {
   return item.envelope?.from?.map(formatAddress).filter(Boolean).join(', ') ?? '';
 }
 
+/** To, then Cc: everyone in the conversation, so mail with several people becomes a group. */
+function recipientsOf(item: FetchMessageObject): string[] {
+  return [...(item.envelope?.to ?? []), ...(item.envelope?.cc ?? [])].map(formatAddress).filter(Boolean);
+}
+
+function samePeople(stored: StoredPeople | undefined, item: FetchMessageObject): boolean {
+  if (!stored || stored.sender !== senderOf(item)) return false;
+  const recipients = recipientsOf(item);
+  return stored.recipients.length === recipients.length && stored.recipients.every((recipient, index) => recipient === recipients[index]);
+}
+
 /** "Name <address>" when the sender gave a name, so chats show "Coursera", not the address. */
 function formatAddress({ name, address }: { name?: string; address?: string }): string {
   const display = name?.replace(/["<>\r\n]/g, '').trim();
@@ -247,7 +258,7 @@ async function toSyncedMessage(item: FetchMessageObject, source: Buffer | undefi
     sourceMessageId: messageIdOf(item, mailbox),
     mailbox, subject: item.envelope?.subject ?? '',
     from: senderOf(item),
-    to: item.envelope?.to?.map((address) => address.address ?? address.name ?? '').filter(Boolean) ?? [],
+    to: recipientsOf(item),
     sentAt: new Date(item.envelope?.date ?? item.internalDate ?? Date.now()).toISOString(),
     text: parsed?.text?.slice(0, 50_000) ?? '',
     senderVerified: brand.verified,

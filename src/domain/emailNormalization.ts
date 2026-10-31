@@ -19,56 +19,88 @@ export function correspondentKey(address: string, verified = false): { key: stri
 
 /**
  * Turns stored email (inbound and sent, across every connected mailbox) into
- * people-first conversations: one per person, or one per company for company
- * mail, with both directions in order.
+ * people-first conversations: one per person, one per company for company
+ * mail, and one group per set of people when an email includes several (To and
+ * Cc), with both directions in order.
  */
 export function normalizeStoredEmail(messages: StoredMailMessage[], { iconService }: { iconService?: string } = {}): Conversation[] {
-  const groups = new Map<string, { key: string; company?: string; items: Array<StoredMailMessage & { address: string }> }>();
+  const own = ownAddresses(messages);
+  const names = knownNames(messages);
+  const groups = new Map<string, { key: string; company?: string; people: string[]; items: Array<StoredMailMessage & { address: string }> }>();
   for (const message of messages) {
-    const own = message.accountEmail.toLowerCase();
-    const outbound = extractEmail(message.from) === own;
-    const address = outbound
-      ? extractEmail(message.to.find((recipient) => extractEmail(recipient) !== own) ?? message.to[0] ?? '') || 'unknown-recipient'
-      : extractEmail(message.from) || message.from || 'unknown-sender';
-    const { key, company } = correspondentKey(address, Boolean(message.senderVerified));
-    const group = groups.get(key) ?? { key, company, items: [] };
-    group.items.push({ ...message, address });
-    groups.set(key, group);
+    const outbound = own.has(extractEmail(message.from));
+    const people = othersIn(message, own);
+    // A group is everyone else on the email; a direct chat is the one other person (or company).
+    const group = people.length > 1;
+    const address = (outbound ? people[0] : extractEmail(message.from) || message.from) || (outbound ? 'unknown-recipient' : 'unknown-sender');
+    const { key, company } = group ? { key: groupKey(people), company: undefined } : correspondentKey(address, Boolean(message.senderVerified));
+    const entry = groups.get(key) ?? { key, company, people: group ? people : [], items: [] };
+    entry.items.push({ ...message, address });
+    groups.set(key, entry);
   }
 
-  return [...groups.values()].map(({ key, company, items }) => {
+  return [...groups.values()].map(({ key, company, people, items }) => {
     const unique = [...new Map(items.map((item) => [`${item.accountId}:${item.sourceMessageId}`, item])).values()];
     const ordered = unique.sort((a, b) => Date.parse(a.sentAt) - Date.parse(b.sentAt));
-    const inboundItems = ordered.filter((item) => extractEmail(item.from) !== item.accountEmail.toLowerCase());
+    const isOutbound = (item: StoredMailMessage) => own.has(extractEmail(item.from));
+    const inboundItems = ordered.filter((item) => !isOutbound(item));
     const latestInbound = inboundItems.at(-1);
     const latest = ordered.at(-1)!;
     const replyTarget = latestInbound ?? latest;
-    const verified = [...inboundItems].reverse().find((item) => item.senderVerified);
-    // The newest name the sender gave; mail stored as a bare address falls back to the company or address.
-    const givenName = [...inboundItems].reverse().map((item) => extractName(item.from)).find(Boolean);
-    const name = givenName || (company ? brandName(company) : replyTarget.address);
     const source: MessageSource = /@(icloud|me|mac)\.com$/i.test(replyTarget.accountEmail) ? 'icloud' : /@(gmail|googlemail)\.com$/i.test(replyTarget.accountEmail) ? 'gmail' : 'imap';
-    const personId = `mail-person-${stableID(key)}`;
     const conversationId = `mail-conversation-${stableID(key)}`;
-    const addresses = [...new Set(ordered.map((item) => item.address))];
-    const person: Person = {
-      id: personId, name, initials: initialsFor(name), avatarColor: colorFor(key),
-      identities: addresses.map((value) => ({ id: `mail-identity-${stableID(value)}`, personId, kind: 'email' as const, value, source, label: replyTarget.accountEmail, verifiedByUser: false })),
-      ...(verified ? { verifiedDomain: verified.address.split('@')[1] } : {}),
-      avatarUrls: senderIconUrls(replyTarget.address, verified?.senderLogoUrl, iconService),
-    };
+    const identity = (personId: string, value: string) => ({ id: `mail-identity-${stableID(value)}`, personId, kind: 'email' as const, value, source, label: replyTarget.accountEmail, verifiedByUser: false });
+
+    let participants: Person[];
+    let personFor: (address: string) => string;
+    if (people.length) {
+      participants = people.map((address) => {
+        const personId = personIdFor(address);
+        const verified = [...inboundItems].reverse().find((item) => item.address === address && item.senderVerified);
+        const name = names.get(address) || address;
+        return {
+          id: personId, name, initials: initialsFor(name), avatarColor: colorFor(address), identities: [identity(personId, address)],
+          ...(verified ? { verifiedDomain: address.split('@')[1] } : {}),
+          avatarUrls: senderIconUrls(address, verified?.senderLogoUrl, iconService),
+        };
+      });
+      // A stable order, so the group's name doesn't change with whoever wrote last.
+      participants.sort((first, second) => first.name.localeCompare(second.name));
+      personFor = personIdFor;
+    } else {
+      const verified = [...inboundItems].reverse().find((item) => item.senderVerified);
+      // The newest name the sender gave; mail stored as a bare address falls back to the company or address.
+      const givenName = [...inboundItems].reverse().map((item) => extractName(item.from)).find(Boolean) || names.get(replyTarget.address);
+      const name = givenName || (company ? brandName(company) : replyTarget.address);
+      const personId = `mail-person-${stableID(key)}`;
+      participants = [{
+        id: personId, name, initials: initialsFor(name), avatarColor: colorFor(key),
+        identities: [...new Set(ordered.map((item) => item.address))].map((value) => identity(personId, value)),
+        ...(verified ? { verifiedDomain: verified.address.split('@')[1] } : {}),
+        avatarUrls: senderIconUrls(replyTarget.address, verified?.senderLogoUrl, iconService),
+      }];
+      personFor = () => personId;
+    }
+    const byId = new Map(participants.map((person) => [person.id, person]));
+    const latestText = emailPreview(latest.text, '') || attachmentPreview(latest);
+    // In a group, the preview says who wrote last, like iMessage.
+    const latestAuthor = people.length && !isOutbound(latest) ? byId.get(personFor(extractEmail(latest.from)))?.name.split(' ')[0] : undefined;
     return {
       id: conversationId,
-      participants: [person], sourceSummary: [source], lastMessageAt: latest.sentAt,
-      preview: emailPreview(latest.text, '') || attachmentPreview(latest), unreadCount: 0, labels: [],
-      email: { accountId: replyTarget.accountId, accountEmail: replyTarget.accountEmail, address: replyTarget.address, latestSubject: replyTarget.subject, latestMessageId: replyTarget.sourceMessageId },
+      participants, sourceSummary: [source], lastMessageAt: latest.sentAt,
+      ...(people.length ? { groupTitle: groupTitle(participants) } : {}),
+      preview: latestAuthor ? `${latestAuthor}: ${latestText}` : latestText, unreadCount: 0, labels: [],
+      email: {
+        accountId: replyTarget.accountId, accountEmail: replyTarget.accountEmail, address: replyTarget.address, latestSubject: replyTarget.subject, latestMessageId: replyTarget.sourceMessageId,
+        ...(people.length ? { recipients: people } : {}),
+      },
       messages: linkReplies(ordered.map((message) => {
-        const outbound = extractEmail(message.from) === message.accountEmail.toLowerCase();
-        const identityId = `mail-identity-${stableID(message.address)}`;
+        const outbound = isOutbound(message);
+        const senderPersonId = outbound ? 'me' : personFor(message.address);
         return {
           id: `mail-message-${stableID(`${message.accountId}:${message.sourceMessageId}`)}`, sourceMessageId: message.sourceMessageId,
-          conversationId, senderPersonId: outbound ? 'me' : personId, senderIdentityId: outbound ? 'me' : identityId,
-          recipientPersonIds: outbound ? [personId] : ['me'], sentAt: message.sentAt, body: message.text, source, channel: 'email' as const,
+          conversationId, senderPersonId, senderIdentityId: outbound ? 'me' : `mail-identity-${stableID(message.address)}`,
+          recipientPersonIds: outbound ? participants.map((person) => person.id) : ['me'], sentAt: message.sentAt, body: message.text, source, channel: 'email' as const,
           emailContext: { providerThreadId: message.sourceMessageId, subject: message.subject || '(No subject)', address: message.address, accountId: message.accountId, accountEmail: message.accountEmail },
           attachments: (message.attachments ?? []).map((item) => ({ name: item.filename, contentType: item.contentType, size: item.size, storagePath: item.storagePath, inline: item.inline })),
           remoteImages: message.remoteImages ?? [],
@@ -78,6 +110,61 @@ export function normalizeStoredEmail(messages: StoredMailMessage[], { iconServic
       })),
     };
   });
+}
+
+/** The conversation an email to these addresses lands in, so a new message can open it. */
+export function emailConversationId(addresses: string[]): string {
+  const people = [...new Set(addresses.map((address) => extractEmail(address)).filter(Boolean))];
+  return `mail-conversation-${stableID(people.length > 1 ? groupKey(people) : correspondentKey(people[0] ?? '').key)}`;
+}
+
+/** A subject for a new email written like a message: its first line, cut at a word. */
+export function subjectFromBody(body: string): string {
+  const line = body.trim().split('\n')[0].trim();
+  if (line.length <= 60) return line || 'Message';
+  return `${line.slice(0, 60).replace(/\s+\S*$/, '')}…`;
+}
+
+/** Every address that is you: each connected mailbox, and whoever sent your Sent mail (aliases). */
+function ownAddresses(messages: StoredMailMessage[]): Set<string> {
+  const own = new Set(messages.map((message) => message.accountEmail.toLowerCase()));
+  for (const message of messages) if (message.mailbox === 'Sent') own.add(extractEmail(message.from));
+  own.delete('');
+  return own;
+}
+
+/** Everyone else on an email, sender first, then To and Cc. */
+function othersIn(message: StoredMailMessage, own: Set<string>): string[] {
+  return [...new Set([message.from, ...message.to].map((value) => extractEmail(value)).filter((address) => address && !own.has(address)))];
+}
+
+/** The newest display name seen for each address, from senders and recipients alike. */
+function knownNames(messages: StoredMailMessage[]): Map<string, string> {
+  const names = new Map<string, string>();
+  const ordered = [...messages].sort((a, b) => Date.parse(a.sentAt) - Date.parse(b.sentAt));
+  for (const message of ordered) {
+    for (const value of [message.from, ...message.to]) {
+      const name = extractName(value);
+      if (name) names.set(extractEmail(value), name);
+    }
+  }
+  return names;
+}
+
+function groupKey(addresses: string[]): string {
+  return `group:${[...addresses].sort().join(',')}`;
+}
+
+function personIdFor(address: string): string {
+  // The same id as this person's one-to-one chat, so they are one person everywhere.
+  return `mail-person-${stableID(correspondentKey(address).key)}`;
+}
+
+/** "Ana, Bo and Cy", or "Ana, Bo and 3 others", from first names. */
+function groupTitle(people: Person[]): string {
+  const first = people.map((person) => (person.name.includes('@') ? person.name : person.name.split(' ')[0]));
+  if (first.length <= 3) return first.length === 2 ? first.join(' and ') : `${first.slice(0, -1).join(', ')} and ${first.at(-1)}`;
+  return `${first.slice(0, 2).join(', ')} and ${first.length - 2} others`;
 }
 
 /** Points each reply at the message it quotes (by Message-ID) when that message is in the same chat. */

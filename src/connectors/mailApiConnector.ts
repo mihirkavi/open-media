@@ -48,6 +48,8 @@ export interface StoredMailMessage extends SyncedMailMessage {
 
 export interface OutgoingMail {
   to: string[];
+  /** Everyone else in a group email. */
+  cc?: string[];
   subject: string;
   text: string;
   inReplyTo?: string;

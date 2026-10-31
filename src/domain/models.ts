@@ -108,6 +108,8 @@ export interface EmailThreadInfo {
   latestMessageId?: string;
   /** True when the mailbox has outgoing (SMTP) settings, so replies can be sent. */
   canSend?: boolean;
+  /** Everyone else in a group email (sender, To and Cc); replies go to all of them. */
+  recipients?: string[];
 }
 
 export interface DraftMessage {

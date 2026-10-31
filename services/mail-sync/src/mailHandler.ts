@@ -58,6 +58,7 @@ const mailPorts = new Set([993, 143, 995, 110, 465, 587, 2525]);
 const address = z.email().max(320);
 const sendSchema = z.object({
   to: z.array(address).min(1).max(10),
+  cc: z.array(address).max(20).optional(),
   subject: z.string().max(998).refine((value) => !/[\r\n]/.test(value), 'Subjects cannot contain line breaks.'),
   text: z.string().min(1).max(50_000),
   inReplyTo: z.string().max(998).refine((value) => !/[\r\n]/.test(value)).optional(),

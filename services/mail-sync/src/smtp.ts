@@ -63,6 +63,7 @@ export async function sendSmtp(
   const message = new MailComposer({
     from: account.email,
     to: mail.to,
+    ...(mail.cc?.length ? { cc: mail.cc } : {}),
     subject: mail.subject,
     text: mail.text,
     ...(mail.inReplyTo ? { inReplyTo: mail.inReplyTo, references: [mail.inReplyTo] } : {}),
@@ -87,7 +88,7 @@ export async function sendSmtp(
     mailbox: 'Sent',
     subject: mail.subject,
     from: account.email,
-    to: mail.to,
+    to: [...mail.to, ...(mail.cc ?? [])],
     sentAt: new Date().toISOString(),
     text: mail.text,
     inReplyTo: mail.inReplyTo,

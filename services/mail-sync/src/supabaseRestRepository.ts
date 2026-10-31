@@ -1,5 +1,5 @@
 import { attachmentPath } from './mailMedia.js';
-import { MailAccountInput, PublicMailAccount, StoredMailAccount, SyncedMessage } from './types.js';
+import { MailAccountInput, PublicMailAccount, StoredMailAccount, StoredPeople, SyncedMessage } from './types.js';
 
 const bucket = 'mail-attachments';
 
@@ -86,12 +86,12 @@ export class SupabaseRestRepository {
     return await this.rpc<boolean>('open_media_delete_mail_account', { p_account_id: accountId });
   }
 
-  /** Stored senders for the given Message-IDs. Empty if the lookup fails, so sync falls back to downloading. */
-  async knownSenders(accountId: string, sourceMessageIds: string[]): Promise<Map<string, string>> {
+  /** Stored sender and recipients for the given Message-IDs. Empty if the lookup fails, so sync falls back to downloading. */
+  async knownSenders(accountId: string, sourceMessageIds: string[]): Promise<Map<string, StoredPeople>> {
     if (!sourceMessageIds.length) return new Map();
     try {
-      const rows = await this.rpc<Array<{ source_message_id: string; sender: string }>>('open_media_mail_known_senders', { p_account_id: accountId, p_source_message_ids: sourceMessageIds.slice(0, 200) });
-      return new Map(rows.map((row) => [row.source_message_id, row.sender]));
+      const rows = await this.rpc<Array<{ source_message_id: string; sender: string; recipients?: string[] }>>('open_media_mail_known_senders', { p_account_id: accountId, p_source_message_ids: sourceMessageIds.slice(0, 200) });
+      return new Map(rows.map((row) => [row.source_message_id, { sender: row.sender, recipients: row.recipients ?? [] }]));
     } catch {
       return new Map();
     }

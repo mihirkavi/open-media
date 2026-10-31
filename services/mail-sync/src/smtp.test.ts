@@ -138,3 +138,12 @@ test('sending works over a real socket to a local test server', async () => {
     server.close();
   }
 });
+
+test('a group reply reaches everyone in Cc and is stored with all of them', async () => {
+  const server = fakeIcloud();
+  const sent = await sendSmtp(icloud, account, { to: ['ana@example.test'], cc: ['bo@example.test', 'cy@example.test'], subject: 'Re: Plans', text: 'Works for me' }, async () => server.socket);
+  const commands = server.state.commands;
+  for (const recipient of ['ana@example.test', 'bo@example.test', 'cy@example.test']) assert.ok(commands.includes(`RCPT TO:<${recipient}>`), recipient);
+  assert.ok(commands.includes('DATA Cc: bo@example.test, cy@example.test'));
+  assert.deepEqual(sent.to, ['ana@example.test', 'bo@example.test', 'cy@example.test']);
+});

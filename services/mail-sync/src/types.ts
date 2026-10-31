@@ -69,8 +69,16 @@ export interface MailAttachment {
   storagePath?: string;
 }
 
+/** Who a stored message is from and to, as saved ("Name <address>" where a name was given). */
+export interface StoredPeople {
+  sender: string;
+  recipients: string[];
+}
+
 export interface OutgoingMail {
   to: string[];
+  /** Everyone else in a group conversation. */
+  cc?: string[];
   subject: string;
   text: string;
   /** Message-ID being replied to, for threading in the recipient's mail client. */

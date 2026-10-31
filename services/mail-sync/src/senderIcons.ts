@@ -11,7 +11,9 @@
 export const minIconPixels = 96;
 const maxIconBytes = 300 * 1024;
 const maxPageBytes = 256 * 1024;
-const timeoutMs = 5_000;
+const timeoutMs = 4_000;
+/** A whole lookup gives up after this long; the app shows initials meanwhile. */
+const budgetMs = 9_000;
 
 type Fetch = (url: string, init?: RequestInit) => Promise<Response>;
 
@@ -33,6 +35,7 @@ export function isIconDomain(domain: string): boolean {
 
 export async function findSenderIcon(domain: string, fetchImpl: Fetch = fetch): Promise<SenderIcon | undefined> {
   if (!isIconDomain(domain)) return undefined;
+  const deadline = Date.now() + budgetMs;
   const page = await homePage(domain, fetchImpl);
   const candidates = [
     ...(page ? iconCandidates(page.html, page.url) : []),
@@ -45,6 +48,7 @@ export async function findSenderIcon(domain: string, fetchImpl: Fetch = fetch): 
   const seen = new Set<string>();
   for (const candidate of candidates.sort((a, b) => b.declared - a.declared)) {
     if (seen.has(candidate.url) || seen.size >= 6) continue;
+    if (Date.now() > deadline) break;
     seen.add(candidate.url);
     const icon = await download(candidate.url, fetchImpl);
     if (icon && (iconPixels(icon.bytes, icon.contentType) ?? 0) >= minIconPixels) return icon;

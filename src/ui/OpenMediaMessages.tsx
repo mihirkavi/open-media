@@ -27,6 +27,11 @@ interface Props {
   onSend: (conversationId: string, body: string, replyTo?: Message) => Promise<void>;
   onSearchProfiles: (query: string) => Promise<Person[]>;
   onStartConversation: (personId: string) => Promise<string>;
+  /** Sends a new email and returns the conversation it lands in. */
+  onSendNewEmail?: (addresses: string[], body: string) => Promise<string>;
+  /** The mailbox new emails are sent from, if any can send. */
+  emailFrom?: string;
+  emailContacts?: EmailContact[];
   /** Opens this conversation, e.g. after “Message” on someone's profile. */
   openConversationId?: string;
   onSetBlocked: (personId: string, blocked: boolean) => Promise<void>;
@@ -47,6 +52,9 @@ export function OpenMediaMessages({
   onSend,
   onSearchProfiles,
   onStartConversation,
+  onSendNewEmail,
+  emailFrom,
+  emailContacts = [],
   onSetBlocked,
   onReport,
   openConversationId,
@@ -72,7 +80,26 @@ export function OpenMediaMessages({
   const selected =
     conversations.find((conversation) => conversation.id === selectedId) ??
     (!compact ? filtered[0] : undefined);
-  if (compact && selected)
+  const composing = newMessageOpen && messageMode === "open_media";
+  const newMessagePanel = (
+          <NewMessagePanel
+            onClose={() => setNewMessageOpen(false)}
+            onSearch={onSearchProfiles}
+            onStart={async (personId) => {
+              const id = await onStartConversation(personId);
+              setSelectedId(id);
+              setNewMessageOpen(false);
+            }}
+            onSendEmail={onSendNewEmail ? async (addresses, body) => {
+              const id = await onSendNewEmail(addresses, body);
+              setSelectedId(id);
+              setNewMessageOpen(false);
+            } : undefined}
+            emailFrom={emailFrom}
+            emailContacts={emailContacts}
+          />
+  );
+  if (compact && selected && !composing)
     return (
       <MessageThread
         key={selected.id}
@@ -118,16 +145,8 @@ export function OpenMediaMessages({
             </View>
           )}
         </View>
-        {newMessageOpen && messageMode === "open_media" ? (
-          <NewMessagePanel
-            onClose={() => setNewMessageOpen(false)}
-            onSearch={onSearchProfiles}
-            onStart={async (personId) => {
-              const id = await onStartConversation(personId);
-              setSelectedId(id);
-              setNewMessageOpen(false);
-            }}
-          />
+        {composing && compact ? (
+          newMessagePanel
         ) : <>
         <View style={styles.search}>
           <Ionicons name="search" size={17} color={colors.textSecondary} />
@@ -207,11 +226,7 @@ export function OpenMediaMessages({
                   selected?.id === conversation.id && styles.rowActive,
                 ]}
               >
-                <Avatar
-                  initials={conversation.participants[0]?.initials ?? "OM"}
-                  imageUrls={conversation.participants[0]?.avatarUrls}
-                  size={48}
-                />
+                <ConversationAvatar people={conversation.participants} size={48} />
                 <View style={styles.rowCopy}>
                   <View style={styles.rowTitleLine}>
                     <Text numberOfLines={1} style={styles.rowTitle}>
@@ -263,7 +278,10 @@ export function OpenMediaMessages({
       </View>
       {!compact ? (
         <View style={styles.threadPane}>
-          {selected ? (
+          {composing ? (
+            // Like Messages on a Mac, a new message takes the conversation pane.
+            newMessagePanel
+          ) : selected ? (
             <MessageThread
               key={selected.id}
               conversation={selected}
@@ -296,6 +314,22 @@ function useReducedMotion(): boolean {
     return () => subscription.remove();
   }, []);
   return reduced;
+}
+
+/** The composer's height: one line, growing with the text up to six, and shrinking back. */
+function useComposerHeight(input: React.RefObject<TextInput | null>, value: string) {
+  const [inputHeight, setInputHeight] = useState(composerLineHeight);
+  const fitComposer = (height: number) => setInputHeight(Math.min(Math.max(height, composerLineHeight), composerLineHeight * 6));
+  // A web text box never reports shrinking, so measure it from zero whenever the text changes.
+  useLayoutEffect(() => {
+    const node = input.current as unknown as HTMLTextAreaElement | null;
+    if (Platform.OS !== "web" || !node?.style) return;
+    const previous = node.style.height;
+    node.style.height = "0px";
+    fitComposer(node.scrollHeight);
+    node.style.height = previous;
+  }, [value]);
+  return { inputHeight, fitComposer };
 }
 
 /** A new message rises and fades in, the way chat apps show arrivals. */
@@ -412,7 +446,9 @@ function MessageThread({
     setTimeout(() => composerInput.current?.focus(), 0);
   };
   const byId = useMemo(() => new Map(conversation.messages.map((message) => [message.id, message])), [conversation.messages]);
-  const senderLabel = (message: Message) => message.direction === "outbound" ? "You" : (otherPerson?.name ?? "Them");
+  const isGroup = conversation.participants.length > 1;
+  const senderOf = (message: Message) => conversation.participants.find((person) => person.id === message.senderPersonId) ?? otherPerson;
+  const senderLabel = (message: Message) => message.direction === "outbound" ? "You" : (senderOf(message)?.name ?? "Them");
   const deliver = async (item: PendingMessage) => {
     setPending((items) => items.map((other) => (other.id === item.id ? { ...other, failed: undefined } : other)));
     try {
@@ -441,17 +477,7 @@ function MessageThread({
   const arrives = (message: Message) =>
     !reduceMotion && !openedWith.has(message.id) && !(message.direction === "outbound" && sentBodies.has(message.body.trim()));
   const scrolledOnce = useRef(false);
-  const [inputHeight, setInputHeight] = useState(composerLineHeight);
-  const fitComposer = (height: number) => setInputHeight(Math.min(Math.max(height, composerLineHeight), composerLineHeight * 6));
-  // A web text box never reports shrinking, so measure it from zero whenever the text changes.
-  useLayoutEffect(() => {
-    const node = composerInput.current as unknown as HTMLTextAreaElement | null;
-    if (Platform.OS !== "web" || !node?.style) return;
-    const previous = node.style.height;
-    node.style.height = "0px";
-    fitComposer(node.scrollHeight);
-    node.style.height = previous;
-  }, [body]);
+  const { inputHeight, fitComposer } = useComposerHeight(composerInput, body);
   const [focused, setFocused] = useState(false);
   // On the web, Enter sends and Shift+Enter starts a new line, like other chat apps.
   const onComposerKey = (event: { nativeEvent: { key: string; shiftKey?: boolean; isComposing?: boolean }; preventDefault: () => void }) => {
@@ -476,11 +502,7 @@ function MessageThread({
         ) : null}
         <PersonLink target={threadTarget(conversation, otherPerson)} label={`Open ${conversationTitle(conversation)}’s profile`} style={styles.threadHeadingLink}>
         <View style={styles.threadHeading}>
-          <Avatar
-            initials={otherPerson?.initials ?? "OM"}
-            imageUrls={otherPerson?.avatarUrls}
-            size={44}
-          />
+          <ConversationAvatar people={conversation.participants} size={44} />
           <View style={[styles.rowTitleLine, styles.threadNameLine]}>
             <Text numberOfLines={1} style={styles.threadTitle}>
               {conversationTitle(conversation)}
@@ -543,6 +565,9 @@ function MessageThread({
                   item.groupStart && styles.groupStart,
                 ]}
               >
+                {isGroup && item.groupStart && item.message.direction === "inbound" ? (
+                  <Text numberOfLines={1} style={styles.groupSender}>{senderLabel(item.message)}</Text>
+                ) : null}
                 <ReplyableBubble
                   outbound={item.message.direction === "outbound"}
                   enabled={canSend}
@@ -780,124 +805,274 @@ function MessageThread({
 }
 
 /** Find someone on Open Media, right in the conversation list (no pop-up). */
+/** Someone you have emailed with, offered in the To field. */
+export interface EmailContact {
+  address: string;
+  name: string;
+  initials: string;
+  avatarUrls: string[];
+}
+
+const emailPattern = /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[a-z]{2,}$/i;
+
+/**
+ * New message, like iMessage: a To field that takes names, @handles and email addresses as
+ * chips, suggestions as you type, and the message box underneath. Open Media people open their
+ * chat; email recipients (one, or several for a group) get a new email from your mailbox.
+ */
 function NewMessagePanel({
   onClose,
   onSearch,
   onStart,
+  onSendEmail,
+  emailFrom,
+  emailContacts,
 }: {
   onClose: () => void;
   onSearch: (query: string) => Promise<Person[]>;
   onStart: (personId: string) => Promise<void>;
+  onSendEmail?: (addresses: string[], body: string) => Promise<void>;
+  emailFrom?: string;
+  emailContacts: EmailContact[];
 }) {
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const reduceMotion = useReducedMotion();
   const [query, setQuery] = useState("");
+  const [recipients, setRecipients] = useState<Array<{ address: string; name: string }>>([]);
   const [results, setResults] = useState<Person[]>([]);
   const [busy, setBusy] = useState(false);
+  const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const [body, setBody] = useState("");
+  const toInput = useRef<TextInput>(null);
+  const bodyInput = useRef<TextInput>(null);
+  const { inputHeight, fitComposer } = useComposerHeight(bodyInput, body);
+  const typed = query.trim().replace(/[,;]$/, "");
   useEffect(() => {
     let active = true;
     const timeout = setTimeout(() => {
-      if (query.trim().length < 2) {
+      // Open Media profiles; not for something that is clearly an email address.
+      if (typed.length < 2 || typed.includes("@") && !typed.startsWith("@")) {
         setResults([]);
         setBusy(false);
         return;
       }
       setBusy(true);
       setError("");
-      onSearch(query)
-        .then((people) => {
-          if (active) setResults(people);
-        })
-        .catch((reason) => {
-          if (active)
-            setError(
-              reason instanceof Error ? reason.message : "Search failed.",
-            );
-        })
-        .finally(() => {
-          if (active) setBusy(false);
-        });
+      onSearch(typed)
+        .then((people) => active && setResults(people))
+        .catch((reason) => active && setError(reason instanceof Error ? reason.message : "Search failed."))
+        .finally(() => active && setBusy(false));
     }, 250);
     return () => {
       active = false;
       clearTimeout(timeout);
     };
-  }, [query, onSearch]);
+  }, [typed, onSearch]);
+  const chosen = new Set(recipients.map((recipient) => recipient.address));
+  const lower = typed.toLowerCase();
+  const contacts = typed
+    ? emailContacts.filter((contact) => !chosen.has(contact.address) && (contact.address.includes(lower) || contact.name.toLowerCase().includes(lower))).slice(0, 6)
+    : [];
+  const typedAddress = emailPattern.test(typed) && !chosen.has(typed.toLowerCase()) && !contacts.some((contact) => contact.address === typed.toLowerCase()) ? typed.toLowerCase() : undefined;
+  // A typed address you've emailed before shows that person's name.
+  const addRecipient = (address: string, name = emailContacts.find((contact) => contact.address === address)?.name ?? address) => {
+    setRecipients((list) => (list.some((item) => item.address === address) ? list : [...list, { address, name }]));
+    setQuery("");
+    setError("");
+    toInput.current?.focus();
+  };
+  const onToKey = (event: { nativeEvent: { key: string }; preventDefault: () => void }) => {
+    const { key } = event.nativeEvent;
+    if ((key === "Enter" || key === "Tab") && emailPattern.test(typed)) {
+      event.preventDefault();
+      addRecipient(typed.toLowerCase());
+    } else if (key === "Enter" && contacts[0]) {
+      event.preventDefault();
+      addRecipient(contacts[0].address, contacts[0].name);
+    } else if (key === "Enter" && recipients.length) {
+      event.preventDefault();
+      bodyInput.current?.focus();
+    } else if (key === "Backspace" && !query && recipients.length) {
+      setRecipients((list) => list.slice(0, -1));
+    }
+  };
+  const send = async () => {
+    const addresses = [...recipients.map((recipient) => recipient.address), ...(typedAddress ? [typedAddress] : [])];
+    if (!addresses.length || !body.trim() || !onSendEmail || sending) return;
+    setSending(true);
+    setError("");
+    try {
+      await onSendEmail(addresses, body.trim());
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The email could not be sent.");
+      setSending(false);
+    }
+  };
+  const onBodyKey = (event: { nativeEvent: { key: string; shiftKey?: boolean; isComposing?: boolean }; preventDefault: () => void }) => {
+    const { key, shiftKey, isComposing } = event.nativeEvent;
+    if (Platform.OS === "web" && key === "Enter" && !shiftKey && !isComposing) {
+      event.preventDefault();
+      send();
+    }
+  };
+  const writing = recipients.length > 0;
+  const suggestions = Boolean(typed) && (contacts.length || typedAddress || results.length || busy);
   return (
-        <View style={styles.newPanel}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>New message</Text>
+    <View style={styles.newPanel}>
+      <View style={styles.modalHeader}>
+        <Text style={styles.modalTitle}>New message</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={onClose} style={styles.close}>
+          <Ionicons name="close" size={22} color={colors.text} />
+        </Pressable>
+      </View>
+      <Pressable accessible={false} onPress={() => toInput.current?.focus()} style={styles.toField}>
+        <Text style={styles.toLabel}>To:</Text>
+        {recipients.map((recipient) => (
+          <Appear key={recipient.address} animate={!reduceMotion} style={styles.recipientChip}>
+            <Text numberOfLines={1} style={styles.recipientName}>{recipient.name}</Text>
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Close"
-              onPress={onClose}
-              style={styles.close}
+              accessibilityLabel={`Remove ${recipient.name}`}
+              hitSlop={8}
+              onPress={() => setRecipients((list) => list.filter((item) => item.address !== recipient.address))}
             >
-              <Ionicons name="close" size={22} color={colors.text} />
+              <Ionicons name="close-circle" size={16} color={colors.textTertiary} />
             </Pressable>
-          </View>
-          <View style={styles.search}>
-            <Ionicons name="search" size={17} color={colors.textSecondary} />
-            <TextInput
-              accessibilityLabel="Find people"
-              autoCapitalize="none"
-              autoFocus
-              value={query}
-              onChangeText={setQuery}
-              placeholder="Name or @handle"
-              placeholderTextColor={colors.textTertiary}
-              style={styles.searchInput}
-            />
-          </View>
-          {busy ? (
-            <ActivityIndicator style={{ margin: 28 }} color={colors.text} />
-          ) : error ? (
-            <Text accessibilityLiveRegion="assertive" style={styles.error}>
-              {error}
-            </Text>
-          ) : (
-            <ScrollView style={styles.results}>
-              {results.map((person) => (
+          </Appear>
+        ))}
+        <TextInput
+          ref={toInput}
+          accessibilityLabel="To"
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoFocus
+          // The email keyboard on phones. Not on the web: an email-type field strips the spaces that separate addresses.
+          keyboardType={Platform.OS === "web" ? "default" : "email-address"}
+          value={query}
+          onChangeText={(value) => {
+            // An address followed by a space, comma or semicolon becomes a chip, as in Mail; this
+            // also takes several pasted addresses. Phone keyboards don't report keys, so read the text.
+            let rest = value;
+            let match: RegExpMatchArray | null;
+            const added: string[] = [];
+            while ((match = rest.match(/^\s*([^\s,;]+)[\s,;]+/)) && emailPattern.test(match[1])) {
+              added.push(match[1].toLowerCase());
+              rest = rest.slice(match[0].length);
+            }
+            added.forEach((address) => addRecipient(address));
+            setQuery(added.length ? rest.trimStart() : value);
+          }}
+          onKeyPress={onToKey}
+          placeholder={recipients.length ? "" : "Name, @handle or email"}
+          placeholderTextColor={colors.textTertiary}
+          style={styles.toInput}
+        />
+      </Pressable>
+      {suggestions ? (
+        <ScrollView keyboardShouldPersistTaps="handled" style={styles.suggestions}>
+          {typedAddress ? (
+            <Pressable accessibilityRole="button" onPress={() => addRecipient(typedAddress)} style={({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) => [styles.personRow, (hovered || pressed) && styles.rowHover]}>
+              <View style={[styles.avatar, styles.suggestionIcon]}>
+                <Ionicons name="mail-outline" size={18} color={colors.textSecondary} />
+              </View>
+              <View style={styles.rowCopy}>
+                <Text numberOfLines={1} style={styles.rowTitle}>{typedAddress}</Text>
+                <Text style={styles.preview}>{emailFrom ? `Email from ${emailFrom}` : "Email"}</Text>
+              </View>
+            </Pressable>
+          ) : null}
+          {contacts.map((contact) => (
+            <Pressable key={contact.address} accessibilityRole="button" accessibilityLabel={`Add ${contact.name}, ${contact.address}`} onPress={() => addRecipient(contact.address, contact.name)} style={({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) => [styles.personRow, (hovered || pressed) && styles.rowHover]}>
+              <Avatar initials={contact.initials} imageUrls={contact.avatarUrls} />
+              <View style={styles.rowCopy}>
+                <Text numberOfLines={1} style={styles.rowTitle}>{contact.name}</Text>
+                <Text numberOfLines={1} style={styles.preview}>{contact.address}</Text>
+              </View>
+            </Pressable>
+          ))}
+          {!writing
+            ? results.map((person) => (
                 <Pressable
                   key={person.id}
                   accessibilityRole="button"
                   accessibilityLabel={`Message ${person.name}, ${person.identities[0]?.value ?? ""}`}
-                  disabled={busy}
                   onPress={() => {
                     setBusy(true);
                     onStart(person.id)
-                      .catch((reason) =>
-                        setError(
-                          reason instanceof Error
-                            ? reason.message
-                            : "Could not start conversation.",
-                        ),
-                      )
+                      .catch((reason) => setError(reason instanceof Error ? reason.message : "Could not start conversation."))
                       .finally(() => setBusy(false));
                   }}
-                  style={styles.personRow}
+                  style={({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) => [styles.personRow, (hovered || pressed) && styles.rowHover]}
                 >
-                  <Avatar initials={person.initials} />
-                  <View>
-                    <Text style={styles.rowTitle}>{person.name}</Text>
-                    <Text style={styles.preview}>
-                      {person.identities[0]?.value}
-                    </Text>
+                  <Avatar initials={person.initials} imageUrls={person.avatarUrls} />
+                  <View style={styles.rowCopy}>
+                    <Text numberOfLines={1} style={styles.rowTitle}>{person.name}</Text>
+                    <Text numberOfLines={1} style={styles.preview}>{person.identities[0]?.value} · Open Media</Text>
                   </View>
                 </Pressable>
-              ))}
-              {query.length >= 2 && !results.length ? (
-                <Text style={styles.statusText}>
-                  No Open Media profiles found.
-                </Text>
-              ) : null}
-            </ScrollView>
-          )}
-          <Text style={styles.modalFootnote}>
-            Only people who have finished Open Media onboarding appear here.
-          </Text>
+              ))
+            : null}
+          {busy ? <ActivityIndicator style={{ margin: 18 }} color={colors.textTertiary} /> : null}
+        </ScrollView>
+      ) : (
+        <View style={styles.newMessageSpace}>
+          {error ? (
+            <Text accessibilityLiveRegion="assertive" style={styles.error}>{error}</Text>
+          ) : typed.length >= 2 && !typed.includes("@") && !busy ? (
+            <Text style={styles.statusText}>No one found. Type an email address to send an email.</Text>
+          ) : !writing ? (
+            <Text style={styles.statusText}>
+              Message someone on Open Media by name or @handle, or type an email address.{emailFrom ? "" : " Sending email needs a mailbox with outgoing mail in Settings → Connections."}
+            </Text>
+          ) : recipients.length > 1 ? (
+            <Text style={styles.statusText}>Everyone gets the same email and sees who else is on it, like a group.</Text>
+          ) : null}
         </View>
+      )}
+      {writing ? (
+        <View style={styles.composerWrap}>
+          <View style={styles.composer}>
+            <TextInput
+              ref={bodyInput}
+              accessibilityLabel="Message"
+              multiline
+              maxLength={50_000}
+              value={body}
+              onChangeText={setBody}
+              onKeyPress={onBodyKey}
+              onContentSizeChange={(event) => Platform.OS !== "web" && fitComposer(event.nativeEvent.contentSize.height)}
+              placeholder={emailFrom ? `Email from ${emailFrom}` : "Message"}
+              placeholderTextColor={colors.textTertiary}
+              style={[styles.composerInput, { height: inputHeight }]}
+            />
+            {sending ? (
+              <View style={styles.send}><ActivityIndicator size="small" color={colors.surface} /></View>
+            ) : (
+              <SendButton ready={Boolean(body.trim()) && Boolean(onSendEmail) && Boolean(emailFrom)} reduceMotion={reduceMotion} onPress={send} />
+            )}
+          </View>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/** One face for a chat with one person; two overlapping faces for a group, like iMessage. */
+function ConversationAvatar({ people, size }: { people: Person[]; size: number }) {
+  const { colors } = useOpenMediaTheme();
+  if (people.length < 2) return <Avatar initials={people[0]?.initials ?? "OM"} imageUrls={people[0]?.avatarUrls} size={size} />;
+  const small = Math.round(size * 0.66);
+  return (
+    <View accessibilityLabel={`${people.length} people`} style={{ width: size, height: size }}>
+      <View style={{ position: "absolute", top: 0, left: 0 }}>
+        <Avatar initials={people[0].initials} imageUrls={people[0].avatarUrls} size={small} />
+      </View>
+      <View style={{ position: "absolute", right: 0, bottom: 0, borderRadius: small / 2 + 2, borderWidth: 2, borderColor: colors.surface }}>
+        <Avatar initials={people[1].initials} imageUrls={people[1].avatarUrls} size={small - 2} />
+      </View>
+    </View>
   );
 }
 
@@ -914,22 +1089,22 @@ function Avatar({ initials, imageUrls = [], size = 40 }: { initials: string; ima
   useEffect(() => setIndex(0), [candidates]);
   const dimension = { width: size, height: size, borderRadius: size / 2 };
   const url = candidates[index];
-  if (url) {
-    return (
-      <View style={[styles.avatarFrame, dimension]}>
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => setLoaded(false), [url]);
+  // Initials sit underneath, so a picture that is slow or missing never leaves a blank circle.
+  return (
+    <View style={[styles.avatar, dimension, loaded && styles.avatarFrame]}>
+      {!loaded ? <Text style={[styles.avatarText, { fontSize: Math.round(size * 0.32) }]}>{initials}</Text> : null}
+      {url ? (
         <Image
           accessibilityIgnoresInvertColors
           source={{ uri: url }}
+          onLoad={() => setLoaded(true)}
           onError={() => setIndex((value) => value + 1)}
           resizeMode="cover"
-          style={dimension}
+          style={[dimension, styles.avatarPicture, !loaded && styles.avatarPictureLoading]}
         />
-      </View>
-    );
-  }
-  return (
-    <View style={[styles.avatar, dimension]}>
-      <Text style={[styles.avatarText, { fontSize: Math.round(size * 0.32) }]}>{initials}</Text>
+      ) : null}
     </View>
   );
 }
@@ -950,7 +1125,9 @@ function VerifiedBadge({ domain }: { domain: string }) {
 /** "Verified sender · coursera.org · via you@…", without repeating an address that is already the title. */
 function emailMeta(conversation: Conversation, person?: Person): string {
   const email = conversation.email!;
-  const who = person?.verifiedDomain
+  const who = conversation.participants.length > 1
+    ? `Group email · ${conversation.participants.length + 1} people`
+    : person?.verifiedDomain
     ? `Verified sender · ${person.verifiedDomain}`
     : email.address.toLowerCase() === conversationTitle(conversation).toLowerCase() ? "Email" : email.address;
   return `${who} · via ${email.accountEmail}${email.canSend ? "" : " (receive only)"}`;
@@ -1336,6 +1513,8 @@ function createStyles(colors: ThemeColors) {
     rowActive: { backgroundColor: colors.bubble },
     rowTime: { marginLeft: "auto", paddingLeft: 6, flexShrink: 0, color: colors.textTertiary, fontSize: 12, fontVariant: ["tabular-nums"] },
     avatarFrame: { overflow: "hidden", backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+    avatarPicture: { position: "absolute", top: 0, left: 0 },
+    avatarPictureLoading: { opacity: 0 },
     avatar: {
       width: 40,
       height: 40,
@@ -1407,6 +1586,7 @@ function createStyles(colors: ThemeColors) {
     messageWrap: { maxWidth: "76%", alignSelf: "flex-start", marginTop: 2 },
     outboundWrap: { alignSelf: "flex-end" },
     groupStart: { marginTop: 10 },
+    groupSender: { marginBottom: 3, marginLeft: 12, color: colors.textTertiary, fontSize: 12, fontWeight: "600" },
     bubble: {
       paddingHorizontal: 14,
       paddingVertical: 9,
@@ -1556,6 +1736,34 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.surface,
     },
     newPanel: { flex: 1, paddingTop: 4 },
+    toField: {
+      minHeight: 48,
+      marginHorizontal: 18,
+      paddingVertical: 6,
+      flexDirection: "row",
+      flexWrap: "wrap",
+      alignItems: "center",
+      gap: 6,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    toLabel: { marginRight: 2, color: colors.textSecondary, fontSize: 15 },
+    toInput: { flexGrow: 1, minWidth: 140, minHeight: 34, paddingVertical: 0, color: colors.text, fontSize: 15, outlineStyle: "none" } as object,
+    recipientChip: {
+      maxWidth: "100%",
+      height: 30,
+      paddingLeft: 11,
+      paddingRight: 7,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 5,
+      borderRadius: 15,
+      backgroundColor: colors.bubble,
+    },
+    recipientName: { flexShrink: 1, color: colors.text, fontSize: 14, fontWeight: "600" },
+    suggestions: { flex: 1, paddingTop: 6 },
+    suggestionIcon: { width: 40, height: 40, borderRadius: 20 },
+    newMessageSpace: { flex: 1, paddingHorizontal: 12, paddingTop: 8 },
     modalHeader: {
       paddingHorizontal: 18,
       marginBottom: 10,

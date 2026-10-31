@@ -42,7 +42,7 @@ export async function syncPop3(input: MailAccountInput, limit = 50): Promise<Syn
       messages.push({
         sourceMessageId: parsed.messageId ?? `pop-${index}`,
         mailbox: 'POP Inbox', subject: parsed.subject ?? '',
-        from: parsed.from?.text ?? '', to: parsed.to ? (Array.isArray(parsed.to) ? parsed.to.map((address) => address.text) : [parsed.to.text]) : [],
+        from: parsed.from?.text ?? '', to: [parsed.to, parsed.cc].flatMap((list) => (list ? (Array.isArray(list) ? list.map((address) => address.text) : [list.text]) : [])),
         sentAt: messageDate(parsed).toISOString(), text: parsed.text?.slice(0, 50_000) ?? '',
         senderVerified: brand.verified, senderLogoUrl: brand.logoUrl,
         remoteImages: collectRemoteImages(parsed.html), attachments: collectAttachments(parsed.attachments),

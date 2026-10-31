@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { StoredMailMessage } from '../connectors/mailApiConnector';
-import { correspondentKey, normalizeStoredEmail } from './emailNormalization';
+import { correspondentKey, emailConversationId, normalizeStoredEmail, subjectFromBody } from './emailNormalization';
 
 const base = { accountId: 'acct-1', accountEmail: 'me@gmail.com', mailbox: 'INBOX', to: ['me@gmail.com'] };
 const mail = (overrides: Partial<StoredMailMessage>): StoredMailMessage => ({ ...base, sourceMessageId: 'id', subject: 'Plans', from: 'Ana <ana@example.com>', sentAt: '2026-10-01T10:00:00Z', text: 'hi', ...overrides });
@@ -69,4 +69,44 @@ test('a sender stored without a name shows the company, not the address', () => 
     mail({ sourceMessageId: '<new@x>', from: 'onlinebanking@ealerts.bankofamerica.com', sentAt: '2026-10-01T10:00:00Z' }),
   ]);
   assert.equal(named.participants[0].name, 'Bank of America', 'an older message’s name is used when the newest has none');
+});
+
+test('an email with several people is a group with everyone in it', () => {
+  const conversations = normalizeStoredEmail([
+    mail({ sourceMessageId: '<g1@x>', from: '"Ana Lima" <ana@example.com>', to: ['me@gmail.com', '"Bo Chen" <bo@example.org>'], sentAt: '2026-10-01T10:00:00Z', text: 'Trip plans?' }),
+    mail({ sourceMessageId: '<g2@x>', mailbox: 'Sent', from: 'me@gmail.com', to: ['ana@example.com', 'bo@example.org'], sentAt: '2026-10-01T11:00:00Z', text: 'I am in' }),
+    mail({ sourceMessageId: '<g3@x>', from: 'Bo Chen <bo@example.org>', to: ['ana@example.com'], sentAt: '2026-10-01T12:00:00Z', text: 'Me too' }),
+    mail({ sourceMessageId: '<d1@x>', from: 'Ana Lima <ana@example.com>', sentAt: '2026-10-01T09:00:00Z', text: 'Just us' }),
+  ]);
+  const group = conversations.find((conversation) => conversation.messages.some((message) => message.sourceMessageId === '<g1@x>'))!;
+  assert.equal(group.groupTitle, 'Ana and Bo');
+  assert.deepEqual(group.participants.map((person) => person.name), ['Ana Lima', 'Bo Chen']);
+  assert.deepEqual(group.email?.recipients, ['ana@example.com', 'bo@example.org']);
+  assert.deepEqual(group.messages.map((message) => message.sourceMessageId), ['<g1@x>', '<g2@x>', '<g3@x>'], 'Bo and Ana on a thread with me are the same group');
+  assert.equal(group.preview, 'Bo: Me too', 'the preview says who wrote last');
+  assert.equal(group.messages[2].senderPersonId, group.participants[1].id);
+  const direct = conversations.find((conversation) => conversation.messages.some((message) => message.sourceMessageId === '<d1@x>'))!;
+  assert.equal(direct.participants.length, 1);
+  assert.equal(direct.participants[0].id, group.participants[0].id, 'Ana is one person in her chat and in the group');
+});
+
+test('your own aliases are never counted as another person', () => {
+  const [conversation, ...rest] = normalizeStoredEmail([
+    mail({ sourceMessageId: '<s@x>', mailbox: 'Sent', from: 'alias@mydomain.example', to: ['ana@example.com'], text: 'Hi' }),
+    mail({ sourceMessageId: '<r@x>', from: 'Ana <ana@example.com>', to: ['me@gmail.com', 'alias@mydomain.example'], text: 'Hello both of you' }),
+  ]);
+  assert.equal(rest.length, 0);
+  assert.equal(conversation.participants.length, 1);
+});
+
+test('a new email opens the conversation its recipients will be in', () => {
+  const [conversation] = normalizeStoredEmail([mail({ from: 'Ana <ana@example.com>', to: ['me@gmail.com', 'bo@example.org'] })]);
+  assert.equal(emailConversationId(['bo@example.org', 'Ana@Example.com']), conversation.id);
+  const [direct] = normalizeStoredEmail([mail({})]);
+  assert.equal(emailConversationId(['ana@example.com']), direct.id);
+});
+
+test('a new email takes its subject from the first line', () => {
+  assert.equal(subjectFromBody('Dinner Friday?\nThe new place on Valencia'), 'Dinner Friday?');
+  assert.equal(subjectFromBody('Here is a long first line that keeps going well past what fits in a subject line'), 'Here is a long first line that keeps going well past what…');
 });

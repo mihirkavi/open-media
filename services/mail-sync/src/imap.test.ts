@@ -65,7 +65,7 @@ test('IMAP sign-in finishes when nextTick runs as a microtask, as on Cloudflare 
  * `withAttachment` adds a small file to each message; `reportedSize` overrides RFC822.SIZE.
  * IDLE is supported, and `deliver()` adds a message and tells idling clients, like new mail.
  */
-async function fakeMailbox({ count, dropAfterFetches, hangOnLogout = false, withAttachment = false, reportedSize }: { count: number; dropAfterFetches?: number; hangOnLogout?: boolean; withAttachment?: boolean; reportedSize?: number }) {
+async function fakeMailbox({ count, dropAfterFetches, hangOnLogout = false, withAttachment = false, reportedSize, withCc = false }: { count: number; dropAfterFetches?: number; hangOnLogout?: boolean; withAttachment?: boolean; reportedSize?: number; withCc?: boolean }) {
   const sockets = new Set<Socket>();
   const fetched: string[] = [];
   const idling = new Set<Socket>();
@@ -108,7 +108,7 @@ async function fakeMailbox({ count, dropAfterFetches, hangOnLogout = false, with
           let out = '';
           for (const i of [...wanted].sort((a, b) => a - b)) {
             const body = message(i);
-            out += `* ${i} FETCH (UID ${i} RFC822.SIZE ${reportedSize ?? body.length} ENVELOPE (NIL "Test ${i}" (("Sender" NIL "s${i}" "example.test")) NIL NIL NIL NIL NIL NIL "<m${i}@example.test>")${withBody ? ` BODY[] {${body.length}}\r\n${body}` : ''})\r\n`;
+            out += `* ${i} FETCH (UID ${i} RFC822.SIZE ${reportedSize ?? body.length} ENVELOPE (NIL "Test ${i}" (("Sender" NIL "s${i}" "example.test")) NIL NIL (("Me" NIL "person" "example.test")) ${withCc ? '(("Ana Lima" NIL "ana" "example.test"))' : 'NIL'} NIL NIL "<m${i}@example.test>")${withBody ? ` BODY[] {${body.length}}\r\n${body}` : ''})\r\n`;
           }
           socket.write(`${out}${tag} OK done\r\n`);
         } else if (upper === 'LOGOUT') { if (!hangOnLogout) socket.end(`* BYE\r\n${tag} OK bye\r\n`); }
@@ -124,6 +124,9 @@ async function fakeMailbox({ count, dropAfterFetches, hangOnLogout = false, with
   const deliver = () => { count += 1; idling.forEach((socket) => socket.write(`* ${count} EXISTS\r\n`)); };
   return { input, fetched, deliver, close: () => { sockets.forEach((socket) => socket.destroy()); server.close(); } };
 }
+
+/** How the fake mailbox's message `i` is stored once synced with names. */
+const people = (i: number) => ({ sender: `"Sender" <s${i}@example.test>`, recipients: ['"Me" <person@example.test>'] });
 
 test('IMAP sync reads the newest messages, bodies in batches of ten', async () => {
   const { syncImap } = await import('./imap.js');
@@ -209,9 +212,9 @@ test('sync downloads only new mail, plus mail saved without the sender name', as
   const { syncImap } = await import('./imap.js');
   const mailbox = await fakeMailbox({ count: 30 });
   try {
-    // m30–m21 are stored with the sender's name; m20 was stored before names were kept.
-    const stored = new Map(Array.from({ length: 10 }, (_, index) => [`<m${30 - index}@example.test>`, `"Sender" <s${30 - index}@example.test>`]));
-    stored.set('<m20@example.test>', 's20@example.test');
+    // m30–m21 are stored with names; m20 was stored before names were kept.
+    const stored = new Map(Array.from({ length: 10 }, (_, index) => [`<m${30 - index}@example.test>`, people(30 - index)]));
+    stored.set('<m20@example.test>', { sender: 's20@example.test', recipients: ['person@example.test'] });
     const messages = await syncImap(mailbox.input, { limits: { INBOX: 25, Sent: 0 }, known: async (ids) => new Map(ids.filter((id) => stored.has(id)).map((id) => [id, stored.get(id)!])) });
     assert.equal(messages.length, 15);
     assert.equal(messages[0].subject, 'Test 20');
@@ -223,7 +226,7 @@ test('sync downloads only new mail, plus mail saved without the sender name', as
 test('a waiting sync returns new mail moments after it arrives, with nextTick as on Workers', async () => {
   const { syncImap } = await import('./imap.js');
   const mailbox = await fakeMailbox({ count: 3 });
-  const everything = async (ids: string[]) => new Map(ids.filter((id) => id !== '<m4@example.test>').map((id) => [id, `"Sender" <s${id.match(/\d+/)![0]}@example.test>`]));
+  const everything = async (ids: string[]) => new Map(ids.filter((id) => id !== '<m4@example.test>').map((id) => [id, people(Number(id.match(/\d+/)![0]))]));
   const nextTick = process.nextTick;
   process.nextTick = ((callback: (...args: unknown[]) => void, ...args: unknown[]) => queueMicrotask(() => callback(...args))) as typeof process.nextTick;
   try {
@@ -243,8 +246,21 @@ test('a waiting sync with no new mail answers empty when the wait ends', async (
   const mailbox = await fakeMailbox({ count: 3 });
   try {
     const started = Date.now();
-    const messages = await syncImap(mailbox.input, { limits: { INBOX: 3, Sent: 0 }, known: async (ids) => new Map(ids.map((id) => [id, `"Sender" <s${id.match(/\d+/)![0]}@example.test>`])), waitMs: 400 });
+    const messages = await syncImap(mailbox.input, { limits: { INBOX: 3, Sent: 0 }, known: async (ids) => new Map(ids.map((id) => [id, people(Number(id.match(/\d+/)![0]))])), waitMs: 400 });
     assert.deepEqual(messages, []);
     assert.ok(Date.now() - started >= 400);
+  } finally { mailbox.close(); }
+});
+
+test('Cc recipients are kept, and mail saved before Cc was kept is downloaded once more', async () => {
+  const { syncImap } = await import('./imap.js');
+  const mailbox = await fakeMailbox({ count: 2, withCc: true });
+  try {
+    const before = { sender: '"Sender" <s2@example.test>', recipients: ['person@example.test'] };
+    const after = { sender: '"Sender" <s1@example.test>', recipients: ['"Me" <person@example.test>', '"Ana Lima" <ana@example.test>'] };
+    const stored = new Map([['<m2@example.test>', before], ['<m1@example.test>', after]]);
+    const messages = await syncImap(mailbox.input, { limits: { INBOX: 2, Sent: 0 }, known: async () => stored });
+    assert.deepEqual(messages.map((message) => message.subject), ['Test 2'], 'only the message saved without Cc');
+    assert.deepEqual(messages[0].to, ['"Me" <person@example.test>', '"Ana Lima" <ana@example.test>']);
   } finally { mailbox.close(); }
 });

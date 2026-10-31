@@ -29,7 +29,10 @@ export function layoutThread(messages: Message[], now = new Date()): ThreadItem[
     }
     const subject = message.emailContext?.subject?.trim();
     const normalized = normalizeSubject(subject ?? '');
-    const showSubject = Boolean(subject) && normalized !== '' && normalized !== '(no subject)' && normalized !== lastSubject;
+    // Emails written here take their subject from the first line; don't say it twice.
+    const firstLine = message.body.trim().split('\n')[0].replace(/\s+/g, ' ').toLowerCase();
+    const repeatsBody = Boolean(normalized) && firstLine.startsWith(normalized.replace(/…$/, ''));
+    const showSubject = Boolean(subject) && normalized !== '' && normalized !== '(no subject)' && normalized !== lastSubject && !repeatsBody;
     if (normalized) lastSubject = normalized;
     items.push({
       kind: 'message',

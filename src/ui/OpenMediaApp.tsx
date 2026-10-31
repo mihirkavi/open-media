@@ -28,10 +28,10 @@ import {
 } from "../data/openMediaService";
 import { deletePost, reportPost } from "../data/postService";
 import { bridgedSourceOf, loadBridgedConversations, sendBridgedMessage } from "../connectors/bridgesConnector";
-import { normalizeStoredEmail, replySubject } from "../domain/emailNormalization";
+import { emailConversationId, normalizeStoredEmail, replySubject, subjectFromBody } from "../domain/emailNormalization";
 import { useLiveMail } from "./useLiveMail";
 import { profileHandleFromPath } from "../domain/profileFields";
-import { Conversation, Message } from "../domain/models";
+import { Conversation, Message, Person } from "../domain/models";
 import { useFeedLenses } from "./useFeedLenses";
 import { initialsFor } from "../domain/publicPosts";
 import { ThemeColors } from "../theme";
@@ -155,6 +155,8 @@ export function OpenMediaApp({
       ),
     [nativeConversations, bridgedConversations, mailConversations],
   );
+  // Mailboxes that can send, for new emails (the first one sends).
+  const [sendingMailboxes, setSendingMailboxes] = useState<Array<{ id: string; email: string }>>([]);
   const refreshMail = useCallback(async () => {
     if (messageMode !== "open_media") return;
     try {
@@ -165,6 +167,7 @@ export function OpenMediaApp({
       const sending = new Set(
         accounts.filter((account) => account.canSend).map((account) => account.id),
       );
+      setSendingMailboxes(accounts.filter((account) => account.canSend).map((account) => ({ id: account.id, email: account.email })));
       setMailConversations(
         normalizeStoredEmail(stored, { iconService: apiConfigured() ? getAPIURL() : undefined }).map((conversation) =>
           conversation.email
@@ -238,10 +241,14 @@ export function OpenMediaApp({
         (conversation) => conversation.id === conversationId,
       )?.email;
       if (email) {
-        // Replying to a specific email threads to it, from the mailbox that received it.
+        // Replying to a specific email threads to it, from the mailbox that received it. In a
+        // group, it goes to whoever wrote that email, with everyone else in Cc (reply all).
         const target = replyTo?.emailContext;
+        const others = email.recipients ?? [];
+        const primary = others.length > 1 && replyTo?.direction !== "inbound" ? email.address : target?.address ?? email.address;
         await sendMail(target?.accountId ?? email.accountId, {
-          to: [target?.address ?? email.address],
+          to: [primary],
+          ...(others.length > 1 ? { cc: others.filter((address) => address !== primary) } : {}),
           subject: replySubject(target?.subject ?? email.latestSubject),
           text: body,
           inReplyTo: replyTo?.sourceMessageId ?? email.latestMessageId,
@@ -263,6 +270,29 @@ export function OpenMediaApp({
       await refreshMessages();
     },
     [bridgedConversations, currentUserId, mailConversations, messageMode, refreshBridged, refreshMail, refreshMessages],
+  );
+  // A new email written like a message: the first line becomes the subject.
+  const sendNewEmail = useCallback(
+    async (addresses: string[], body: string) => {
+      const mailbox = sendingMailboxes[0];
+      if (!mailbox) throw new Error("Add outgoing mail (SMTP) to a mailbox in Settings → Connections to send email.");
+      await sendMail(mailbox.id, { to: addresses, subject: subjectFromBody(body), text: body });
+      await refreshMail();
+      return emailConversationId(addresses);
+    },
+    [refreshMail, sendingMailboxes],
+  );
+  // People you have emailed with, for the To field's suggestions.
+  const emailContacts = useMemo(
+    () => {
+      const seen = new Map<string, Person>();
+      for (const conversation of mailConversations) for (const person of conversation.participants) {
+        const address = person.identities.find((identity) => identity.kind === "email")?.value;
+        if (address && !seen.has(address)) seen.set(address, person);
+      }
+      return [...seen.entries()].map(([address, person]) => ({ address, name: person.name, avatarUrls: person.avatarUrls ?? [], initials: person.initials }));
+    },
+    [mailConversations],
   );
   const searchProfiles = useCallback(
     (query: string) =>
@@ -416,6 +446,9 @@ export function OpenMediaApp({
             onSend={sendMessage}
             onSearchProfiles={searchProfiles}
             onStartConversation={beginConversation}
+            onSendNewEmail={sendNewEmail}
+            emailFrom={sendingMailboxes[0]?.email}
+            emailContacts={emailContacts}
             onSetBlocked={updateBlock}
             onReport={reportConversation}
             openConversationId={openConversationId}
