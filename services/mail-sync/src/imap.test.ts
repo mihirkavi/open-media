@@ -62,11 +62,15 @@ test('IMAP sign-in finishes when nextTick runs as a microtask, as on Cloudflare 
 /**
  * A fake mailbox of `count` messages that honours FETCH ranges and items. `dropAfterFetches`
  * closes the connection after that many body FETCHes; `hangOnLogout` never answers LOGOUT.
+ * `withAttachment` adds a small file to each message; `reportedSize` overrides RFC822.SIZE.
  */
-async function fakeMailbox({ count, dropAfterFetches, hangOnLogout = false }: { count: number; dropAfterFetches?: number; hangOnLogout?: boolean }) {
+async function fakeMailbox({ count, dropAfterFetches, hangOnLogout = false, withAttachment = false, reportedSize }: { count: number; dropAfterFetches?: number; hangOnLogout?: boolean; withAttachment?: boolean; reportedSize?: number }) {
   const sockets = new Set<Socket>();
   const fetched: string[] = [];
-  const message = (i: number) => `Message-ID: <m${i}@example.test>\r\nFrom: Sender <s${i}@example.test>\r\nSubject: Test ${i}\r\n\r\nHello ${i}\r\n`;
+  const headers = (i: number) => `Message-ID: <m${i}@example.test>\r\nFrom: Sender <s${i}@example.test>\r\nSubject: Test ${i}\r\n`;
+  const message = (i: number) => withAttachment
+    ? `${headers(i)}MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=b\r\n\r\n--b\r\nContent-Type: text/plain\r\n\r\nHello ${i}\r\n--b\r\nContent-Type: application/pdf\r\nContent-Disposition: attachment; filename=file${i}.pdf\r\nContent-Transfer-Encoding: base64\r\n\r\n${Buffer.from(`file ${i}`).toString('base64')}\r\n--b--\r\n`
+    : `${headers(i)}\r\nHello ${i}\r\n`;
   const server = createServer((socket) => {
     sockets.add(socket);
     socket.write('* OK [CAPABILITY IMAP4rev1] ready\r\n');
@@ -99,7 +103,7 @@ async function fakeMailbox({ count, dropAfterFetches, hangOnLogout = false }: { 
           let out = '';
           for (const i of [...wanted].sort((a, b) => a - b)) {
             const body = message(i);
-            out += `* ${i} FETCH (UID ${i} RFC822.SIZE ${body.length} ENVELOPE (NIL "Test ${i}" (("Sender" NIL "s${i}" "example.test")) NIL NIL NIL NIL NIL NIL "<m${i}@example.test>")${withBody ? ` BODY[] {${body.length}}\r\n${body}` : ''})\r\n`;
+            out += `* ${i} FETCH (UID ${i} RFC822.SIZE ${reportedSize ?? body.length} ENVELOPE (NIL "Test ${i}" (("Sender" NIL "s${i}" "example.test")) NIL NIL NIL NIL NIL NIL "<m${i}@example.test>")${withBody ? ` BODY[] {${body.length}}\r\n${body}` : ''})\r\n`;
           }
           socket.write(`${out}${tag} OK done\r\n`);
         } else if (upper === 'LOGOUT') { if (!hangOnLogout) socket.end(`* BYE\r\n${tag} OK bye\r\n`); }
@@ -159,5 +163,38 @@ test('a server that never answers LOGOUT does not fail a finished sync', async (
     const messages = await syncImap(mailbox.input, { INBOX: 3, Sent: 0 });
     assert.equal(messages.length, 3);
     assert.ok(Date.now() - started < 6_000);
+  } finally { mailbox.close(); }
+});
+
+test('sync saves each batch before downloading the next, then lets go of the file bytes', async () => {
+  const { syncImap } = await import('./imap.js');
+  const mailbox = await fakeMailbox({ count: 25, withAttachment: true });
+  const saves: Array<{ size: number; downloadsSoFar: number; withBytes: boolean }> = [];
+  try {
+    const messages = await syncImap(mailbox.input, { INBOX: 25, Sent: 0 }, async (batch) => {
+      saves.push({ size: batch.length, downloadsSoFar: mailbox.fetched.length, withBytes: batch.every((message) => Buffer.isBuffer(message.attachments?.[0]?.content)) });
+    });
+    assert.deepEqual(saves, [{ size: 10, downloadsSoFar: 1, withBytes: true }, { size: 10, downloadsSoFar: 2, withBytes: true }, { size: 5, downloadsSoFar: 3, withBytes: true }]);
+    assert.equal(messages.length, 25);
+    assert.equal(messages[0].attachments?.[0].filename, 'file25.pdf');
+    assert.ok(messages.every((message) => message.attachments?.every((attachment) => attachment.content === undefined)), 'no bytes are kept after saving');
+  } finally { mailbox.close(); }
+});
+
+test('large messages download in smaller batches', async () => {
+  const { syncImap } = await import('./imap.js');
+  const mailbox = await fakeMailbox({ count: 5, reportedSize: 5 * 1024 * 1024 });
+  try {
+    await syncImap(mailbox.input, { INBOX: 5, Sent: 0 });
+    assert.deepEqual(mailbox.fetched, ['5,4', '3,2', '1']);
+  } finally { mailbox.close(); }
+});
+
+test('a failed save fails the sync instead of looking like a partial one', async () => {
+  const { syncImap } = await import('./imap.js');
+  const mailbox = await fakeMailbox({ count: 25 });
+  let calls = 0;
+  try {
+    await assert.rejects(syncImap(mailbox.input, { INBOX: 25, Sent: 0 }, async () => { if (++calls === 2) throw new Error('database unavailable'); }), /database unavailable/);
   } finally { mailbox.close(); }
 });

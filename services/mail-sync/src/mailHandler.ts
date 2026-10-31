@@ -9,7 +9,7 @@ import { Bridges, BridgesEnv } from './bridges.js';
 import { decryptSecret, encryptSecret } from './crypto.js';
 import { createSignedKeyRequest, FarcasterSignerEnv, farcasterPublishingConfigured, forwardSignedMessage, parseEd25519PublicKey } from './farcasterSigner.js';
 import { UserFacingError } from './errors.js';
-import { syncImap, testImap } from './imap.js';
+import { syncImap, syncLimits, testImap } from './imap.js';
 import { resolveMailHost } from './networkSafety.js';
 import { handleAgentRequest, isAgentPath } from './agentApi.js';
 import { handlePublicApiRequest, isPublicApiPath } from './publicApi.js';
@@ -111,8 +111,11 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
       const account = await repository.findAccount(session.userId, syncMatch[1]);
       if (!account) return json(404, { error: 'Mailbox not found.' }, headers);
       const input = await connectionInput({ ...account, password: decryptSecret(account.encryptedSecret, env.MAIL_CREDENTIALS_KEY) }, env);
-      const messages = account.protocol === 'imap' ? await syncImap(input) : await syncPop3(input);
-      await repository.saveMessages(session.userId, account.id, messages);
+      // IMAP saves batch by batch as it goes, so attachments never pile up in memory.
+      const messages = account.protocol === 'imap'
+        ? await syncImap(input, syncLimits, (batch) => repository.saveMessages(session.userId, account.id, batch))
+        : await syncPop3(input);
+      if (account.protocol !== 'imap') await repository.saveMessages(session.userId, account.id, messages);
       // File bytes stay on the server; clients read stored mail through the database.
   const summaries = messages.map(({ attachments, ...message }) => ({ ...message, attachmentCount: attachments?.length ?? 0 }));
   return json(200, { messages: summaries, count: messages.length, mode: account.protocol === 'imap' ? 'sync' : 'import' }, headers);

@@ -84,8 +84,17 @@ export function describeMailError(error: unknown, input: Pick<MailAccountInput, 
 export const syncLimits = { INBOX: 50, Sent: 25 };
 /** Larger messages keep their sender and subject, but their body isn't downloaded. */
 const maxSourceBytes = 10 * 1024 * 1024;
-/** Bodies are downloaded this many at a time, and parsed only once a batch has fully arrived. */
+/** Bodies are downloaded this many at a time (and at most this many bytes), and parsed only once a batch has fully arrived. */
 const sourceBatch = 10;
+const sourceBatchBytes = 12 * 1024 * 1024;
+
+/** Saves one parsed batch, attachment bytes included, before the next batch is downloaded. */
+export type SaveBatch = (messages: SyncedMessage[]) => Promise<void>;
+
+/** A save failure: unlike a dropped connection, it must not be reported as a partial sync. */
+class SaveFailed {
+  constructor(readonly cause: unknown) {}
+}
 
 /**
  * Reads the newest messages from INBOX and the Sent folder, so threads show both sides.
@@ -94,8 +103,12 @@ const sourceBatch = 10;
  * the sender checks wait on the network, and pausing ImapFlow's stream that long on Workers
  * could stall it until the socket timed out ("Connection not available"). If the connection
  * still drops partway, the messages that already arrived are kept.
+ *
+ * With `save`, each batch is stored as soon as it is parsed and its attachment bytes are then
+ * dropped. A Worker has 128 MB: holding every attachment of every message until the end ran out
+ * of memory, and Cloudflare ended the request without a reply ("Can't reach the mail service").
  */
-export async function syncImap(input: MailAccountInput, limits = syncLimits): Promise<SyncedMessage[]> {
+export async function syncImap(input: MailAccountInput, limits = syncLimits, save?: SaveBatch): Promise<SyncedMessage[]> {
   const client = clientFor(input);
   const messages: SyncedMessage[] = [];
   const started = Date.now();
@@ -107,11 +120,12 @@ export async function syncImap(input: MailAccountInput, limits = syncLimits): Pr
     const sent = folders.find((folder) => folder.specialUse === '\\Sent')?.path;
     for (const [path, mailbox, limit] of [['INBOX', 'INBOX', limits.INBOX], ...(sent ? [[sent, 'Sent', limits.Sent] as const] : [])] as const) {
       stage = mailbox;
-      await fetchRecent(client, path, mailbox, limit, messages);
+      await fetchRecent(client, path, mailbox, limit, messages, save);
     }
     logSync('done', started, messages.length);
     return messages;
   } catch (error) {
+    if (error instanceof SaveFailed) { logSync('save', started, messages.length, error.cause); throw error.cause; }
     logSync(stage, started, messages.length, error);
     if (messages.length) return messages;
     throw new UserFacingError(describeMailError(error, input, 'IMAP'));
@@ -124,7 +138,7 @@ function logSync(stage: string, started: number, count: number, error?: unknown)
   console.log(JSON.stringify({ event: 'imap_sync', stage, ms: Date.now() - started, messages: count, ...(error ? { errorCode: detail?.code, error: detail?.message?.slice(0, 120) } : {}) }));
 }
 
-async function fetchRecent(client: ImapFlow, path: string, mailbox: string, limit: number, into: SyncedMessage[]): Promise<void> {
+async function fetchRecent(client: ImapFlow, path: string, mailbox: string, limit: number, into: SyncedMessage[], save?: SaveBatch): Promise<void> {
   const opened = await client.mailboxOpen(path, { readOnly: true });
   if (!opened.exists) return;
   const first = Math.max(1, opened.exists - limit + 1);
@@ -133,8 +147,7 @@ async function fetchRecent(client: ImapFlow, path: string, mailbox: string, limi
   for await (const item of client.fetch(`${first}:*`, { uid: true, envelope: true, internalDate: true, size: true })) items.push(item);
   // Newest first, so a sync that is cut short keeps the most recent mail.
   items.sort((a, b) => b.uid - a.uid);
-  for (let index = 0; index < items.length; index += sourceBatch) {
-    const batch = items.slice(index, index + sourceBatch);
+  for (const batch of batches(items)) {
     const wanted = batch.filter((item) => (item.size ?? 0) <= maxSourceBytes).map((item) => item.uid);
     const sources = new Map<number, Buffer>();
     if (wanted.length) {
@@ -142,8 +155,32 @@ async function fetchRecent(client: ImapFlow, path: string, mailbox: string, limi
         if (item.source) sources.set(item.uid, item.source);
       }
     }
-    for (const item of batch) into.push(await toSyncedMessage(item, sources.get(item.uid), mailbox));
+    const parsed: SyncedMessage[] = [];
+    for (const item of batch) {
+      parsed.push(await toSyncedMessage(item, sources.get(item.uid), mailbox));
+      sources.delete(item.uid);
+    }
+    if (save) {
+      try { await save(parsed); } catch (error) { throw new SaveFailed(error); }
+      for (const message of parsed) message.attachments = message.attachments?.map(({ content: _content, ...metadata }) => metadata);
+    }
+    into.push(...parsed);
   }
+}
+
+/** Groups messages so each download stays under both the count and the byte budget. */
+function batches(items: FetchMessageObject[]): FetchMessageObject[][] {
+  const groups: FetchMessageObject[][] = [];
+  let current: FetchMessageObject[] = [];
+  let bytes = 0;
+  for (const item of items) {
+    const size = (item.size ?? 0) <= maxSourceBytes ? item.size ?? 0 : 0;
+    if (current.length && (current.length === sourceBatch || bytes + size > sourceBatchBytes)) { groups.push(current); current = []; bytes = 0; }
+    current.push(item);
+    bytes += size;
+  }
+  if (current.length) groups.push(current);
+  return groups;
 }
 
 async function toSyncedMessage(item: FetchMessageObject, source: Buffer | undefined, mailbox: string): Promise<SyncedMessage> {
