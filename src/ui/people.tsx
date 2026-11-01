@@ -36,6 +36,8 @@ interface PeopleValue {
   contacts?: ContactsState;
   /** Opens a conversation with an Open Media handle, when the viewer can message. */
   message?: (handle: string) => void;
+  /** Opens Search with a query, for example a #hashtag tapped in a post. */
+  search?: (query: string) => void;
 }
 
 const PeopleContext = createContext<PeopleValue | null>(null);

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Linking, Pressable, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { createClientId } from '../data/openMediaService';
 import { addPostComment, interactOnNetwork, loadPostComments, networkInteractionsDone, setPostLike, setPostReshare } from '../data/interactionService';
@@ -10,6 +10,7 @@ import { PostEngagement, SocialPost } from '../domain/posts';
 import { formatRelativeTime } from '../domain/publicPosts';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
+import { RichText } from './RichText';
 import { Text, TextInput } from './Text';
 import { useCrossPosting } from './useCrossPosting';
 
@@ -94,6 +95,24 @@ function Action({ icon, activeIcon, active, count, route, label, busy = false, e
   return <Pressable accessibilityRole={route.via === 'open' ? 'link' : 'button'} accessibilityLabel={label} accessibilityState={{ busy, ...(expanded === undefined ? { selected: active } : { expanded }) }} disabled={busy} onPress={onPress} hitSlop={6} style={({ pressed }) => [styles.action, pressed && styles.pressed]}>{content}</Pressable>;
 }
 
+/**
+ * An event's Register action, drawn like the like and reshare icons: a ticket (the metaphor event apps
+ * use for getting in) with a one-word label where the others show a count. It opens the official page,
+ * where people register themselves; Open Media can't see whether they did, so it has no filled state.
+ */
+export function RegisterAction({ url, label, short }: { url: string; label: string; short: string }) {
+  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
+  const [hovered, setHovered] = useState(false);
+  return <View style={styles.tipAnchor}>
+    {/* React Native Web drops `title`, so web gets its tooltip here; phones read the label instead. */}
+    {hovered && Platform.OS === 'web' ? <View pointerEvents="none" style={styles.tip}><Text numberOfLines={1} style={styles.tipText}>{label}</Text></View> : null}
+    <Pressable accessibilityRole="link" accessibilityLabel={label} accessibilityHint="Opens the official page" onPress={() => { Linking.openURL(url).catch(() => undefined); }} onHoverIn={() => setHovered(true)} onHoverOut={() => setHovered(false)} hitSlop={6} style={({ pressed }) => [styles.action, pressed && styles.pressed]}>
+      <Ionicons name="ticket-outline" size={17} color={hovered ? colors.text : colors.textSecondary} />
+      <Text style={[styles.actionText, hovered && styles.actionTextActive]}>{short}</Text>
+    </Pressable>
+  </View>;
+}
+
 function Comments({ post, route, signedIn, onCommented }: { post: SocialPost; route: InteractionRoute; signedIn: boolean; onCommented: () => void }) {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
   const native = route.via === 'open-media';
@@ -135,7 +154,7 @@ function Comments({ post, route, signedIn, onCommented }: { post: SocialPost; ro
     {native && comments?.length === 0 ? <Text style={styles.commentMeta}>No comments yet.</Text> : null}
     {comments?.map((comment) => <View key={comment.id} style={styles.comment}>
       <Text numberOfLines={1} style={styles.commentMeta}><Text style={styles.commentAuthor}>{comment.author.displayName}</Text> {comment.author.handle} · {formatRelativeTime(comment.createdAt)}</Text>
-      <Text selectable style={styles.commentBody}>{comment.body}</Text>
+      <RichText text={comment.body} source={post.provenance.connectorId} style={styles.commentBody} />
     </View>)}
     {!native && route.via === 'network' ? <Text style={styles.commentMeta}>Other replies are on {networks[route.network].displayName}.</Text> : null}
     {error ? <Text accessibilityLiveRegion="assertive" style={styles.error}>{error}</Text> : null}
@@ -148,9 +167,12 @@ function Comments({ post, route, signedIn, onCommented }: { post: SocialPost; ro
 }
 
 const createStyles = (colors: ThemeColors) => StyleSheet.create({
-  actions: { marginTop: 15, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 22, rowGap: 4 },
+  actions: { marginTop: 12, marginLeft: -2, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 24, rowGap: 4 },
   action: { minHeight: 32, minWidth: 32, flexDirection: 'row', alignItems: 'center', gap: 6 },
   pressed: { opacity: 0.5 },
+  tipAnchor: { position: 'relative' },
+  tip: { position: 'absolute', bottom: '100%', left: -8, marginBottom: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: colors.text, zIndex: 10, width: 'max-content' } as object,
+  tipText: { color: colors.surface, fontSize: 11, fontWeight: '600' },
   actionText: { color: colors.textSecondary, fontSize: 12 },
   actionTextActive: { color: colors.text, fontWeight: '700' },
   notice: { marginTop: 6, color: colors.textSecondary, fontSize: 12, lineHeight: 17 },
@@ -159,7 +181,7 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   comment: { gap: 2 },
   commentAuthor: { color: colors.text, fontWeight: '700' },
   commentMeta: { color: colors.textSecondary, fontSize: 12, lineHeight: 17 },
-  commentBody: { color: colors.text, fontSize: 14, lineHeight: 20 },
+  commentBody: { color: colors.text, fontSize: 15, lineHeight: 21 },
   commentField: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   commentInput: { flex: 1, minHeight: 40, paddingHorizontal: 12, borderRadius: 20, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface, color: colors.text, fontSize: 14, outlineStyle: 'none' } as object,
 });

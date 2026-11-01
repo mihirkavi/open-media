@@ -295,11 +295,16 @@ export function eventPriceText(event: Pick<PostEvent, 'free' | 'priceText'>): st
   return event.free ? 'Free' : event.priceText;
 }
 
-/** The event's one action: the official page, labelled by what a person can do there. */
-export function eventRegistration(event: Pick<PostEvent, 'availability' | 'registrationUrl' | 'sources'>): { url: string; label: string } {
+/**
+ * The event's one action: the official page, labelled by what a person can do there. `short` sits
+ * beside the ticket icon in the action row; `label` is its accessible name and web tooltip.
+ */
+export function eventRegistration(event: Pick<PostEvent, 'availability' | 'registrationUrl' | 'sources'>): { url: string; label: string; short: string } {
   const provider = providerName(event.sources[0]?.provider ?? 'events');
   const closed = event.availability === 'closed' || event.availability === 'sold_out';
-  return { url: event.registrationUrl, label: closed ? `See on ${provider}` : event.availability === 'waitlist' ? `Join waitlist on ${provider}` : `Register on ${provider}` };
+  if (closed) return { url: event.registrationUrl, label: `See on ${provider}`, short: event.availability === 'sold_out' ? 'Sold out' : 'Closed' };
+  if (event.availability === 'waitlist') return { url: event.registrationUrl, label: `Join waitlist on ${provider}`, short: 'Waitlist' };
+  return { url: event.registrationUrl, label: `Register on ${provider}`, short: 'Register' };
 }
 
 /** Date and time, place, and price on one line, e.g. "Sat, Oct 31 · 6:00 PM · 2838 Bartlett St, Oakland · Free". */

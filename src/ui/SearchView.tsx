@@ -25,9 +25,11 @@ const suggestions = ['videos about cooking today', 'ethereum on lens', 'only vid
  * Universal search: everything Open Media knows plus public posts across every network, with a
  * basic AI summary. Messages and email are matched on this device only.
  */
-export function SearchView({ posts, conversations, viewer, lenses, onNavigate, onClose }: { posts: SocialPost[]; conversations: Conversation[]; viewer?: FeedViewer; lenses?: FeedLenses; onNavigate?: (target: SearchTarget) => void; onClose?: () => void }) {
+export function SearchView({ posts, conversations, viewer, lenses, onNavigate, onClose, initialQuery = '' }: { posts: SocialPost[]; conversations: Conversation[]; viewer?: FeedViewer; lenses?: FeedLenses; onNavigate?: (target: SearchTarget) => void; onClose?: () => void; initialQuery?: string }) {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initialQuery);
+  // A hashtag tapped in a post opens Search with it filled in.
+  useEffect(() => { if (initialQuery) setQuery(initialQuery); }, [initialQuery]);
   const search = useUniversalSearch(query, posts, conversations);
   const byId = useMemo(() => new Map(search.posts.map((post) => [post.id, post])), [search.posts]);
   const hasQuery = Boolean(search.parsed.raw);

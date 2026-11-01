@@ -13,7 +13,7 @@ import { BrandMark } from './BrandMark';
 import { DevelopersPage } from './DevelopersPage';
 import { LandingPage, PublicPage } from './LandingPage';
 import { MissionPage } from './MissionPage';
-import { PeopleProvider, PersonTarget } from './people';
+import { PeopleProvider, PersonTarget, usePeople } from './people';
 import { PersonProfile } from './PersonProfile';
 import { OpenMediaApp } from './OpenMediaApp';
 import { FeedView } from './OpenMediaFeed';
@@ -158,13 +158,17 @@ function PublicHome({ onSignIn, onNavigate }: { onSignIn: () => void; onNavigate
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
   const feed = useMixedFeed();
   const lenses = useFeedLenses(undefined, 'raw');
-  const [searching, setSearching] = useState(false);
-  if (searching) return <View style={styles.screen}><SearchView posts={feed.posts} conversations={[]} lenses={lenses} onClose={() => setSearching(false)} /></View>;
-  return <View style={styles.screen}>
-    <View style={styles.publicBar}><Pressable accessibilityRole="link" accessibilityLabel={Platform.OS === 'web' ? 'Open Media home' : 'About Open Media'} onPress={() => onNavigate(Platform.OS === 'web' ? 'landing' : 'mission')}><BrandMark compact /></Pressable><View style={styles.publicActions}>{Platform.OS !== 'web' ? <Pressable accessibilityRole="button" accessibilityLabel="Our mission" onPress={() => onNavigate('mission')} style={styles.publicSearch}><Ionicons name="information-circle-outline" size={22} color={colors.text} /></Pressable> : null}<Pressable accessibilityRole="search" accessibilityLabel="Search everything" onPress={() => setSearching(true)} style={styles.publicSearch}><Ionicons name="search" size={20} color={colors.text} /></Pressable><Pressable accessibilityRole="button" onPress={onSignIn} style={styles.signInButton}><Text style={styles.signInText}>Sign in</Text></Pressable></View></View>
+  const [searching, setSearching] = useState<string | false>(false);
+  // Hashtags in signed-out posts open this screen's Search too.
+  const parent = usePeople();
+  const people = useMemo(() => parent ? { ...parent, search: (query: string) => setSearching(query) } : null, [parent]);
+  if (searching !== false) return <View style={styles.screen}><SearchView posts={feed.posts} conversations={[]} lenses={lenses} initialQuery={searching} onClose={() => setSearching(false)} /></View>;
+  const page = <View style={styles.screen}>
+    <View style={styles.publicBar}><Pressable accessibilityRole="link" accessibilityLabel={Platform.OS === 'web' ? 'Open Media home' : 'About Open Media'} onPress={() => onNavigate(Platform.OS === 'web' ? 'landing' : 'mission')}><BrandMark compact /></Pressable><View style={styles.publicActions}>{Platform.OS !== 'web' ? <Pressable accessibilityRole="button" accessibilityLabel="Our mission" onPress={() => onNavigate('mission')} style={styles.publicSearch}><Ionicons name="information-circle-outline" size={22} color={colors.text} /></Pressable> : null}<Pressable accessibilityRole="search" accessibilityLabel="Search everything" onPress={() => setSearching("")} style={styles.publicSearch}><Ionicons name="search" size={20} color={colors.text} /></Pressable><Pressable accessibilityRole="button" onPress={onSignIn} style={styles.signInButton}><Text style={styles.signInText}>Sign in</Text></Pressable></View></View>
     <FeedView lens={lenses.lens} lenses={lenses.lenses} onLensChange={lenses.choose} lensContext={lenses.context} posts={feed.posts} loading={feed.loading} error={feed.error} hasMore={feed.hasMore} onRetry={feed.refresh} onLoadMore={feed.loadMore} sources={feed.sources} loadingMore={feed.loadingMore} pendingCount={feed.pendingCount} onShowPending={feed.showPending} />
     <Pressable accessibilityRole="link" onPress={() => onNavigate('developers')} style={styles.apiLink}><Ionicons name="code-slash-outline" size={14} color={colors.textSecondary} /><Text style={styles.apiLinkText}>Open data · APIs and MCP for developers and agents</Text></Pressable>
   </View>;
+  return people ? <PeopleProvider value={people}>{page}</PeopleProvider> : page;
 }
 
 function SignInScreen({ error, onError, onBack, onMatrixDemo }: { error: string; onError: (value: string) => void; onBack: () => void; onMatrixDemo?: () => void }) {

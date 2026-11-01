@@ -53,9 +53,9 @@ test('an event becomes a Feed post that keeps its sources and says why it is the
 test('an event reads as one meta line, and its one action says what the official page offers', () => {
   assert.equal(eventMetaLine(event, 'en-US'), 'Sun, Nov 1 · 8:30 AM · Mox, San Francisco · Free');
   assert.equal(eventMetaLine({ ...event, online: true, free: undefined, priceText: '$20', availability: 'sold_out' }, 'en-US'), 'Sun, Nov 1 · 8:30 AM · Online · $20 · Sold out');
-  assert.deepEqual(eventRegistration(event), { url: 'https://lu.ma/abc', label: 'Register on Luma' });
-  assert.equal(eventRegistration({ ...event, availability: 'waitlist' }).label, 'Join waitlist on Luma');
-  assert.equal(eventRegistration({ ...event, availability: 'closed' }).label, 'See on Luma');
+  assert.deepEqual(eventRegistration(event), { url: 'https://lu.ma/abc', label: 'Register on Luma', short: 'Register' });
+  assert.deepEqual(eventRegistration({ ...event, availability: 'waitlist' }), { url: 'https://lu.ma/abc', label: 'Join waitlist on Luma', short: 'Waitlist' });
+  assert.deepEqual(eventRegistration({ ...event, availability: 'sold_out' }), { url: 'https://lu.ma/abc', label: 'See on Luma', short: 'Sold out' });
 });
 
 test('events sit among posts without pushing any out', () => {

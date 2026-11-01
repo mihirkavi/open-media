@@ -365,10 +365,13 @@ export function OpenMediaApp({
     setOpenConversationId(id);
     navigate("messages");
   };
+  const [searchQuery, setSearchQuery] = useState("");
   const people = useMemo(() => ({
     open: openPerson,
     contacts: messageMode === "open_media" ? contacts : undefined,
     message: messageMode === "open_media" ? (handle: string) => { messagePerson(handle).catch(() => undefined); } : undefined,
+    search: (query: string) => { setPerson(undefined); setSearchQuery(query); navigate("search"); },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [openPerson, contacts, messageMode]);
 
   // Create opens the writing box at the top of Feed; no pop-up.
@@ -456,6 +459,7 @@ export function OpenMediaApp({
         ) : null}
         {!person && destination === "search" ? (
           <SearchView
+            initialQuery={searchQuery}
             posts={feed.posts}
             conversations={conversations}
             viewer={viewer}
