@@ -78,22 +78,37 @@ export function publicEvent(event: CanonicalEvent, area: string): PublicEvent | 
 const descriptionBudgetMs = 4000;
 const maxDescribed = 20;
 
+/** Meetup's event pages cut the description off mid-sentence; end it on a whole word instead. */
+function finished(text: string | undefined): string | undefined {
+  const value = text?.trim();
+  if (!value || /[.!?…)"”]$/.test(value)) return value || undefined;
+  return `${value.slice(0, value.lastIndexOf(' ') > 0 ? value.lastIndexOf(' ') : value.length).replace(/[\s,;:–—-]+$/, '')}…`;
+}
+
 /**
- * Luma's nearby search has no descriptions; its single-event call does. Fetches them only for the
- * events being returned (cached for 3 hours per event), within a short time budget, so a slow or
- * failing lookup leaves that event without a description instead of delaying the Feed.
+ * Luma's nearby search has no descriptions, and Meetup's has neither descriptions nor real pictures;
+ * each event's own lookup has both. Fetches them only for the events being returned (cached per
+ * event), within a short time budget, so a slow or failing lookup leaves that event as it was
+ * instead of delaying the Feed.
  */
-export async function withLumaDescriptions(events: CanonicalEvent[], source: Pick<ProviderRouter, 'lumaEvent'>): Promise<CanonicalEvent[]> {
+export async function withEventDetails(events: CanonicalEvent[], source: Pick<ProviderRouter, 'lumaEvent' | 'readEventPage'>): Promise<CanonicalEvent[]> {
   let looked = 0;
   return Promise.all(events.map(async (event) => {
     const luma = event.sources.find((item) => item.provider === 'luma');
-    if (event.description || !luma || looked >= maxDescribed) return event;
+    // Meetup's find pages carry no description and only a generic cover; each event's own page has both.
+    const meetup = event.sources.find((item) => item.provider === 'meetup' && item.url.startsWith('https://www.meetup.com/'));
+    const image = event.imageUrl?.startsWith('https://') ? event.imageUrl : undefined;
+    const lookup = luma && !event.description ? () => source.lumaEvent(luma.providerEventId)
+      : meetup && (!event.description || !image) ? async () => { const found = await source.readEventPage(meetup.url); return found.find((item) => item.url === meetup.url) ?? found[0]; }
+      : undefined;
+    if (!lookup || looked >= maxDescribed) return event;
     looked += 1;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), descriptionBudgetMs); });
-    const detail = await Promise.race([source.lumaEvent(luma.providerEventId).catch(() => undefined), timeout]).finally(() => clearTimeout(timer));
-    const description = detail?.description?.trim();
-    return description ? { ...event, description } : event;
+    const detail = await Promise.race([lookup().catch(() => undefined), timeout]).finally(() => clearTimeout(timer));
+    const description = event.description || (meetup && !luma ? finished(detail?.description) : detail?.description?.trim()) || undefined;
+    const imageUrl = image ?? (detail?.imageUrl?.startsWith('https://') ? detail.imageUrl : undefined) ?? event.imageUrl;
+    return { ...event, ...(description ? { description } : {}), ...(imageUrl ? { imageUrl } : {}) };
   }));
 }
 
@@ -123,7 +138,7 @@ export async function upcomingEvents(env: PublicEventsEnv, options: { area?: str
     .map((event) => ({ event, shown: publicEvent(event, area.name) }))
     .filter((item) => Boolean(item.shown))
     .slice(0, Math.min(50, Math.max(1, options.limit ?? 20)));
-  const described = await withLumaDescriptions(upcoming.map((item) => item.event), router);
+  const described = await withEventDetails(upcoming.map((item) => item.event), router);
   const data = described.map((event) => publicEvent(event, area.name)).filter((event): event is PublicEvent => Boolean(event));
   return {
     area: area.name,
