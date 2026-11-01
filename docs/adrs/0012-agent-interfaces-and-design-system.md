@@ -31,8 +31,8 @@ Chosen over: a separate agent service (duplicated logic), and OAuth for account 
 
 ### Typography and details
 
-- Inter for everything people read and type, Instrument Serif for the few editorial headlines on the landing and mission pages. Both are open-licensed and bundled with the app (`@expo-google-fonts`).
-- `src/ui/Text.tsx` maps each weight to its own font file (no faux bold) and applies Inter's dynamic tracking, so large titles sit slightly tighter and small text stays open. ExtraBold is drawn as Bold for a calmer hierarchy.
+- Geist for everything people read and type (Inter until 2026-10-31; Geist reads crisper and less generic at the same sizes), Instrument Serif for the few editorial headlines on the landing and mission pages. Both are open-licensed and bundled with the app (`@expo-google-fonts`).
+- `src/ui/Text.tsx` maps each weight to its own font file (no faux bold) and applies Geist's tracking, so large titles sit slightly tighter and reading sizes keep their drawn spacing. ExtraBold is drawn as Bold for a calmer hierarchy.
 - The splash screen waits for the fonts, so text never flashes in a fallback face.
 - The logo is a transparent mark drawn dark on light and light on dark everywhere, including the launch screen.
 

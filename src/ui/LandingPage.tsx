@@ -14,7 +14,7 @@ export type PublicPage = 'landing' | 'feed' | 'mission' | 'developers';
 /**
  * The website's front page for people who aren't signed in. It explains the idea in the order the
  * Master Builder Prompt does (the promise, the three benefits, the product, the philosophy, the
- * mission) and keeps the app's black-and-white system: Inter for reading, Instrument Serif only
+ * mission) and keeps the app's black-and-white system: Geist for reading, Instrument Serif only
  * for the few headlines that carry the idea.
  */
 export function LandingPage({ onNavigate, onSignIn }: { onNavigate: (page: PublicPage) => void; onSignIn: () => void }) {

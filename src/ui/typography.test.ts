@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { interTracking } from './typeMetrics';
+import { geistTracking } from './typeMetrics';
 
-test('Inter tracking tightens large text and leaves small text open', () => {
-  assert.ok(interTracking(12) > -0.001);
-  assert.ok(interTracking(15) < 0 && interTracking(15) > -0.012);
-  assert.ok(interTracking(32) < -0.02);
+test('Geist tracking leaves reading text open and tightens large text', () => {
+  assert.equal(geistTracking(12), 0);
+  assert.equal(geistTracking(14), 0);
+  assert.ok(geistTracking(18) < 0 && geistTracking(18) > -0.006);
+  assert.ok(geistTracking(32) < -0.019);
+  assert.equal(geistTracking(72), -0.022);
 });
