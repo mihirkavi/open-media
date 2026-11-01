@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Children, Fragment, isValidElement, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import { loadMyProfileFields, loadProfessionalProfile, OpenMediaProfile, saveMyProfileFields, saveProfessionalProfile, saveProfileBasics } from '../data/openMediaService';
 import { loadPublicPerson, saveLinkedAccounts } from '../data/peopleService';
@@ -13,12 +13,23 @@ import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { Text, TextInput } from './Text';
 
-const openNetworks: { id: NetworkId; label: string; placeholder: string }[] = [
-  { id: 'farcaster', label: 'Farcaster', placeholder: 'yourname' },
-  { id: 'lens', label: 'Lens', placeholder: 'yourname' },
-  { id: 'hive', label: 'Hive', placeholder: 'yourname' },
-  { id: 'deso', label: 'DeSo', placeholder: 'yourname' },
+type IconName = keyof typeof Ionicons.glyphMap;
+
+const openNetworks: { id: NetworkId; label: string; placeholder: string; icon: IconName }[] = [
+  { id: 'farcaster', label: 'Farcaster', placeholder: 'yourname', icon: 'radio-outline' },
+  { id: 'lens', label: 'Lens', placeholder: 'yourname', icon: 'leaf-outline' },
+  { id: 'hive', label: 'Hive', placeholder: 'yourname', icon: 'cube-outline' },
+  { id: 'deso', label: 'DeSo', placeholder: 'yourname', icon: 'diamond-outline' },
 ];
+
+/** Each field's icon; social networks use their own logo where Ionicons has one. */
+const fieldIcons: Record<string, IconName> = {
+  pronouns: 'person-outline', location: 'location-outline', website: 'globe-outline', email: 'mail-outline', phone: 'call-outline',
+  linkedin: 'logo-linkedin', x: 'logo-x', instagram: 'logo-instagram', facebook: 'logo-facebook', threads: 'logo-threads', bluesky: 'cloud-outline',
+  mastodon: 'logo-mastodon', tiktok: 'logo-tiktok', youtube: 'logo-youtube', github: 'logo-github', reddit: 'logo-reddit', medium: 'logo-medium',
+  substack: 'newspaper-outline', dribbble: 'logo-dribbble', behance: 'logo-behance', twitch: 'logo-twitch', pinterest: 'logo-pinterest',
+  snapchat: 'logo-snapchat', telegram: 'paper-plane-outline', discord: 'logo-discord',
+};
 
 const groupTitles: Record<FieldGroup, string> = { about: 'About', contact: 'Contact', social: 'Social accounts' };
 const groupNotes: Record<FieldGroup, string> = {
@@ -103,7 +114,7 @@ export function EditProfile({ profile, onClose, onSaved }: { profile: OpenMediaP
       setProfessional(next.professional); setSkills(next.professional.skills.join(', ')); setLanguages(next.professional.languages.join(', '));
       setFields(editableFields(next.fields));
       setReview(undefined);
-      setImportNote(`Filled in ${chosen.length} ${chosen.length === 1 ? 'field' : 'fields'} from ${review.from}. Check them below, then Save profile.`);
+      setImportNote(`Filled in ${chosen.length} ${chosen.length === 1 ? 'field' : 'fields'} from ${review.from}. Check them below, then tap Save.`);
     } catch (reason) {
       setImportNote(reason instanceof Error ? reason.message : 'Those values don’t fit the profile.');
     }
@@ -139,96 +150,120 @@ export function EditProfile({ profile, onClose, onSaved }: { profile: OpenMediaP
   const address = publicProfileUrl(profile.handle);
   const open = (url: string) => { Linking.openURL(url).catch(() => undefined); };
   const groups: FieldGroup[] = ['about', 'contact', 'social'];
+  const shownName = name.trim() || profile.handle;
+  // Wide screens put short fields on one line: label, value, then who may see it.
+  const wide = useWindowDimensions().width >= 760;
+  const remove = (label: string, onPress: () => void) => <Text accessibilityRole="button" onPress={onPress} style={styles.remove}>{label}</Text>;
 
-  return <ScrollView ref={scroll} style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
-    <View style={styles.bar}>
+  return <View style={styles.screen}>
+    <View style={styles.bar}><View style={styles.barInner}>
       <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={onClose} style={styles.back}><Ionicons name="chevron-back" size={22} color={colors.text} /></Pressable>
       <Text accessibilityRole="header" style={styles.title}>Edit profile</Text>
-    </View>
-    <Text style={styles.note}>Your public address: <Text accessibilityRole="link" onPress={() => open(address)} style={styles.link}>{address.replace('https://', '')}</Text> · Resume: <Text accessibilityRole="link" onPress={() => open(`${address}/resume`)} style={styles.link}>{`${address.replace('https://', '')}/resume`}</Text></Text>
-    <Text style={styles.note}>Fill this in from <Text accessibilityRole="link" onPress={() => startImport('linkedin')} style={styles.link}>your LinkedIn PDF or data export</Text> or <Text accessibilityRole="link" onPress={() => startImport('website')} style={styles.link}>your website</Text>. You choose what to keep.</Text>
-    {importing ? <View style={styles.importing}><ActivityIndicator color={colors.text} /><Text style={styles.note}>{importing === 'linkedin' ? 'Reading your LinkedIn file…' : `Reading ${website.replace(/^https?:\/\//, '')}…`}</Text></View> : null}
-    {importNote ? <Text accessibilityLiveRegion="polite" style={styles.message}>{importNote}</Text> : null}
-    {review ? <Review review={review} current={{ name, bio, professional, fields }} onToggle={(id) => setReview((current) => { if (!current) return current; const chosen = new Set(current.chosen); if (chosen.has(id)) chosen.delete(id); else chosen.add(id); return { ...current, chosen }; })} onUse={useChosen} onCancel={() => setReview(undefined)} styles={styles} colors={colors} /> : null}
-    {loading ? <ActivityIndicator style={styles.loading} color={colors.text} /> : null}
-
-    <Section title="Basics" styles={styles}>
-      <Field label="Name" value={name} onChange={setName} max={80} styles={styles} colors={colors} />
-      <Field label="Bio" value={bio} onChange={setBio} max={240} multiline styles={styles} colors={colors} hint={`${bio.length}/240`} />
-    </Section>
-
-    <Section title="Work" note="Public, and used for your resume and the Work feed." styles={styles}>
-      <Field label="Headline" value={professional.headline ?? ''} onChange={(headline) => setProfessional((current) => ({ ...current, headline }))} max={120} placeholder="Product designer and design-system lead" styles={styles} colors={colors} />
-      <Text style={styles.label}>Status</Text>
-      <View style={styles.choices}>
-        {([undefined, 'work', 'hiring'] as (OpenTo | undefined)[]).map((choice) => <Pressable key={choice ?? 'none'} accessibilityRole="radio" accessibilityState={{ checked: professional.openTo === choice }} onPress={() => setProfessional((current) => ({ ...current, openTo: choice }))} style={[styles.choice, professional.openTo === choice && styles.choiceOn]}><Text style={[styles.choiceText, professional.openTo === choice && styles.choiceTextOn]}>{choice === 'work' ? 'Open to work' : choice === 'hiring' ? 'Hiring' : 'Not shown'}</Text></Pressable>)}
+      <Pressable accessibilityRole="button" accessibilityLabel="Save profile" disabled={saving || loading} onPress={save} style={[styles.save, (saving || loading) && styles.disabled]}>{saving ? <ActivityIndicator size="small" color={colors.surface} /> : <Text style={styles.saveText}>Save</Text>}</Pressable>
+    </View></View>
+    {message ? <Text accessibilityLiveRegion="polite" style={styles.banner}>{message}</Text> : null}
+    <ScrollView ref={scroll} style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+      <View style={styles.identity}>
+        {profile.avatarUrl ? <Image source={{ uri: profile.avatarUrl }} style={styles.avatar} accessibilityIgnoresInvertColors /> : <View style={styles.avatar}><Text style={styles.avatarText}>{shownName.charAt(0).toUpperCase()}</Text></View>}
+        <Text style={styles.identityName} numberOfLines={1}>{shownName}</Text>
+        <Text style={styles.identityLine} numberOfLines={1}>{professional.headline?.trim() || `@${profile.handle}`}</Text>
+        <Text style={styles.identityLinks}><Text accessibilityRole="link" onPress={() => open(address)} style={styles.link}>{address.replace('https://', '')}</Text>{'   ·   '}<Text accessibilityRole="link" onPress={() => open(`${address}/resume`)} style={styles.link}>Resume</Text></Text>
       </View>
-      <Field label="Summary" value={professional.summary ?? ''} onChange={(summary) => setProfessional((current) => ({ ...current, summary }))} max={1200} multiline styles={styles} colors={colors} />
-      <Field label="Skills" value={skills} onChange={setSkills} max={2000} placeholder="Figma, user research, prototyping" hint="Separate with commas" styles={styles} colors={colors} />
-      <Field label="Languages" value={languages} onChange={setLanguages} max={400} placeholder="English, Hindi, Marathi" hint="Separate with commas" styles={styles} colors={colors} />
-    </Section>
 
-    <Section title="Experience" styles={styles}>
-      {professional.work.map((item, index) => <View key={index} style={styles.entry}>
-        <Field label="Role" value={item.position} onChange={(position) => setWork(index, { position })} max={120} styles={styles} colors={colors} />
-        <Field label="Company" value={item.name} onChange={(company) => setWork(index, { name: company })} max={120} styles={styles} colors={colors} />
-        <View style={styles.row}>
-          <Field label="From" value={item.startDate ?? ''} onChange={(startDate) => setWork(index, { startDate })} max={7} placeholder="2022-03" styles={styles} colors={colors} grow />
-          <Field label="To" value={item.endDate ?? ''} onChange={(endDate) => setWork(index, { endDate })} max={7} placeholder="Empty if current" styles={styles} colors={colors} grow />
+      <View style={styles.importCard}>
+        <View style={styles.importIcon}><Ionicons name="sparkles-outline" size={17} color={colors.text} /></View>
+        <View style={styles.grow}>
+          <Text style={styles.importTitle}>Fill this in for you</Text>
+          <Text style={styles.footnote}>From your LinkedIn PDF or data export, or from your website. You choose what to keep.</Text>
+          <View style={styles.importActions}>
+            <Pressable accessibilityRole="link" accessibilityLabel="Fill from your LinkedIn PDF or data export" onPress={() => startImport('linkedin')} style={styles.pill}><Ionicons name="logo-linkedin" size={14} color={colors.text} /><Text style={styles.pillText}>LinkedIn</Text></Pressable>
+            <Pressable accessibilityRole="link" accessibilityLabel="Fill from your website" onPress={() => startImport('website')} style={styles.pill}><Ionicons name="globe-outline" size={14} color={colors.text} /><Text style={styles.pillText}>Website</Text></Pressable>
+          </View>
         </View>
-        <Field label="Location" value={item.location ?? ''} onChange={(place) => setWork(index, { location: place })} max={120} styles={styles} colors={colors} />
-        <Field label="What you did" value={item.summary ?? ''} onChange={(summary) => setWork(index, { summary })} max={600} multiline styles={styles} colors={colors} />
-        <Text accessibilityRole="button" onPress={() => setProfessional((current) => ({ ...current, work: current.work.filter((_, at) => at !== index) }))} style={styles.remove}>Remove this role</Text>
-      </View>)}
-      {professional.work.length < 20 ? <Text accessibilityRole="button" onPress={() => setProfessional((current) => ({ ...current, work: [...current.work, { name: '', position: '', highlights: [] }] }))} style={styles.add}>+ Add a role</Text> : null}
-    </Section>
+      </View>
+      {importing ? <View style={styles.importing}><ActivityIndicator color={colors.text} /><Text style={styles.footnote}>{importing === 'linkedin' ? 'Reading your LinkedIn file…' : `Reading ${website.replace(/^https?:\/\//, '')}…`}</Text></View> : null}
+      {importNote ? <Text accessibilityLiveRegion="polite" style={styles.message}>{importNote}</Text> : null}
+      {review ? <Review review={review} current={{ name, bio, professional, fields }} onToggle={(id) => setReview((current) => { if (!current) return current; const chosen = new Set(current.chosen); if (chosen.has(id)) chosen.delete(id); else chosen.add(id); return { ...current, chosen }; })} onUse={useChosen} onCancel={() => setReview(undefined)} styles={styles} colors={colors} /> : null}
+      {loading ? <ActivityIndicator style={styles.loading} color={colors.text} /> : null}
 
-    <Section title="Projects" note="Things you made, with a link to each. Public." styles={styles}>
-      {(professional.projects ?? []).map((item, index) => <View key={index} style={styles.entry}>
-        <Field label="Project" value={item.name} onChange={(projectName) => setProject(index, { name: projectName })} max={120} styles={styles} colors={colors} />
-        <Field label="Link" value={item.url ?? ''} onChange={(url) => setProject(index, { url })} max={300} placeholder="https://…" keyboard="url" styles={styles} colors={colors} />
-        <Field label="About it" value={item.description ?? ''} onChange={(description) => setProject(index, { description })} max={600} multiline styles={styles} colors={colors} />
-        <Text accessibilityRole="button" onPress={() => setProfessional((current) => ({ ...current, projects: (current.projects ?? []).filter((_, at) => at !== index) }))} style={styles.remove}>Remove this project</Text>
-      </View>)}
-      {(professional.projects ?? []).length < 10 ? <Text accessibilityRole="button" onPress={() => setProfessional((current) => ({ ...current, projects: [...(current.projects ?? []), { name: '' }] }))} style={styles.add}>+ Add a project</Text> : null}
-    </Section>
+      <Section title="Basics" styles={styles}>
+        <Field label="Name" value={name} onChange={setName} max={80} styles={styles} colors={colors} />
+        <Field label="Bio" value={bio} onChange={setBio} max={240} multiline placeholder="A line or two about you" styles={styles} colors={colors} accessory={<Text style={styles.count}>{`${bio.length}/240`}</Text>} />
+      </Section>
 
-    <Section title="Education" styles={styles}>
-      {professional.education.map((item, index) => <View key={index} style={styles.entry}>
-        <Field label="School" value={item.institution} onChange={(institution) => setSchool(index, { institution })} max={120} styles={styles} colors={colors} />
-        <View style={styles.row}>
-          <Field label="Degree" value={item.studyType ?? ''} onChange={(studyType) => setSchool(index, { studyType })} max={120} placeholder="B.Tech" styles={styles} colors={colors} grow />
-          <Field label="Field" value={item.area ?? ''} onChange={(area) => setSchool(index, { area })} max={120} placeholder="Computer science" styles={styles} colors={colors} grow />
+      <Section title="Work" note="Public, and used for your resume and the Work feed." styles={styles}>
+        <Field label="Headline" value={professional.headline ?? ''} onChange={(headline) => setProfessional((current) => ({ ...current, headline }))} max={120} placeholder="Product designer and design-system lead" styles={styles} colors={colors} />
+        <View style={styles.rowInline}>
+          <Text style={styles.label}>Status</Text>
+          <Segmented label="Work status" value={professional.openTo ?? 'none'} options={[['none', 'Not shown'], ['work', 'Open to work'], ['hiring', 'Hiring']]} onChange={(choice) => setProfessional((current) => ({ ...current, openTo: choice === 'none' ? undefined : choice as OpenTo }))} styles={styles} />
         </View>
-        <View style={styles.row}>
-          <Field label="From" value={item.startDate ?? ''} onChange={(startDate) => setSchool(index, { startDate })} max={7} placeholder="2016" styles={styles} colors={colors} grow />
-          <Field label="To" value={item.endDate ?? ''} onChange={(endDate) => setSchool(index, { endDate })} max={7} placeholder="2020" styles={styles} colors={colors} grow />
-        </View>
-        <Text accessibilityRole="button" onPress={() => setProfessional((current) => ({ ...current, education: current.education.filter((_, at) => at !== index) }))} style={styles.remove}>Remove this school</Text>
-      </View>)}
-      {professional.education.length < 10 ? <Text accessibilityRole="button" onPress={() => setProfessional((current) => ({ ...current, education: [...current.education, { institution: '' }] }))} style={styles.add}>+ Add a school</Text> : null}
-    </Section>
+        <Field label="Summary" value={professional.summary ?? ''} onChange={(summary) => setProfessional((current) => ({ ...current, summary }))} max={1200} multiline placeholder="What you do and what you’re looking for" styles={styles} colors={colors} />
+        <Field label="Skills" value={skills} onChange={setSkills} max={2000} placeholder="Figma, user research, prototyping" accessory={<Text style={styles.count}>Separate with commas</Text>} styles={styles} colors={colors} />
+        <Field label="Languages" value={languages} onChange={setLanguages} max={400} placeholder="English, Hindi, Marathi" accessory={<Text style={styles.count}>Separate with commas</Text>} styles={styles} colors={colors} />
+      </Section>
 
-    {groups.map((group) => <Section key={group} title={groupTitles[group]} note={groupNotes[group]} styles={styles}>
-      {fields.filter((item) => fieldDefinition(item.field)?.group === group).map((item) => {
-        const definition = fieldDefinition(item.field)!;
-        return <View key={item.field} style={styles.fieldBlock}>
-          <Field label={definition.label} value={item.value} onChange={(value) => setField(item.field, { value })} max={definition.max} placeholder={definition.placeholder} keyboard={definition.kind === 'email' ? 'email-address' : definition.kind === 'phone' ? 'phone-pad' : definition.kind === 'url' ? 'url' : 'default'} styles={styles} colors={colors} />
-          <Visibility value={item.visibility} onChange={(visibility) => setField(item.field, { visibility })} label={definition.label} styles={styles} />
-          {item.field === 'website' && /\./.test(item.value) ? <Text accessibilityRole="link" onPress={() => startImport('website')} style={styles.add}>Fill my profile from this site</Text> : null}
-          {item.field === 'linkedin' ? <Text accessibilityRole="link" onPress={() => startImport('linkedin')} style={styles.hintLink}>Fill my profile from my LinkedIn PDF or data export</Text> : null}
-        </View>;
-      })}
-    </Section>)}
+      <Section title="Experience" styles={styles}>
+        {professional.work.map((item, index) => <Entry key={index} styles={styles}>
+          <Field label="Role" value={item.position} onChange={(position) => setWork(index, { position })} max={120} placeholder="Senior designer" styles={styles} colors={colors} />
+          <Field label="Company" value={item.name} onChange={(company) => setWork(index, { name: company })} max={120} styles={styles} colors={colors} />
+          <View style={styles.pair}>
+            <Field label="From" value={item.startDate ?? ''} onChange={(startDate) => setWork(index, { startDate })} max={7} placeholder="2022-03" styles={styles} colors={colors} grow />
+            <View style={styles.pairDivider} />
+            <Field label="To" value={item.endDate ?? ''} onChange={(endDate) => setWork(index, { endDate })} max={7} placeholder="Now" styles={styles} colors={colors} grow />
+          </View>
+          <Field label="Location" value={item.location ?? ''} onChange={(place) => setWork(index, { location: place })} max={120} styles={styles} colors={colors} />
+          <Field label="What you did" value={item.summary ?? ''} onChange={(summary) => setWork(index, { summary })} max={600} multiline styles={styles} colors={colors} />
+          {remove('Remove this role', () => setProfessional((current) => ({ ...current, work: current.work.filter((_, at) => at !== index) })))}
+        </Entry>)}
+        {professional.work.length < 20 ? <AddRow label={professional.work.length ? 'Add another role' : 'Add a role'} onPress={() => setProfessional((current) => ({ ...current, work: [...current.work, { name: '', position: '', highlights: [] }] }))} styles={styles} colors={colors} /> : null}
+      </Section>
 
-    <Section title="Open networks" note="Public. Your posts there also appear on your Open Media profile." styles={styles}>
-      {openNetworks.map((network) => <Field key={network.id} label={network.label} value={networks[network.id] ?? ''} onChange={(value) => setNetworks((current) => ({ ...current, [network.id]: value }))} max={64} placeholder={network.placeholder} styles={styles} colors={colors} />)}
-    </Section>
+      <Section title="Projects" note="Things you made, with a link to each. Public." styles={styles}>
+        {(professional.projects ?? []).map((item, index) => <Entry key={index} styles={styles}>
+          <Field label="Project" value={item.name} onChange={(projectName) => setProject(index, { name: projectName })} max={120} styles={styles} colors={colors} />
+          <Field label="Link" value={item.url ?? ''} onChange={(url) => setProject(index, { url })} max={300} placeholder="https://…" keyboard="url" styles={styles} colors={colors} />
+          <Field label="About it" value={item.description ?? ''} onChange={(description) => setProject(index, { description })} max={600} multiline styles={styles} colors={colors} />
+          {remove('Remove this project', () => setProfessional((current) => ({ ...current, projects: (current.projects ?? []).filter((_, at) => at !== index) })))}
+        </Entry>)}
+        {(professional.projects ?? []).length < 10 ? <AddRow label={(professional.projects ?? []).length ? 'Add another project' : 'Add a project'} onPress={() => setProfessional((current) => ({ ...current, projects: [...(current.projects ?? []), { name: '' }] }))} styles={styles} colors={colors} /> : null}
+      </Section>
 
-    {message ? <Text accessibilityLiveRegion="polite" style={styles.message}>{message}</Text> : null}
-    <Pressable accessibilityRole="button" disabled={saving || loading} onPress={save} style={[styles.save, (saving || loading) && styles.disabled]}>{saving ? <ActivityIndicator color={colors.surface} /> : <Text style={styles.saveText}>Save profile</Text>}</Pressable>
-    <View style={{ height: Platform.OS === 'web' ? 24 : 60 }} />
-  </ScrollView>;
+      <Section title="Education" styles={styles}>
+        {professional.education.map((item, index) => <Entry key={index} styles={styles}>
+          <Field label="School" value={item.institution} onChange={(institution) => setSchool(index, { institution })} max={120} styles={styles} colors={colors} />
+          <View style={styles.pair}>
+            <Field label="Degree" value={item.studyType ?? ''} onChange={(studyType) => setSchool(index, { studyType })} max={120} placeholder="B.Tech" styles={styles} colors={colors} grow />
+            <View style={styles.pairDivider} />
+            <Field label="Field" value={item.area ?? ''} onChange={(area) => setSchool(index, { area })} max={120} placeholder="Computer science" styles={styles} colors={colors} grow />
+          </View>
+          <View style={styles.pair}>
+            <Field label="From" value={item.startDate ?? ''} onChange={(startDate) => setSchool(index, { startDate })} max={7} placeholder="2016" styles={styles} colors={colors} grow />
+            <View style={styles.pairDivider} />
+            <Field label="To" value={item.endDate ?? ''} onChange={(endDate) => setSchool(index, { endDate })} max={7} placeholder="2020" styles={styles} colors={colors} grow />
+          </View>
+          {remove('Remove this school', () => setProfessional((current) => ({ ...current, education: current.education.filter((_, at) => at !== index) })))}
+        </Entry>)}
+        {professional.education.length < 10 ? <AddRow label={professional.education.length ? 'Add another school' : 'Add a school'} onPress={() => setProfessional((current) => ({ ...current, education: [...current.education, { institution: '' }] }))} styles={styles} colors={colors} /> : null}
+      </Section>
+
+      {groups.map((group) => <Section key={group} title={groupTitles[group]} note={groupNotes[group]} styles={styles}>
+        {fields.filter((item) => fieldDefinition(item.field)?.group === group).map((item) => {
+          const definition = fieldDefinition(item.field)!;
+          return <View key={item.field}>
+            <Field icon={fieldIcons[item.field] ?? 'at-outline'} label={definition.label} value={item.value} onChange={(value) => setField(item.field, { value })} max={definition.max} placeholder={definition.placeholder} keyboard={definition.kind === 'email' ? 'email-address' : definition.kind === 'phone' ? 'phone-pad' : definition.kind === 'url' ? 'url' : 'default'} styles={styles} colors={colors} inline={wide}
+              accessory={<Segmented label={`Who can see your ${definition.label}`} value={item.visibility} options={fieldVisibilities.map((choice) => [choice, visibilityLabels[choice]])} onChange={(visibility) => setField(item.field, { visibility: visibility as FieldVisibility })} styles={styles} small />} />
+            {item.field === 'website' && /\./.test(item.value) ? <Text accessibilityRole="link" onPress={() => startImport('website')} style={[styles.inlineAction, wide && styles.inlineActionWide]}>Fill my profile from this site</Text> : null}
+            {item.field === 'linkedin' ? <Text accessibilityRole="link" onPress={() => startImport('linkedin')} style={[styles.inlineAction, wide && styles.inlineActionWide]}>Fill my profile from my LinkedIn PDF or data export</Text> : null}
+          </View>;
+        })}
+      </Section>)}
+
+      <Section title="Open networks" note="Public. Your posts there also appear on your Open Media profile." styles={styles}>
+        {openNetworks.map((network) => <Field key={network.id} icon={network.icon} label={network.label} value={networks[network.id] ?? ''} onChange={(value) => setNetworks((current) => ({ ...current, [network.id]: value }))} max={64} placeholder={network.placeholder} styles={styles} colors={colors} inline={wide} />)}
+      </Section>
+      <View style={{ height: Platform.OS === 'web' ? 32 : 72 }} />
+    </ScrollView>
+  </View>;
 }
 
 type Styles = ReturnType<typeof createStyles>;
@@ -246,8 +281,7 @@ function Review({ review, current, onToggle, onUse, onCancel, styles, colors }: 
   const { proposals, skipped } = review.result;
   return <View style={styles.section}>
     <Text accessibilityRole="header" style={styles.sectionTitle}>From {review.from}</Text>
-    <Text style={styles.note}>Choose what to use. It fills the fields below; nothing is saved until you tap Save profile.{skipped?.length ? ` Skipped because the site asked: ${skipped.length} ${skipped.length === 1 ? 'page' : 'pages'}.` : ''}</Text>
-    <View style={styles.card}>
+    <View style={styles.card}><Rows styles={styles}>
       {proposals.map((proposal) => {
         const on = review.chosen.has(proposal.id);
         const old = replaces(proposal, current);
@@ -265,69 +299,131 @@ function Review({ review, current, onToggle, onUse, onCancel, styles, colors }: 
         <Text accessibilityRole="button" onPress={onUse} style={styles.add}>{`Use ${review.chosen.size} of ${proposals.length}`}</Text>
         <Text accessibilityRole="button" onPress={onCancel} style={styles.cancel}>Not now</Text>
       </View>
-    </View>
+    </Rows></View>
+    <Text style={styles.sectionNote}>Choose what to use. It fills the fields below; nothing is saved until you tap Save.{skipped?.length ? ` Skipped because the site asked: ${skipped.length} ${skipped.length === 1 ? 'page' : 'pages'}.` : ''}</Text>
   </View>;
+}
+
+/** Rows in a grouped card, with a hairline between each (iOS's inset grouped style). */
+function Rows({ children, styles }: React.PropsWithChildren<{ styles: Styles }>) {
+  const rows = Children.toArray(children).filter(isValidElement);
+  return <>{rows.map((row, index) => <Fragment key={row.key ?? index}>{index ? <View style={styles.separator} /> : null}{row}</Fragment>)}</>;
 }
 
 function Section({ title, note, styles, children }: React.PropsWithChildren<{ title: string; note?: string; styles: Styles }>) {
-  return <View style={styles.section}><Text accessibilityRole="header" style={styles.sectionTitle}>{title}</Text>{note ? <Text style={styles.note}>{note}</Text> : null}<View style={styles.card}>{children}</View></View>;
-}
-
-function Field({ label, value, onChange, max, placeholder, hint, multiline, keyboard, grow, styles, colors }: { label: string; value: string; onChange: (value: string) => void; max: number; placeholder?: string; hint?: string; multiline?: boolean; keyboard?: 'default' | 'email-address' | 'phone-pad' | 'url'; grow?: boolean; styles: Styles; colors: ThemeColors }) {
-  return <View style={[styles.field, grow && styles.grow]}>
-    <Text style={styles.label}>{label}</Text>
-    <TextInput accessibilityLabel={label} value={value} onChangeText={onChange} maxLength={max} placeholder={placeholder} placeholderTextColor={colors.textTertiary} multiline={multiline} keyboardType={keyboard} autoCapitalize={keyboard && keyboard !== 'default' ? 'none' : 'sentences'} style={[styles.input, multiline && styles.multiline]} />
-    {hint ? <Text style={styles.hint}>{hint}</Text> : null}
+  return <View style={styles.section}>
+    <Text accessibilityRole="header" style={styles.sectionTitle}>{title}</Text>
+    <View style={styles.card}><Rows styles={styles}>{children}</Rows></View>
+    {note ? <Text style={styles.sectionNote}>{note}</Text> : null}
   </View>;
 }
 
-function Visibility({ value, onChange, label, styles }: { value: FieldVisibility; onChange: (value: FieldVisibility) => void; label: string; styles: Styles }) {
-  return <View accessibilityRole="radiogroup" accessibilityLabel={`Who can see your ${label}`} style={styles.visibility}>
-    {fieldVisibilities.map((choice) => <Pressable key={choice} accessibilityRole="radio" accessibilityState={{ checked: value === choice }} onPress={() => onChange(choice)} style={[styles.visibilityChoice, value === choice && styles.choiceOn]}><Text style={[styles.visibilityText, value === choice && styles.choiceTextOn]}>{visibilityLabels[choice]}</Text></Pressable>)}
+/** One role, project or school; its Remove line closes it off from the next. */
+function Entry({ styles, children }: React.PropsWithChildren<{ styles: Styles }>) {
+  return <View><Rows styles={styles}>{children}</Rows></View>;
+}
+
+function AddRow({ label, onPress, styles, colors }: { label: string; onPress: () => void; styles: Styles; colors: ThemeColors }) {
+  return <Pressable accessibilityRole="button" onPress={onPress} style={({ pressed }) => [styles.addRow, pressed && styles.pressed]}>
+    <Ionicons name="add-circle" size={20} color={colors.text} />
+    <Text style={styles.addText}>{label}</Text>
+  </Pressable>;
+}
+
+function Field({ label, icon, accessory, value, onChange, max, placeholder, multiline, keyboard, grow, inline, styles, colors }: { label: string; icon?: IconName; accessory?: React.ReactNode; inline?: boolean; value: string; onChange: (value: string) => void; max: number; placeholder?: string; multiline?: boolean; keyboard?: 'default' | 'email-address' | 'phone-pad' | 'url'; grow?: boolean; styles: Styles; colors: ThemeColors }) {
+  const [focused, setFocused] = useState(false);
+  const input = <TextInput accessibilityLabel={label} value={value} onChangeText={onChange} maxLength={max} placeholder={placeholder} placeholderTextColor={colors.textTertiary} multiline={multiline} keyboardType={keyboard} autoCapitalize={keyboard && keyboard !== 'default' ? 'none' : 'sentences'} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} style={[styles.input, multiline && styles.multiline, inline && styles.grow]} />;
+  if (inline) return <View style={[styles.fieldInline, focused && styles.fieldFocused]}>
+    <View style={styles.inlineLabel}>{icon ? <Ionicons name={icon} size={16} color={colors.textSecondary} /> : null}<Text style={styles.inlineLabelText} numberOfLines={1}>{label}</Text></View>
+    {input}
+    {accessory}
+  </View>;
+  return <View style={[styles.field, grow && styles.grow, focused && styles.fieldFocused]}>
+    <View style={styles.labelRow}>
+      {icon ? <Ionicons name={icon} size={15} color={colors.textSecondary} /> : null}
+      <Text style={[styles.label, styles.grow]} numberOfLines={1}>{label}</Text>
+      {accessory}
+    </View>
+    {input}
+  </View>;
+}
+
+/** A segmented control: the work status, and who may see each field. */
+function Segmented({ label, value, options, onChange, small, styles }: { label: string; value: string; options: [string, string][]; onChange: (value: string) => void; small?: boolean; styles: Styles }) {
+  return <View accessibilityRole="radiogroup" accessibilityLabel={label} style={styles.segmented}>
+    {options.map(([choice, text]) => <Pressable key={choice} accessibilityRole="radio" accessibilityState={{ checked: value === choice }} onPress={() => onChange(choice)} style={[styles.segment, small && styles.segmentSmall, value === choice && styles.segmentOn]}><Text style={[styles.segmentText, small && styles.segmentTextSmall, value === choice && styles.segmentTextOn]}>{text}</Text></Pressable>)}
   </View>;
 }
 
 function createStyles(colors: ThemeColors) {
+  const hairline = StyleSheet.hairlineWidth;
   return StyleSheet.create({
     screen: { flex: 1, backgroundColor: colors.surface },
-    content: { width: '100%', maxWidth: 720, alignSelf: 'center', padding: 20, paddingBottom: 40 },
-    bar: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
-    back: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', marginLeft: -8 },
-    title: { color: colors.text, fontSize: 24, fontWeight: '700', letterSpacing: -0.6 },
+    scroll: { flex: 1 },
+    content: { width: '100%', maxWidth: 640, alignSelf: 'center', paddingHorizontal: 16, paddingTop: 8, paddingBottom: 40 },
+    bar: { borderBottomWidth: hairline, borderBottomColor: colors.border, backgroundColor: colors.surface },
+    barInner: { width: '100%', maxWidth: 640, minHeight: 56, alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 8 },
+    back: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
+    title: { flex: 1, color: colors.text, fontSize: 17, fontWeight: '700', letterSpacing: -0.3 },
+    save: { minWidth: 72, height: 36, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center', borderRadius: 18, backgroundColor: colors.text },
+    saveText: { color: colors.surface, fontSize: 14, fontWeight: '700' },
+    disabled: { opacity: 0.45 },
+    banner: { paddingHorizontal: 20, paddingVertical: 10, color: colors.text, fontSize: 13, textAlign: 'center', backgroundColor: colors.chrome },
+    identity: { alignItems: 'center', paddingTop: 24, paddingBottom: 8 },
+    avatar: { width: 76, height: 76, borderRadius: 38, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.text },
+    avatarText: { color: colors.surface, fontSize: 28, fontWeight: '700' },
+    identityName: { marginTop: 12, color: colors.text, fontSize: 21, fontWeight: '700', letterSpacing: -0.4 },
+    identityLine: { marginTop: 3, color: colors.textSecondary, fontSize: 14 },
+    identityLinks: { marginTop: 8, color: colors.textTertiary, fontSize: 13 },
+    link: { color: colors.textSecondary, textDecorationLine: 'underline' },
+    importCard: { marginTop: 20, flexDirection: 'row', gap: 12, padding: 16, borderRadius: 16, borderWidth: hairline, borderColor: colors.border, backgroundColor: colors.surfaceAlt },
+    importIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.chrome },
+    importTitle: { color: colors.text, fontSize: 15, fontWeight: '700' },
+    importActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
+    pill: { height: 32, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, borderRadius: 16, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
+    pillText: { color: colors.text, fontSize: 13, fontWeight: '600' },
+    footnote: { marginTop: 3, color: colors.textSecondary, fontSize: 13, lineHeight: 18 },
     note: { marginTop: 4, color: colors.textSecondary, fontSize: 13, lineHeight: 19 },
-    link: { color: colors.text, textDecorationLine: 'underline' },
     loading: { marginTop: 16 },
-    section: { marginTop: 26 },
-    sectionTitle: { color: colors.text, fontSize: 16, fontWeight: '700' },
-    card: { marginTop: 10, padding: 14, gap: 12, borderWidth: 1, borderColor: colors.border, borderRadius: 16, backgroundColor: colors.surface },
-    entry: { gap: 10, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
-    row: { flexDirection: 'row', gap: 10 },
+    section: { marginTop: 28 },
+    sectionTitle: { marginBottom: 8, marginLeft: 4, color: colors.text, fontSize: 15, fontWeight: '700', letterSpacing: -0.2 },
+    sectionNote: { marginTop: 7, marginHorizontal: 4, color: colors.textTertiary, fontSize: 12, lineHeight: 17 },
+    card: { borderRadius: 14, overflow: 'hidden', backgroundColor: colors.chrome },
+    separator: { height: hairline, marginLeft: 14, backgroundColor: colors.border },
+    pair: { flexDirection: 'row' },
+    pairDivider: { width: hairline, backgroundColor: colors.border },
     grow: { flex: 1 },
-    field: { gap: 5 },
-    fieldBlock: { gap: 7 },
+    field: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 8 },
+    fieldInline: { minHeight: 50, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 6 },
+    inlineLabel: { width: 132, flexDirection: 'row', alignItems: 'center', gap: 8 },
+    inlineLabelText: { flex: 1, color: colors.text, fontSize: 14, fontWeight: '500' },
+    fieldFocused: { backgroundColor: colors.surface },
+    labelRow: { minHeight: 22, flexDirection: 'row', alignItems: 'center', gap: 7 },
     label: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
-    input: { minHeight: 42, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 11, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.chrome, color: colors.text, fontSize: 15, outlineStyle: 'none' } as object,
-    multiline: { minHeight: 84, textAlignVertical: 'top' },
-    hint: { color: colors.textTertiary, fontSize: 11 },
-    choices: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
-    choice: { minHeight: 34, paddingHorizontal: 12, justifyContent: 'center', borderRadius: 999, borderWidth: 1, borderColor: colors.border },
-    choiceOn: { backgroundColor: colors.text, borderColor: colors.text },
-    choiceText: { color: colors.text, fontSize: 13, fontWeight: '600' },
-    choiceTextOn: { color: colors.surface },
-    visibility: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
-    visibilityChoice: { minHeight: 28, paddingHorizontal: 10, justifyContent: 'center', borderRadius: 999, borderWidth: 1, borderColor: colors.border },
-    visibilityText: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
+    count: { color: colors.textTertiary, fontSize: 11 },
+    input: { minHeight: 32, paddingVertical: 5, paddingHorizontal: 0, color: colors.text, fontSize: 16, outlineStyle: 'none' } as object,
+    multiline: { minHeight: 72, textAlignVertical: 'top' },
+    rowInline: { minHeight: 52, flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingHorizontal: 14, paddingVertical: 10 },
+    segmented: { flexDirection: 'row', padding: 2, borderRadius: 9, backgroundColor: colors.surface },
+    segment: { minHeight: 30, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', borderRadius: 7 },
+    segmentSmall: { minHeight: 24, paddingHorizontal: 8, borderRadius: 6 },
+    segmentOn: { backgroundColor: colors.text },
+    segmentText: { color: colors.textSecondary, fontSize: 13, fontWeight: '600' },
+    segmentTextSmall: { fontSize: 11 },
+    segmentTextOn: { color: colors.surface },
+    addRow: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14 },
+    addText: { color: colors.text, fontSize: 15, fontWeight: '600' },
+    pressed: { opacity: 0.6 },
+    remove: { alignSelf: 'flex-start', paddingHorizontal: 14, paddingVertical: 12, color: colors.danger, fontSize: 14, fontWeight: '600' },
+    inlineAction: { paddingHorizontal: 14, paddingBottom: 10, color: colors.textSecondary, fontSize: 12, fontWeight: '600', textDecorationLine: 'underline' },
+    inlineActionWide: { paddingLeft: 156 },
     add: { color: colors.text, fontSize: 14, fontWeight: '600', paddingVertical: 4 },
-    hintLink: { color: colors.textSecondary, fontSize: 12, fontWeight: '600', textDecorationLine: 'underline' },
+    hint: { color: colors.textTertiary, fontSize: 11 },
     cancel: { color: colors.textSecondary, fontSize: 14, fontWeight: '600', paddingVertical: 4 },
-    importing: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
-    proposal: { flexDirection: 'row', gap: 10, alignItems: 'flex-start', paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: colors.border },
+    importing: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12 },
+    proposal: { flexDirection: 'row', gap: 10, alignItems: 'flex-start', padding: 14 },
     proposalValue: { color: colors.text, fontSize: 14, lineHeight: 20, marginTop: 2 },
-    reviewActions: { flexDirection: 'row', gap: 20, alignItems: 'center' },
-    remove: { color: colors.danger, fontSize: 13, fontWeight: '600', paddingVertical: 2 },
-    message: { marginTop: 18, color: colors.text, fontSize: 13, lineHeight: 19 },
-    save: { minHeight: 50, marginTop: 14, alignItems: 'center', justifyContent: 'center', borderRadius: 25, backgroundColor: colors.text },
-    saveText: { color: colors.surface, fontSize: 15, fontWeight: '700' },
-    disabled: { opacity: 0.5 },
+    reviewActions: { flexDirection: 'row', gap: 20, alignItems: 'center', padding: 14 },
+    message: { marginTop: 14, color: colors.text, fontSize: 13, lineHeight: 19 },
   });
 }
