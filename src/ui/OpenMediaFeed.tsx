@@ -5,6 +5,7 @@ import { EventMeta, ListingCard, ListingFields, PaidPostBlock, PaidPostFields, P
 import { PaymentSheet, PaymentTarget } from './PaymentSheet';
 import { PersonLink, targetForPost, usePeople } from './people';
 import { PostActions, RegisterAction } from './PostActions';
+import { MarkdownBody } from './MarkdownBody';
 import { RichText } from './RichText';
 import { Text, TextInput } from './Text';
 
@@ -15,6 +16,7 @@ import { PostReportReason, publishListing, publishPaidPost, publishPost, rateLis
 import { loadPaidContent } from '../data/paymentsService';
 import { eventRegistration, ListingInput, listingLine, parsePrice, validateListing } from '../domain/listings';
 import { reportChoices } from '../domain/listingSafety';
+import { parseMarkdown, previewBlocks, tidyBlocks } from '../domain/markdown';
 import { crossPostVideo, discardPreparedVideo, draftCrossPostVideo, prepareVideo, PreparedVideo, uploadPostVideo, UploadedVideo, VideoError } from '../data/videoUpload';
 import { CrossPostOutcome, CrossPostVideo, destinationSummary, outcomeSummary, prepareCrossPost } from '../domain/crossPosting';
 import { NetworkId, networks, safeHttpsUrl, sourceName } from '../domain/networkPosts';
@@ -315,8 +317,11 @@ export function PostCard({ post, mode, lensContext, viewer, onDelete, onReport }
   const network = networks[post.provenance.connectorId as keyof typeof networks];
   const image = post.media?.[0];
   // External posts can be long; Open Media posts are short enough to show whole.
-  const long = !native && (!post.title || Boolean(post.event)) && (post.body.length > 420 || post.body.split('\n').length > 8);
   const [showAll, setShowAll] = useState(false);
+  // Hive and Lens posts keep their own formatting; a collapsed one shows its opening blocks.
+  const blocks = useMemo(() => post.markdown ? tidyBlocks(parseMarkdown(post.markdown), post.title) : undefined, [post.markdown, post.title]);
+  const preview = useMemo(() => blocks ? previewBlocks(blocks) : undefined, [blocks]);
+  const long = preview ? preview.more : !native && (!post.title || Boolean(post.event)) && (post.body.length > 420 || post.body.split('\n').length > 8);
   const [payTarget, setPayTarget] = useState<PaymentTarget>();
   const [paid, setPaid] = useState(post.paid);
   const reloadPaid = () => { loadPaidContent(post.id).then((content) => setPaid({ priceMinor: content.priceMinor, currency: content.currency, unlocked: content.unlocked, ...(content.body ? { body: content.body } : {}) })).catch(() => undefined); };
@@ -328,7 +333,8 @@ export function PostCard({ post, mode, lensContext, viewer, onDelete, onReport }
     {post.event && image?.kind === 'image' && image.url ? <PostImage url={image.url} altText={image.altText} /> : null}
     {post.title ? <RichText text={title} source={post.provenance.connectorId} style={styles.postTitle} /> : null}
     {post.event ? <EventMeta event={post.event} /> : null}
-    {post.body && post.body !== post.listing?.title ? <RichText text={body} source={post.provenance.connectorId} numberOfLines={long && !showAll ? 8 : undefined} style={[styles.body, post.title ? styles.bodyAfterTitle : null]} /> : null}<TranslationNote note={translation.note} />
+    {blocks && preview && body === post.body ? <MarkdownBody blocks={showAll ? blocks : preview.blocks} collapsed={!showAll} source={post.provenance.connectorId} style={[styles.body, post.title ? styles.bodyAfterTitle : null]} />
+      : post.body && post.body !== post.listing?.title ? <RichText text={body} source={post.provenance.connectorId} numberOfLines={long && !showAll ? 8 : undefined} style={[styles.body, post.title ? styles.bodyAfterTitle : null]} /> : null}<TranslationNote note={translation.note} />
     {post.listing ? <ListingCard listing={post.listing} onMessage={native && !own && people?.message ? () => people.message!(post.author.handle.replace(/^@/, '')) : undefined} onRate={native && !own && viewer ? (stars) => rateListing(post.id, stars) : undefined} onBuy={native && !own && viewer && post.listing ? () => setPayTarget({ kind: 'listing', postId: post.id, listing: post.listing! }) : undefined} /> : null}
     {paid ? <PaidPostBlock paid={paid} onUnlock={native && !own && viewer && !paid.unlocked ? () => setPayTarget({ kind: 'paid_post', postId: post.id, paid }) : undefined} /> : null}
     {payTarget ? <PaymentSheet target={payTarget} recipient={post.author.handle.replace(/^@/, '')} onClose={() => setPayTarget(undefined)} onPaid={payTarget.kind === 'paid_post' ? reloadPaid : undefined} /> : null}

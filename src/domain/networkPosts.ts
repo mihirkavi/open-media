@@ -1,4 +1,5 @@
 import { PostMedia, SocialPost } from './posts';
+import { cleanPostMarkdown, looksLikeMarkdown } from './markdown';
 import { initialsFor } from './publicPosts';
 
 /**
@@ -217,6 +218,8 @@ export function socialPostFromLens(record: LensPostRecord): SocialPost | undefin
     author: { id: `lens:${record.author.address.toLowerCase()}`, displayName: record.author.metadata?.name?.trim() || localName || handle, handle, avatarUrl: safeHttpsUrl(record.author.metadata?.picture ?? undefined) },
     title: metadata.title?.trim() || undefined,
     body: text,
+    // Lens content is Markdown by its spec; plain posts stay plain.
+    markdown: looksLikeMarkdown(content) ? cleanPostMarkdown(text) || undefined : undefined,
     createdAt: record.timestamp,
     images: image ? [image] : [],
     imageAlt: metadata.image?.altTag ?? metadata.video?.altTag ?? undefined,
@@ -257,6 +260,7 @@ export function socialPostFromHive(record: HivePostRecord, videos?: Map<string, 
     author: { id: `hive:${record.author}`, displayName: record.author, handle: `@${record.author}`, avatarUrl: `https://images.hive.blog/u/${encodeURIComponent(record.author)}/avatar/small` },
     title: record.title.trim() || undefined,
     body: excerpt,
+    markdown: cleanPostMarkdown(record.body) || undefined,
     createdAt: hiveTimestamp(record.created),
     images: firstImage ? [firstImage] : [],
     video: (() => { const id = threeSpeakVideoId(record); return id ? videos?.get(id) : undefined; })(),
@@ -345,6 +349,7 @@ interface NetworkPostInput {
   author: { id: string; displayName: string; handle: string; avatarUrl?: string };
   title?: string;
   body: string;
+  markdown?: string;
   createdAt: string;
   images: string[];
   imageAlt?: string;
@@ -364,6 +369,7 @@ function networkPost(input: NetworkPostInput): SocialPost {
     author: { ...input.author, initials: initialsFor(input.author.displayName) },
     title: input.title,
     body: truncate(input.body, maxNetworkBodyLength),
+    ...(input.markdown ? { markdown: input.markdown } : {}),
     kind: input.video ? 'video' : media.length ? 'image' : 'text',
     createdAt: input.createdAt,
     media: media.length ? media : undefined,

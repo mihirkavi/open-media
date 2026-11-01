@@ -50,6 +50,12 @@ export interface SocialPost {
   /** Long-form posts (for example Hive articles) carry a title; the body is then an excerpt. */
   title?: string;
   body: string;
+  /**
+   * The post's own formatting, where its network writes Markdown (Hive, and Lens when used):
+   * cleaned and length-capped (see domain/markdown). `body` stays the plain text for search,
+   * ranking and translation.
+   */
+  markdown?: string;
   kind: PostKind;
   createdAt: string;
   media?: PostMedia[];
