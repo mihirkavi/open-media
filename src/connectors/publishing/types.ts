@@ -1,5 +1,6 @@
 import { CrossPostContent } from '../../domain/crossPosting';
 import { NetworkId } from '../../domain/networkPosts';
+import { InteractionTarget } from '../../domain/postInteractions';
 
 /** The account a person connected for cross-posting. Contains no secrets. */
 export interface NetworkAccount {
@@ -57,7 +58,15 @@ export interface PublishingConnector {
   disconnect(): Promise<void>;
   revokeHint: string;
   publish(content: CrossPostContent, idempotencyKey: string): Promise<PublishedCopy>;
+  /**
+   * Likes, reshares, or comments on a post read from this network, as the connected account.
+   * A comment returns its published copy; likes and reshares return nothing.
+   */
+  interact(target: InteractionTarget, interaction: NetworkInteraction, idempotencyKey: string): Promise<PublishedCopy | undefined>;
 }
+
+/** A like, a reshare (recast, reblog, or repost), or a comment whose text is already fitted to the network. */
+export type NetworkInteraction = { kind: 'like' } | { kind: 'reshare' } | { kind: 'comment'; text: string };
 
 /** Errors whose message is safe and useful to show people as-is. */
 export class PublishingError extends Error {}

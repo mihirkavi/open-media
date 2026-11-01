@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { CastType, FarcasterNetwork, makeCastAdd, Message, MessageData, NobleEd25519Signer } from '@farcaster/core';
+import { CastType, FarcasterNetwork, makeCastAdd, makeReactionAdd, Message, MessageData, NobleEd25519Signer, ReactionType } from '@farcaster/core';
 
-import { encodeCastAddData, fromHex, signCastAdd, toHex } from './farcasterMessage';
+import { encodeCastAddData, encodeReactionAddData, fromHex, signCastAdd, signReactionAdd, toHex } from './farcasterMessage';
 
 // Fixed test key: never a real account's key.
 const privateKey = fromHex('1f'.repeat(32));
@@ -34,5 +34,34 @@ for (const [name, text, embeds, parentUrl] of [
     assert.equal(toHex(decoded.signer), toHex(expected.signer));
     assert.equal(decoded.hashScheme, expected.hashScheme);
     assert.equal(decoded.signatureScheme, expected.signatureScheme);
+  });
+}
+
+test('a reply CastAdd matches @farcaster/core', async () => {
+  const parentCastId = { fid: 42, hash: `0x${'ab'.repeat(20)}` as const };
+  const result = await makeCastAdd(
+    { text: 'Replying from Open Media', embeds: [], embedsDeprecated: [], mentions: [], mentionsPositions: [], type: CastType.CAST, parentCastId: { fid: 42, hash: fromHex(parentCastId.hash) } },
+    { fid: 123456, network: FarcasterNetwork.MAINNET, timestamp: Math.round(timestampMs / 1000 - Date.UTC(2021, 0, 1) / 1000) },
+    new NobleEd25519Signer(privateKey),
+  );
+  if (result.isErr()) throw result.error;
+  const ours = signCastAdd({ fid: 123456, text: 'Replying from Open Media', parentCastId, timestampMs }, privateKey);
+  assert.equal(ours.hash, `0x${toHex(result.value.hash)}`);
+  assert.equal(toHex(Message.decode(ours.bytes).signature), toHex(result.value.signature));
+});
+
+for (const [type, reference] of [['like', ReactionType.LIKE], ['recast', ReactionType.RECAST]] as const) {
+  test(`ReactionAdd (${type}) matches @farcaster/core`, async () => {
+    const target = { fid: 42, hash: `0x${'cd'.repeat(20)}` as const };
+    const result = await makeReactionAdd(
+      { type: reference, targetCastId: { fid: 42, hash: fromHex(target.hash) } },
+      { fid: 123456, network: FarcasterNetwork.MAINNET, timestamp: Math.round(timestampMs / 1000 - Date.UTC(2021, 0, 1) / 1000) },
+      new NobleEd25519Signer(privateKey),
+    );
+    if (result.isErr()) throw result.error;
+    assert.equal(toHex(encodeReactionAddData({ fid: 123456, type, target, timestampMs })), toHex(MessageData.encode(result.value.data!).finish()));
+    const ours = signReactionAdd({ fid: 123456, type, target, timestampMs }, privateKey);
+    assert.equal(ours.hash, `0x${toHex(result.value.hash)}`);
+    assert.equal(toHex(Message.decode(ours.bytes).signature), toHex(result.value.signature));
   });
 }

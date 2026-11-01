@@ -1,6 +1,7 @@
 import { PostPaid, SocialPost } from './posts';
 import { isStoredPostVideo, postVideoPublicUrl, StoredPostVideo } from './postVideo';
 import { isListing, PostListing } from './listings';
+import { engagementFromRecord } from './postInteractions';
 
 /** Shape returned by the open_media_public_* database functions and the public API. */
 export interface PublicPostRecord {
@@ -14,6 +15,8 @@ export interface PublicPostRecord {
   listing?: PostListing | null;
   /** A paid part: its price, and the text itself only for people who unlocked it. */
   paid?: { priceMinor: number; currency: string; unlocked: boolean; body?: string | null } | null;
+  /** Comment, reshare, and like counts, with the viewer's own like and reshare. */
+  engagement?: { replies: number; reposts: number; likes: number; liked?: boolean; reshared?: boolean } | null;
 }
 
 function paidFrom(record: PublicPostRecord['paid']): PostPaid | undefined {
@@ -66,6 +69,7 @@ export function socialPostFromPublic(record: PublicPostRecord, supabaseUrl?: str
     } : {}),
     ...(isListing(record.listing) ? { listing: record.listing } : {}),
     ...(paidFrom(record.paid) ? { paid: paidFrom(record.paid) } : {}),
+    engagement: engagementFromRecord(record.engagement),
     topics: record.listing ? [record.listing.kind === 'product' ? 'products' : record.listing.kind === 'event' ? 'events' : 'services'] : [],
     provenance: { connectorId: 'open-media', externalId: record.id },
     relevance: { followsAuthor: false, selectedInterestMatches: [] },

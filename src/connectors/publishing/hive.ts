@@ -4,7 +4,8 @@ import { Platform } from 'react-native';
 import { deviceSecretStorage } from '../../auth/supabase';
 import { hivePermlink } from '../../domain/crossPosting';
 import { hiveAuthBroadcast, HiveAuthSession, hiveAuthLogin } from './hiveAuth';
-import { NetworkAccount, PublishingConnector, PublishingError } from './types';
+import { InteractionTarget } from '../../domain/postInteractions';
+import { NetworkAccount, NetworkInteraction, PublishedCopy, PublishingConnector, PublishingError } from './types';
 
 /**
  * Hive: posts are signed by Hive Keychain, which holds the person's keys and asks them to approve.
@@ -30,6 +31,8 @@ interface KeychainResponse { success: boolean; message?: string; error?: unknown
 interface HiveKeychain {
   requestSignBuffer(account: string | null, message: string, key: 'Posting', callback: (response: KeychainResponse & { data?: { username?: string } }) => void, rpc?: string, title?: string): void;
   requestPost(account: string, title: string, body: string, parentPerm: string, parentAccount: string, jsonMetadata: string, permlink: string, commentOptions: string, callback: (response: KeychainResponse) => void): void;
+  requestVote(account: string, permlink: string, author: string, weight: number, callback: (response: KeychainResponse) => void): void;
+  requestCustomJson(account: string, id: string, key: 'Posting', json: string, displayName: string, callback: (response: KeychainResponse) => void): void;
 }
 
 function keychain(): HiveKeychain | undefined {
@@ -124,11 +127,62 @@ export const hivePublisher: PublishingConnector = {
     });
     return { externalId: txId, url: `https://peakd.com/@${name}/${permlink}` };
   },
+
+  interact,
 };
+
+/** A Hive operation, as both Keychain's extension and HiveAuth broadcast it. */
+type HiveOperation = ['vote', { voter: string; author: string; permlink: string; weight: number }]
+  | ['custom_json', { required_auths: string[]; required_posting_auths: string[]; id: string; json: string }]
+  | ['comment', { parent_author: string; parent_permlink: string; author: string; permlink: string; title: string; body: string; json_metadata: string }];
+
+/** Asks Keychain (the extension, or the phone app through HiveAuth) to sign and broadcast one operation. */
+async function broadcast(name: string, op: HiveOperation): Promise<string> {
+  if (native) {
+    const session = await loadSession();
+    if (!session) throw new PublishingError('Your Hive Keychain approval expired. Reconnect Hive in Settings.');
+    return hiveAuthBroadcast(session, [op], () => undefined).catch((error: unknown) => { throw error instanceof PublishingError ? error : new PublishingError(hiveError(String(error))); });
+  }
+  const extension = await waitForKeychain();
+  if (!extension) throw new PublishingError('Hive Keychain isn’t available in this browser.');
+  return new Promise<string>((resolve, reject) => {
+    const done = (response: KeychainResponse) => {
+      if (response.success) resolve(response.result?.id ?? response.result?.tx_id ?? '');
+      else reject(new PublishingError(hiveError(response.message ?? String(response.error ?? ''))));
+    };
+    const [type, body] = op;
+    if (type === 'vote') extension.requestVote(name, body.permlink, body.author, body.weight, done);
+    else if (type === 'custom_json') extension.requestCustomJson(name, body.id, 'Posting', body.json, 'Reblog on Hive', done);
+    else extension.requestPost(name, body.title, body.body, body.parent_permlink, body.parent_author, body.json_metadata, body.permlink, '', done);
+  });
+}
+
+async function interact(target: InteractionTarget, interaction: NetworkInteraction, idempotencyKey: string): Promise<PublishedCopy | undefined> {
+  if (target.network !== 'hive') throw new PublishingError('That post isn’t on Hive.');
+  const name = await load();
+  if (!name) throw new PublishingError('Connect Hive in Settings → Cross-posting.');
+  const { author, permlink } = target;
+  if (interaction.kind === 'like') {
+    // An upvote at full weight. Voting again on the same post is already done.
+    await broadcast(name, ['vote', { voter: name, author, permlink, weight: 10000 }]).catch((error: unknown) => { if (!/already voted|same vote/i.test(String((error as Error)?.message))) throw error; });
+    return undefined;
+  }
+  if (interaction.kind === 'reshare') {
+    await broadcast(name, ['custom_json', { required_auths: [], required_posting_auths: [name], id: 'follow', json: JSON.stringify(['reblog', { account: name, author, permlink }]) }]);
+    return undefined;
+  }
+  // Replies need their own permlink; deriving it from the key makes a retry edit instead of duplicating.
+  const reply = `re-${author.replace(/\./g, '-')}-${hashToBase36(idempotencyKey)}`;
+  const metadata = JSON.stringify({ tags: [appTag], app: 'openmedia/1.0', format: 'markdown' });
+  await broadcast(name, ['comment', { parent_author: author, parent_permlink: permlink, author: name, permlink: reply, title: '', body: interaction.text, json_metadata: metadata }]);
+  return { externalId: `${name}/${reply}`, url: `https://peakd.com/@${name}/${reply}` };
+}
 
 function hiveError(message: string): string {
   if (/cancel|denied|reject/i.test(message)) return 'The post was declined in Hive Keychain.';
   if (/HIVE_MIN_ROOT_COMMENT_INTERVAL|once every 5 minutes|interval/i.test(message)) return 'Hive allows one new post every 5 minutes. Try again shortly.';
+  if (/already voted|same vote/i.test(message)) return 'You already voted on this Hive post.';
+  if (/HIVE_MIN_REPLY_INTERVAL|once every 3 seconds/i.test(message)) return 'Hive allows one comment every few seconds. Try again shortly.';
   if (/RC|resource credit|bandwidth/i.test(message)) return 'Your Hive account doesn’t have enough Resource Credits right now.';
   return 'Hive didn’t accept the post.';
 }

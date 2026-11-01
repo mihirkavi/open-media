@@ -8,8 +8,8 @@ import { prepareNativeCrypto } from './nativeCrypto';
 import { NetworkAccount, PublishingConnector, PublishingError } from './types';
 
 /**
- * DeSo: DeSo Identity issues a derived key that may only submit posts and can spend at most
- * 0.01 DESO in fees. The key is created in this browser and never sent anywhere. Videos are uploaded
+ * DeSo: DeSo Identity issues a derived key that may only submit posts (which include comments and
+ * reposts) and likes, and can spend at most 0.01 DESO in fees. The key is created in this browser and never sent anywhere. Videos are uploaded
  * through DeSo's media API (which stores them with Livepeer) and attached as VideoURLs. On iOS and
  * Android, DeSo Identity opens in a secure in-app browser (an auth session) and returns to
  * `openmedia://deso-auth`; the derived key is then kept in the app's storage.
@@ -41,7 +41,7 @@ function desoSdk() {
       } : {}),
       spendingLimitOptions: {
         GlobalDESOLimit: 0.01 * 1e9,
-        TransactionCountLimitMap: { SUBMIT_POST: 'UNLIMITED', AUTHORIZE_DERIVED_KEY: 1 },
+        TransactionCountLimitMap: { SUBMIT_POST: 'UNLIMITED', LIKE: 'UNLIMITED', AUTHORIZE_DERIVED_KEY: 1 },
       },
     });
     return module;
@@ -103,11 +103,8 @@ export const desoPublisher: PublishingConnector = {
   },
 
   async publish(content) {
-    const stored = await load();
-    if (!stored) throw new PublishingError('Connect DeSo in Settings → Cross-posting.');
+    const stored = await signedIn();
     const deso = await desoSdk();
-    const current = (await deso.identity.snapshot()).currentUser?.publicKey;
-    if (current !== stored.publicKey) throw new PublishingError('DeSo signed out on this browser. Reconnect DeSo in Settings.');
     try {
       // Never open a permission pop-up mid-publish (browsers block it); explain instead.
       const videoURLs = content.video ? [await uploadVideo(deso, stored.publicKey, content.video)] : [];
@@ -116,14 +113,50 @@ export const desoPublisher: PublishingConnector = {
       if (!hash) throw new Error('missing hash');
       return { externalId: hash, url: `https://focus.xyz/post/${hash}` };
     } catch (error) {
-      if (error instanceof PublishingError) throw error;
-      const text = error instanceof Error ? error.message : String(error);
-      if (/insufficient|balance|fee/i.test(text)) throw new PublishingError('Your DeSo account needs a little more DESO for network fees.');
-      if (/spending limit|derived key|not authorized/i.test(text)) throw new PublishingError('Open Media’s DeSo key has expired or reached its limit. Reconnect DeSo in Settings.');
-      throw new PublishingError('DeSo didn’t accept the post. Try again.');
+      throw desoError(error);
+    }
+  },
+
+  async interact(target, interaction) {
+    if (target.network !== 'deso') throw new PublishingError('That post isn’t on DeSo.');
+    const stored = await signedIn();
+    const deso = await desoSdk();
+    try {
+      if (interaction.kind === 'like') {
+        await deso.updateLikeStatus({ ReaderPublicKeyBase58Check: stored.publicKey, LikedPostHashHex: target.postHash, IsUnlike: false }, { checkPermissions: false })
+          .catch((error: unknown) => { if (!/already liked|LikeEntry.*exists/i.test(error instanceof Error ? error.message : String(error))) throw error; });
+        return undefined;
+      }
+      const result = await deso.submitPost({
+        UpdaterPublicKeyBase58Check: stored.publicKey,
+        BodyObj: { Body: interaction.kind === 'comment' ? interaction.text : '', ImageURLs: [], VideoURLs: [] },
+        ...(interaction.kind === 'comment' ? { ParentStakeID: target.postHash } : { RepostedPostHashHex: target.postHash }),
+      }, { checkPermissions: false });
+      if (interaction.kind === 'reshare') return undefined;
+      const hash = (result.constructedTransactionResponse as { PostHashHex?: string }).PostHashHex;
+      return hash ? { externalId: hash, url: `https://focus.xyz/post/${hash}` } : undefined;
+    } catch (error) {
+      throw desoError(error, interaction.kind === 'like');
     }
   },
 };
+
+async function signedIn(): Promise<StoredDeso> {
+  const stored = await load();
+  if (!stored) throw new PublishingError('Connect DeSo in Settings → Cross-posting.');
+  const current = (await (await desoSdk()).identity.snapshot()).currentUser?.publicKey;
+  if (current !== stored.publicKey) throw new PublishingError('DeSo signed out on this browser. Reconnect DeSo in Settings.');
+  return stored;
+}
+
+function desoError(error: unknown, like = false): PublishingError {
+  if (error instanceof PublishingError) return error;
+  const text = error instanceof Error ? error.message : String(error);
+  if (/insufficient|balance|fee/i.test(text)) return new PublishingError('Your DeSo account needs a little more DESO for network fees.');
+  // Keys from before likes were allowed can't like; reconnecting issues one that can.
+  if (/spending limit|derived key|not authorized/i.test(text)) return new PublishingError(like ? 'Open Media’s DeSo key can’t like posts yet. Reconnect DeSo in Settings to allow it.' : 'Open Media’s DeSo key has expired or reached its limit. Reconnect DeSo in Settings.');
+  return new PublishingError(like ? 'DeSo didn’t accept the like. Try again.' : 'DeSo didn’t accept the post. Try again.');
+}
 
 /** Uploads the cleaned file to DeSo's media API; DeSo apps play `lvpr.tv` links natively. */
 async function uploadVideo(deso: DesoSdk, publicKey: string, video: CrossPostVideo): Promise<string> {

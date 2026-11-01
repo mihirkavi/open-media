@@ -138,7 +138,7 @@ export function agentPost(post: SocialPost, mode: FeedMode | FeedLens, origin: s
     createdAt: post.createdAt,
     url: network === 'open-media' ? `${origin}/v1/posts/${post.id.replace(/^open-media-/, '')}` : post.provenance.canonicalURL ?? null,
     media: (post.media ?? []).flatMap((item) => item.url ? [{ type: item.kind, url: item.url, posterUrl: item.posterUrl ?? null, durationSeconds: item.durationSeconds ?? null, altText: item.altText || null }] : []),
-    engagement: post.engagement ?? null,
+    engagement: post.engagement ? { replies: post.engagement.replies, reposts: post.engagement.reposts, likes: post.engagement.likes } : null,
     why: { lens: explanation.lens, used: explanation.used, rules: explanation.rules, filters: explanation.filters, notUsed: explanation.notUsed },
     ...(post.listing ? { listing: post.listing } : {}),
   };

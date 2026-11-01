@@ -16,7 +16,7 @@ test('maps a public post record to the canonical post model', () => {
   assert.equal(post.author.handle, '@maya');
   assert.equal(post.author.initials, 'MC');
   assert.equal(post.provenance.connectorId, 'open-media');
-  assert.equal(post.engagement, undefined);
+  assert.deepEqual(post.engagement, { replies: 0, reposts: 0, likes: 0, liked: false, reshared: false }, 'counts start at zero when the record has none');
   assert.deepEqual(post.relevance, { followsAuthor: false, selectedInterestMatches: [] });
 });
 

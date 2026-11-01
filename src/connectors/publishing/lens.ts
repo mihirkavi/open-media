@@ -104,45 +104,80 @@ export const lensPublisher: PublishingConnector = {
   },
 
   async publish(content, idempotencyKey) {
-    const stored = await load();
-    const provider = wallet();
-    if (!stored) throw new PublishingError('Connect Lens in Settings → Cross-posting.');
-    if (!provider) throw new PublishingError('Your browser wallet isn’t available.');
-    const token = await accessToken(stored);
-
-    const metadata = content.video ? await videoMetadata(content, idempotencyKey) : { $schema: 'https://json-schemas.lens.dev/posts/text-only/3.0.0.json', lens: { id: uuidFrom(idempotencyKey), content: content.text, locale: 'en', mainContentFocus: 'TEXT_ONLY' } };
+    const { provider, token } = await session();
+    const metadata = content.video ? await videoMetadata(content, idempotencyKey) : textMetadata(content.text, idempotencyKey);
     const uri = await groveUpload(JSON.stringify(metadata), 'application/json');
+    return runPostOperation('post', { contentUri: uri }, token, provider, 'post');
+  },
 
-    const { post } = await gql<{ post: { __typename: string; hash?: string; reason?: string; raw?: Record<string, unknown> } }>(
-      'mutation Post($request: CreatePostRequest!) { post(request: $request) { __typename ... on PostResponse { hash } ... on SelfFundedTransactionRequest { reason raw { to from data value gasLimit maxFeePerGas maxPriorityFeePerGas chainId } } ... on SponsoredTransactionRequest { reason } ... on TransactionWillFail { reason } ... on PostOperationValidationFailed { reason } } }',
-      { request: { contentUri: uri } }, token,
-    );
-    let hash = post.hash;
-    if (post.__typename === 'SelfFundedTransactionRequest' && post.raw) {
-      await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: `0x${lensChainId.toString(16)}` }] }).catch(async () => {
-        await provider.request({ method: 'wallet_addEthereumChain', params: [{ chainId: `0x${lensChainId.toString(16)}`, chainName: 'Lens Chain', nativeCurrency: { name: 'GHO', symbol: 'GHO', decimals: 18 }, rpcUrls: ['https://rpc.lens.xyz'], blockExplorerUrls: ['https://explorer.lens.xyz'] }] });
-      });
-      const raw = post.raw;
-      hash = await provider.request({ method: 'eth_sendTransaction', params: [{ from: raw.from, to: raw.to, data: raw.data, value: hexQuantity(raw.value), gas: hexQuantity(raw.gasLimit), maxFeePerGas: hexQuantity(raw.maxFeePerGas), maxPriorityFeePerGas: hexQuantity(raw.maxPriorityFeePerGas) }] })
-        .catch((error: { code?: number }) => { throw new PublishingError(error?.code === 4001 ? 'The Lens post was declined in your wallet.' : 'Your wallet couldn’t send the Lens post. You need a little GHO on Lens Chain for fees.'); }) as string;
-    } else if (!hash) {
-      throw new PublishingError(post.__typename === 'SponsoredTransactionRequest' ? 'Lens asked for a sponsored transaction, which Open Media doesn’t support yet.' : `Lens didn’t accept the post${post.reason ? `: ${post.reason}` : '.'}`);
+  async interact(target, interaction, idempotencyKey) {
+    if (target.network !== 'lens') throw new PublishingError('That post isn’t on Lens.');
+    const { provider, token } = await session();
+    if (interaction.kind === 'like') {
+      // Reactions are off-chain on Lens: no wallet approval or fee.
+      const { addReaction } = await gql<{ addReaction: { __typename: string; reason?: string } }>(
+        'mutation React($request: AddReactionRequest!) { addReaction(request: $request) { __typename ... on AddReactionFailure { reason } } }',
+        { request: { post: target.postId, reaction: 'UPVOTE' } }, token,
+      );
+      if (addReaction.__typename === 'AddReactionFailure') throw new PublishingError(`Lens didn’t accept the like${addReaction.reason ? `: ${addReaction.reason}` : '.'}`);
+      return undefined;
     }
-
-    // Wait briefly for indexing so the link points at the post itself.
-    for (let attempt = 0; attempt < 20; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-      const status = await gql<{ transactionStatus: { __typename: string; reason?: string } }>('query Status($request: TransactionStatusRequest!) { transactionStatus(request: $request) { __typename ... on FailedTransactionStatus { reason } } }', { request: { txHash: hash } }).catch(() => undefined);
-      if (status?.transactionStatus.__typename === 'FailedTransactionStatus') throw new PublishingError(`The Lens post failed${status.transactionStatus.reason ? `: ${status.transactionStatus.reason}` : '.'}`);
-      if (status?.transactionStatus.__typename === 'FinishedTransactionStatus') {
-        const found = await gql<{ post: { slug?: string } | null }>('query Post($request: PostRequest!) { post(request: $request) { ... on Post { slug } } }', { request: { txHash: hash } }).catch(() => undefined);
-        if (found?.post?.slug) return { externalId: hash!, url: `https://hey.xyz/posts/${found.post.slug}` };
-        break;
-      }
+    if (interaction.kind === 'reshare') {
+      await runPostOperation('repost', { post: target.postId }, token, provider, 'repost');
+      return undefined;
     }
-    return { externalId: hash!, url: `https://explorer.lens.xyz/tx/${hash}` };
+    const uri = await groveUpload(JSON.stringify(textMetadata(interaction.text, idempotencyKey)), 'application/json');
+    return runPostOperation('post', { contentUri: uri, commentOn: { post: target.postId } }, token, provider, 'comment');
   },
 };
+
+async function session() {
+  const stored = await load();
+  const provider = wallet();
+  if (!stored) throw new PublishingError('Connect Lens in Settings → Cross-posting.');
+  if (!provider) throw new PublishingError('Your browser wallet isn’t available.');
+  return { stored, provider, token: await accessToken(stored) };
+}
+
+function textMetadata(text: string, idempotencyKey: string) {
+  return { $schema: 'https://json-schemas.lens.dev/posts/text-only/3.0.0.json', lens: { id: uuidFrom(idempotencyKey), content: text, locale: 'en', mainContentFocus: 'TEXT_ONLY' } };
+}
+
+/**
+ * Runs a Lens post-shaped mutation (a post, comment, or repost): sends the transaction the wallet
+ * pays for when Lens doesn't sponsor it, then waits briefly for indexing so the link is the post's own.
+ */
+async function runPostOperation(mutation: 'post' | 'repost', request: Record<string, unknown>, token: string, provider: Eip1193, noun: 'post' | 'comment' | 'repost') {
+  const requestType = mutation === 'post' ? 'CreatePostRequest' : 'CreateRepostRequest';
+  const data = await gql<Record<string, { __typename: string; hash?: string; reason?: string; raw?: Record<string, unknown> }>>(
+    `mutation Run($request: ${requestType}!) { ${mutation}(request: $request) { __typename ... on PostResponse { hash } ... on SelfFundedTransactionRequest { reason raw { to from data value gasLimit maxFeePerGas maxPriorityFeePerGas chainId } } ... on SponsoredTransactionRequest { reason } ... on TransactionWillFail { reason } ... on PostOperationValidationFailed { reason } } }`,
+    { request }, token,
+  );
+  const result = data[mutation];
+  let hash = result.hash;
+  if (result.__typename === 'SelfFundedTransactionRequest' && result.raw) {
+    await provider.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: `0x${lensChainId.toString(16)}` }] }).catch(async () => {
+      await provider.request({ method: 'wallet_addEthereumChain', params: [{ chainId: `0x${lensChainId.toString(16)}`, chainName: 'Lens Chain', nativeCurrency: { name: 'GHO', symbol: 'GHO', decimals: 18 }, rpcUrls: ['https://rpc.lens.xyz'], blockExplorerUrls: ['https://explorer.lens.xyz'] }] });
+    });
+    const raw = result.raw;
+    hash = await provider.request({ method: 'eth_sendTransaction', params: [{ from: raw.from, to: raw.to, data: raw.data, value: hexQuantity(raw.value), gas: hexQuantity(raw.gasLimit), maxFeePerGas: hexQuantity(raw.maxFeePerGas), maxPriorityFeePerGas: hexQuantity(raw.maxPriorityFeePerGas) }] })
+      .catch((error: { code?: number }) => { throw new PublishingError(error?.code === 4001 ? `The Lens ${noun} was declined in your wallet.` : `Your wallet couldn’t send the Lens ${noun}. You need a little GHO on Lens Chain for fees.`); }) as string;
+  } else if (!hash) {
+    throw new PublishingError(result.__typename === 'SponsoredTransactionRequest' ? 'Lens asked for a sponsored transaction, which Open Media doesn’t support yet.' : `Lens didn’t accept the ${noun}${result.reason ? `: ${result.reason}` : '.'}`);
+  }
+
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const status = await gql<{ transactionStatus: { __typename: string; reason?: string } }>('query Status($request: TransactionStatusRequest!) { transactionStatus(request: $request) { __typename ... on FailedTransactionStatus { reason } } }', { request: { txHash: hash } }).catch(() => undefined);
+    if (status?.transactionStatus.__typename === 'FailedTransactionStatus') throw new PublishingError(`The Lens ${noun} failed${status.transactionStatus.reason ? `: ${status.transactionStatus.reason}` : '.'}`);
+    if (status?.transactionStatus.__typename === 'FinishedTransactionStatus') {
+      const found = await gql<{ post: { slug?: string } | null }>('query Post($request: PostRequest!) { post(request: $request) { ... on Post { slug } ... on Repost { slug } } }', { request: { txHash: hash } }).catch(() => undefined);
+      if (found?.post?.slug) return { externalId: hash!, url: `https://hey.xyz/posts/${found.post.slug}` };
+      break;
+    }
+  }
+  return { externalId: hash!, url: `https://explorer.lens.xyz/tx/${hash}` };
+}
 
 /** One-step immutable Grove upload; returns the `lens://` URI. */
 async function groveUpload(body: BodyInit, contentType: string): Promise<string> {

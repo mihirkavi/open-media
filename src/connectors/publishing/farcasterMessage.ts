@@ -9,6 +9,7 @@ import { blake3 } from '@noble/hashes/blake3';
  * Schema: farcasterxyz/snapchain proto/message.proto (Message, MessageData, CastAddBody).
  */
 const MESSAGE_TYPE_CAST_ADD = 1;
+const MESSAGE_TYPE_REACTION_ADD = 3;
 const FARCASTER_NETWORK_MAINNET = 1;
 const HASH_SCHEME_BLAKE3 = 1;
 const SIGNATURE_SCHEME_ED25519 = 1;
@@ -20,9 +21,18 @@ export interface CastInput {
   embedUrls?: string[];
   /** Channel URL, e.g. `https://warpcast.com/~/channel/dev`. */
   parentUrl?: string;
+  /** The cast this one replies to. */
+  parentCastId?: CastId;
   /** Unix milliseconds; defaults to now. */
   timestampMs?: number;
 }
+
+export interface CastId { fid: number; hash: `0x${string}` }
+
+/** Farcaster's ReactionType: a like or a recast (reshare). */
+export type FarcasterReaction = 'like' | 'recast';
+
+export interface ReactionInput { fid: number; type: FarcasterReaction; target: CastId; timestampMs?: number }
 
 export interface SignedFarcasterMessage { bytes: Uint8Array; hash: `0x${string}` }
 
@@ -33,7 +43,8 @@ export function farcasterTime(unixMs: number): number {
 export function encodeCastAddData(input: CastInput): Uint8Array {
   const body = new ProtoWriter();
   body.packedVarints(2, []); // mentions
-  if (input.parentUrl) body.string(7, input.parentUrl);
+  if (input.parentCastId) body.message(3, castId(input.parentCastId));
+  else if (input.parentUrl) body.string(7, input.parentUrl);
   if (input.text) body.string(4, input.text); // proto3 omits empty strings (a video-only cast)
   body.packedVarints(5, []); // mentionsPositions
   for (const url of input.embedUrls ?? []) body.message(6, new ProtoWriter().string(1, url));
@@ -46,8 +57,30 @@ export function encodeCastAddData(input: CastInput): Uint8Array {
   return data.finish();
 }
 
+export function encodeReactionAddData(input: ReactionInput): Uint8Array {
+  const body = new ProtoWriter().varint(1, input.type === 'like' ? 1 : 2).message(2, castId(input.target));
+  const data = new ProtoWriter();
+  data.varint(1, MESSAGE_TYPE_REACTION_ADD);
+  data.varint(2, input.fid);
+  data.varint(3, farcasterTime(input.timestampMs ?? Date.now()));
+  data.varint(4, FARCASTER_NETWORK_MAINNET);
+  data.message(7, body);
+  return data.finish();
+}
+
+function castId(id: CastId) {
+  return new ProtoWriter().varint(1, id.fid).bytes(2, fromHex(id.hash));
+}
+
 export function signCastAdd(input: CastInput, privateKey: Uint8Array): SignedFarcasterMessage {
-  const dataBytes = encodeCastAddData(input);
+  return signMessageData(encodeCastAddData(input), privateKey);
+}
+
+export function signReactionAdd(input: ReactionInput, privateKey: Uint8Array): SignedFarcasterMessage {
+  return signMessageData(encodeReactionAddData(input), privateKey);
+}
+
+function signMessageData(dataBytes: Uint8Array, privateKey: Uint8Array): SignedFarcasterMessage {
   const hash = blake3(dataBytes, { dkLen: 20 });
   const signature = ed25519.sign(hash, privateKey);
   const signer = ed25519.getPublicKey(privateKey);

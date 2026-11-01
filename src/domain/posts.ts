@@ -40,6 +40,9 @@ export interface PostMedia {
   sha256?: string;
 }
 
+/** Counts a source reports; `liked` and `reshared` are the viewer's own, where known. */
+export interface PostEngagement { replies: number; reposts: number; likes: number; liked?: boolean; reshared?: boolean }
+
 /** One canonical post is rendered in both Feed and Clips. */
 export interface SocialPost {
   id: string;
@@ -52,8 +55,8 @@ export interface SocialPost {
   media?: PostMedia[];
   topics: string[];
   provenance: { connectorId: string; externalId?: string; canonicalURL?: string };
-  /** Present only where a source actually reports counts; Open Media has no reactions yet. */
-  engagement?: { replies: number; reposts: number; likes: number };
+  /** Present only where a source actually reports counts. */
+  engagement?: PostEngagement;
   relevance: { followsAuthor: boolean; selectedInterestMatches: string[]; communityMatch?: string };
   /**
    * How an external network's post became eligible for this doorway: which public stream it was read

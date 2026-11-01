@@ -5,7 +5,7 @@ import { Linking, Platform } from 'react-native';
 
 import { deviceSecretStorage, getAPIAccessToken } from '../../auth/supabase';
 import { farcasterProfileFromUserData } from '../../domain/networkPosts';
-import { fromHex, signCastAdd, toHex } from './farcasterMessage';
+import { fromHex, signCastAdd, signReactionAdd, SignedFarcasterMessage, toHex } from './farcasterMessage';
 import { NetworkAccount, PublishingConnector, PublishingError } from './types';
 
 /**
@@ -116,18 +116,37 @@ export const farcasterPublisher: PublishingConnector = {
   async publish(content) {
     const stored = await load();
     if (!stored) throw new PublishingError('Connect Farcaster in Settings → Cross-posting.');
-    const key = fromHex(stored.privateKey);
-    try {
-      const message = signCastAdd({ fid: stored.fid, text: content.text, embedUrls: content.video ? [content.video.url] : undefined }, key);
-      const token = await getAPIAccessToken();
-      if (!token) throw new PublishingError('Sign in to Open Media first.');
-      const response = await fetch(`${apiURL()}/v1/cross-posting/farcaster/messages`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream' }, body: message.bytes as unknown as BodyInit });
-      const body = await response.json().catch(() => ({})) as { hash?: string; error?: string };
-      if (!response.ok) throw new PublishingError(body.error ?? 'Farcaster didn’t accept the post.');
-      const hash = body.hash ?? message.hash;
+    const hash = await submit(stored, (key) => signCastAdd({ fid: stored.fid, text: content.text, embedUrls: content.video ? [content.video.url] : undefined }, key));
+    return { externalId: hash, url: `https://farcaster.xyz/${encodeURIComponent(stored.username)}/${hash.slice(0, 10)}` };
+  },
+
+  async interact(target, interaction) {
+    if (target.network !== 'farcaster') throw new PublishingError('That post isn’t on Farcaster.');
+    const stored = await load();
+    if (!stored) throw new PublishingError('Connect Farcaster in Settings → Cross-posting.');
+    const cast = { fid: target.fid, hash: target.hash as `0x${string}` };
+    if (interaction.kind === 'comment') {
+      const hash = await submit(stored, (key) => signCastAdd({ fid: stored.fid, text: interaction.text, parentCastId: cast }, key));
       return { externalId: hash, url: `https://farcaster.xyz/${encodeURIComponent(stored.username)}/${hash.slice(0, 10)}` };
-    } finally {
-      key.fill(0);
     }
+    // Farcaster keeps one reaction per account and cast, so a repeated like is already done.
+    await submit(stored, (key) => signReactionAdd({ fid: stored.fid, type: interaction.kind === 'like' ? 'like' : 'recast', target: cast }, key), true);
+    return undefined;
   },
 };
+
+/** Signs on this device and relays only the signed bytes through Open Media's server. */
+async function submit(stored: StoredFarcaster, sign: (key: Uint8Array) => SignedFarcasterMessage, duplicateIsDone = false): Promise<string> {
+  const key = fromHex(stored.privateKey);
+  try {
+    const message = sign(key);
+    const token = await getAPIAccessToken();
+    if (!token) throw new PublishingError('Sign in to Open Media first.');
+    const response = await fetch(`${apiURL()}/v1/cross-posting/farcaster/messages`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/octet-stream' }, body: message.bytes as unknown as BodyInit });
+    const body = await response.json().catch(() => ({})) as { hash?: string; error?: string };
+    if (!response.ok && !(duplicateIsDone && /already/i.test(body.error ?? ''))) throw new PublishingError(body.error ?? 'Farcaster didn’t accept the post.');
+    return body.hash ?? message.hash;
+  } finally {
+    key.fill(0);
+  }
+}
