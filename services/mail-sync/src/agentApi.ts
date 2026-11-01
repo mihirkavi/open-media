@@ -49,10 +49,11 @@ import { mcpAppMimeType, postsViewHtml, postsViewUri } from './mcpAppView.js';
 import { authenticate } from './session.js';
 import { confirmEvidence, MarketplaceEnv, MarketplaceError, marketplaceConfigured, readEvidence, serviceRpc } from './marketplace.js';
 import { verifyWebBotAuth } from './webBotAuth.js';
+import { runTranslate, TranslateEnv } from './translate.js';
 import { reportReasons } from '../../../src/domain/listingSafety';
 import { discloseLegalName, handleVerificationWebhook, startVerification, VerificationEnv, VerificationError, verificationConfigured } from './verification.js';
 
-export type AgentEnv = { WEB_APP_HOSTS?: string } & PublicApiEnv & BridgesEnv & ContactsEnv & VerificationEnv & PublicEventsEnv & PaymentsEnv & AgentAuthEnv & MarketplaceEnv;
+export type AgentEnv = { WEB_APP_HOSTS?: string } & PublicApiEnv & BridgesEnv & ContactsEnv & VerificationEnv & PublicEventsEnv & PaymentsEnv & AgentAuthEnv & MarketplaceEnv & TranslateEnv;
 
 const version = '1.0.0';
 const sources = ['open-media', 'farcaster', 'lens', 'hive', 'deso'] as const;
@@ -1085,6 +1086,19 @@ export class Account {
   }
 }
 
+/** Translation for agents (ADR 0022): public text is cached by its hash, private text is never stored. */
+async function translateTexts(env: AgentEnv, args: Record<string, unknown>, privacy: 'public' | 'private') {
+  if (!env.AI) throw new AgentError(503, 'unavailable', 'Translation isn’t available on this server.');
+  try { return await runTranslate({ texts: args.texts, to: args.target, from: args.source }, env, privacy); }
+  catch (error) { throw error instanceof UserFacingError ? new AgentError(400, 'bad_request', error.message) : error; }
+}
+
+const translateInput = {
+  texts: z.array(z.string().min(1).max(5_000)).min(1).max(20),
+  target: z.string().length(2).optional().describe('ISO 639-1 code of the language to translate into. Default: en.'),
+  source: z.string().length(2).optional().describe('ISO 639-1 code of the texts’ language, if known. Detected when left out.'),
+};
+
 // ─── MCP servers ─────────────────────────────────────────────────────────────
 
 const instructions = `Open Media is one open, black-and-white app for a person's social world: one feed across Open Media and the open networks Farcaster, Lens, Hive and DeSo, one inbox, and one post to every network the person chooses. ${mission} Present posts with their author and network, link to the source, and keep each post's “why” reasons when you summarise a feed. You are an agent: never pose as a person.`;
@@ -1143,6 +1157,7 @@ function registerPublicTools(server: McpServer, env: AgentEnv, origin: string) {
   tool(server, 'find_setting', { title: 'Find a setting', description: 'Find where a control lives in the Open Media app, e.g. “dark mode”, “stop posting to farcaster”, “export my data”.', input: { query: z.string().min(1).max(120) }, readOnly: true }, (args) => settingsLookup(String(args.query)));
   tool(server, 'get_listing_checks', { title: 'What was checked on a listing', description: 'For a public listing: whether it is clear or getting a closer look, how many verified people checked its claims, each claim with its outcome, and the public pages they cited.', input: { postId: z.string() }, readOnly: true }, (args) => listingChecks(env, String(args.postId)));
   tool(server, 'get_transparency', { title: 'Marketplace transparency counts', description: 'Monthly counts with no personal data: listings checked, held, sent for a closer look, held after reports, operator decisions, listings cleared by verified people, and seller details requested.', input: { months: z.number().int().min(1).max(24).optional() }, readOnly: true }, (args) => transparency(env, Number(args.months ?? 6)));
+  tool(server, 'translate_text', { title: 'Translate public text', description: 'Translates public text (posts, comments, captions, event descriptions) into English or another language, the way the Open Media app does automatically. Each text’s language is detected; text already in the target language comes back unchanged with translated: false. Translations of public text are cached by a hash of the text, so each post is translated once. Never send private messages or email here: use translate_private_text on /me/mcp, which stores nothing. Show translations as translations, with the original language named.', input: translateInput, readOnly: true }, (args) => translateTexts(env, args, 'public'));
   tool(server, 'about_open_media', { title: 'About Open Media', description: 'The mission, principles, three promises, roadmap and honest status, plus every interface for agents.', input: {}, readOnly: true }, () => aboutOpenMedia(origin));
 }
 
@@ -1276,6 +1291,7 @@ export function accountMcp(env: AgentEnv, origin: string, account: Account) {
     const server = new McpServer({ name: 'open-media-account', title: 'Open Media (your account)', version }, { instructions: `${instructions} These tools act as the signed-in person; ask before publishing, deleting or sending anything.` });
     registerPublicTools(server, env, origin);
     registerAccountTools(server, account);
+    tool(server, 'translate_private_text', { title: 'Translate private text', description: 'Translates the person’s private text (their messages, bridged chats or email) into English or another language. Nothing is stored, cached or logged: the text is translated in memory and returned. Each text’s language is detected; text already in the target language comes back unchanged with translated: false.', input: translateInput, readOnly: true }, (args) => translateTexts(env, args, 'private'));
     return server;
   }, { legacy: 'stateless', responseMode: 'json' });
 }
@@ -1296,8 +1312,8 @@ export function serverCard(origin: string) {
     version,
     documentation: `${origin}/llms.txt`,
     servers: [
-      { name: 'open-media', title: 'Open Media', url: `${origin}/open/mcp`, transport: 'streamable-http', authentication: { type: 'none' }, tools: ['get_feed', 'search', 'get_post', 'get_profile', 'list_feed_lenses', 'get_feed_lens', 'draft_feed_lens', 'preview_feed_lens', 'find_jobs', 'list_networks', 'find_setting', 'about_open_media'] },
-      { name: 'open-media-account', title: 'Open Media (your account)', url: `${origin}/me/mcp`, transport: 'streamable-http', authentication: { type: 'bearer', description: 'The person’s Open Media access token: sign in with request_sign_in_code and sign_in_with_code on the public server (or POST /v1/auth/email-code then /v1/auth/verify), or copy it from Settings → Developers and agents. It expires after about an hour; renew it with refresh_sign_in.' }, tools: ['get_me', 'set_up_profile', 'publish_post', 'delete_post', 'report_post', 'list_conversations', 'start_conversation', 'send_message', 'export_my_data', 'block_person', 'report_conversation', 'delete_my_account', 'list_email', 'list_mailboxes', 'connect_mailbox', 'sync_mailbox', 'send_email', 'remove_mailbox', 'list_chat_networks', 'list_bridged_chats', 'send_bridged_message', 'chat_network_sign_in_options', 'start_chat_network_sign_in', 'continue_chat_network_sign_in', 'disconnect_chat_network', 'cross_posting_status', 'list_my_feed_lenses', 'save_feed_lens', 'install_feed_lens', 'delete_feed_lens', 'get_my_feed', 'get_profile_fields', 'set_profile_fields', 'get_professional_profile', 'set_professional_profile', 'import_resume', 'tailor_resume', 'draft_job_application', 'publish_job', 'plus every public tool'] },
+      { name: 'open-media', title: 'Open Media', url: `${origin}/open/mcp`, transport: 'streamable-http', authentication: { type: 'none' }, tools: ['get_feed', 'search', 'get_post', 'get_profile', 'list_feed_lenses', 'get_feed_lens', 'draft_feed_lens', 'preview_feed_lens', 'find_jobs', 'list_networks', 'find_setting', 'translate_text', 'about_open_media'] },
+      { name: 'open-media-account', title: 'Open Media (your account)', url: `${origin}/me/mcp`, transport: 'streamable-http', authentication: { type: 'bearer', description: 'The person’s Open Media access token: sign in with request_sign_in_code and sign_in_with_code on the public server (or POST /v1/auth/email-code then /v1/auth/verify), or copy it from Settings → Developers and agents. It expires after about an hour; renew it with refresh_sign_in.' }, tools: ['get_me', 'set_up_profile', 'publish_post', 'delete_post', 'report_post', 'list_conversations', 'start_conversation', 'send_message', 'export_my_data', 'block_person', 'report_conversation', 'delete_my_account', 'list_email', 'list_mailboxes', 'connect_mailbox', 'sync_mailbox', 'send_email', 'remove_mailbox', 'list_chat_networks', 'list_bridged_chats', 'send_bridged_message', 'chat_network_sign_in_options', 'start_chat_network_sign_in', 'continue_chat_network_sign_in', 'disconnect_chat_network', 'cross_posting_status', 'list_my_feed_lenses', 'save_feed_lens', 'install_feed_lens', 'delete_feed_lens', 'get_my_feed', 'get_profile_fields', 'set_profile_fields', 'get_professional_profile', 'set_professional_profile', 'import_resume', 'tailor_resume', 'draft_job_application', 'publish_job', 'translate_private_text', 'plus every public tool'] },
       { name: 'open-media-events', title: 'Open Media Events', url: `${origin}/mcp`, transport: 'streamable-http', authentication: { type: 'oauth2', metadata: `${origin}/.well-known/oauth-authorization-server` } },
     ],
   };
@@ -1481,6 +1497,10 @@ function baseOpenApi(origin: string) {
       '/v1/bridges/{network}/login/cancel': { post: { summary: 'Cancel a sign-in', security: bearer, parameters: [{ name: 'network', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: ok('Cancelled') } } },
       '/v1/bridges/{network}/logout': { post: { summary: 'Disconnect a chat network', security: bearer, parameters: [{ name: 'network', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: ok('Disconnected') } } },
       '/v1/cross-posting/status': { get: { summary: 'Which networks this server helps cross-post to', responses: { 200: ok('Status') } } },
+      '/v1/translate': {
+        get: { summary: 'Translate one public text (a post, comment or event description), detecting its language. Cached by a hash of the text.', parameters: [{ name: 'text', in: 'query', required: true, schema: { type: 'string', maxLength: 5000 } }, { name: 'to', in: 'query', schema: { type: 'string', default: 'en' }, description: 'ISO 639-1 target language' }, { name: 'from', in: 'query', schema: { type: 'string' }, description: 'ISO 639-1 source language; detected when left out' }], responses: { 200: ok('Translations'), 400: error, 429: error, 503: error } },
+        post: { summary: 'Translate up to 20 texts at once. Public text is cached by its hash; with private: true (needs the person’s token) nothing is stored, cached or logged.', requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { items: { type: 'array', maxItems: 20, items: { type: 'object', required: ['text'], properties: { id: { type: 'string' }, text: { type: 'string', maxLength: 5000 }, source: { type: 'string' } } } }, texts: { type: 'array', maxItems: 20, items: { type: 'string', maxLength: 5000 } }, target: { type: 'string', default: 'en' }, private: { type: 'boolean', description: 'Messages and email: needs Authorization: Bearer; never stored' } } } } } }, responses: { 200: ok('Translations: id, text, source, target, translated, cached'), 400: error, 401: error, 429: error, 503: error } },
+      },
       '/v1/search/assist': { post: { summary: 'AI summary of public posts you pass in, with citations', responses: { 200: ok('Summary'), 429: error, 503: error } } },
     },
     components: {

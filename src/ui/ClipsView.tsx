@@ -9,6 +9,7 @@ import { explainFeedPost, selectFeed, SocialPost } from '../domain/posts';
 import { formatRelativeTime } from '../domain/publicPosts';
 import { ClipVideo } from './ClipVideo';
 import { useMixedFeed } from './useMixedFeed';
+import { TranslationNote, useTranslation } from './useTranslation';
 import { VerifiedTick } from './VerifiedTick';
 
 /**
@@ -87,6 +88,7 @@ function Clip({ post, height, active, mounted, muted, onToggleMute, onFailed }: 
   useEffect(() => { if (!active) { setPaused(false); setWhy(false); } }, [active]);
   const original = safeHttpsUrl(post.provenance.canonicalURL);
   const network = sourceName(post.provenance.connectorId);
+  const translation = useTranslation(post.id, [post.title ?? post.body]);
   const explanation = explainFeedPost(post, 'raw');
   const fail = useCallback(() => onFailed(post.id), [onFailed, post.id]);
   if (!media?.url) return null;
@@ -100,7 +102,8 @@ function Clip({ post, height, active, mounted, muted, onToggleMute, onFailed }: 
     <Pressable accessibilityRole="button" accessibilityLabel={muted ? 'Turn sound on' : 'Mute'} onPress={onToggleMute} style={styles.mute}><Ionicons name={muted ? 'volume-mute' : 'volume-high'} size={20} color="#FFFFFF" /></Pressable>
     <View pointerEvents="box-none" style={styles.overlay}>
       <PersonLink target={targetForPost(post)} label={`Open ${post.author.displayName}’s profile`} style={styles.authorLink}><Text style={styles.author}>{post.author.displayName}{post.author.verified ? <> <VerifiedTick size={14} /></> : null} <Text style={styles.handle}>{post.author.handle} · {formatRelativeTime(post.createdAt)}</Text></Text></PersonLink>
-      {post.title || post.body ? <Text numberOfLines={3} style={styles.body}>{post.title ?? post.body}</Text> : null}
+      {post.title || post.body ? <Text numberOfLines={3} style={styles.body}>{translation.texts[0]}</Text> : null}
+      <TranslationNote note={translation.note} style={styles.translationNote} />
       <View style={styles.meta}>
         <Text style={styles.source}>{network}{media.durationSeconds ? ` · ${Math.round(media.durationSeconds)}s` : ''}</Text>
         {original ? <Pressable accessibilityRole="link" accessibilityLabel={`Open this clip on ${network}`} onPress={() => { Linking.openURL(original).catch(() => undefined); }} style={styles.link}><Text style={styles.linkText}>Open on {network}</Text><Ionicons name="open-outline" size={12} color="#E8E8E3" /></Pressable> : null}
@@ -123,6 +126,7 @@ const styles = StyleSheet.create({
   author: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
   handle: { color: '#C9C9C4', fontWeight: '400', fontSize: 13 },
   body: { color: '#FFFFFF', fontSize: 14, lineHeight: 20 },
+  translationNote: { color: 'rgba(255,255,255,0.75)' },
   meta: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 16, rowGap: 2 },
   source: { color: '#B9B9B4', fontSize: 12 },
   link: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 4 },

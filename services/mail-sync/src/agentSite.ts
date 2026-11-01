@@ -790,6 +790,7 @@ Open Media is a free, open-source social app (iPhone, Android, web) with one fee
 - Cross-network social search and feed summaries for Farcaster, Lens, Hive, DeSo and Open Media, with source links.
 - One person's posts across the networks they list.
 - Upcoming public events in the San Francisco Bay Area (Luma, Meetup, Eventbrite).
+- Translating posts, comments and event descriptions into English or another language: \`translate_text\` on the public MCP server or \`GET ${origin}/v1/translate?text=…\`. Private messages and email go to \`translate_private_text\` on ${origin}/me/mcp, which stores nothing.
 - Acting for a signed-in person with their own token: posts, messages, email, contacts, listings, privacy, payments, tips and paid posts.
 - Not for Instagram, X, LinkedIn or TikTok feeds; Open Media does not scrape closed networks.
 

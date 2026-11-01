@@ -1,0 +1,7 @@
+// Local development only: lets the Node.js server (src/localServer.ts) borrow the Workers AI
+// binding through Wrangler's getPlatformProxy when OPEN_MEDIA_LOCAL_AI=true. Never deployed.
+{
+  "name": "convo-mail-sync-local-ai",
+  "compatibility_date": "2026-08-18",
+  "ai": { "binding": "AI", "remote": true }
+}

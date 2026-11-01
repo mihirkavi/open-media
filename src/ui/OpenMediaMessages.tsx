@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { AccessibilityInfo, ActivityIndicator, Animated, Easing, Image, Keyboard, Linking, Modal, Platform, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from "react-native";
+import { AccessibilityInfo, ActivityIndicator, Animated, Easing, Image, Keyboard, Linking, Modal, Platform, Pressable, ScrollView, StyleProp, StyleSheet, TextStyle, View, useWindowDimensions } from "react-native";
 import { PersonLink, PersonTarget } from "./people";
 import { Text, TextInput } from "./Text";
 
@@ -15,6 +15,7 @@ import { ThemeColors } from "../theme";
 import { useOpenMediaTheme } from "../themeContext";
 import { SourceMarker, sourceLabel } from "./SourceMarker";
 import type { MessageMode } from "./OpenMediaApp";
+import { TranslationNote, useTranslation } from "./useTranslation";
 import { VerifiedTick, verifiedBlue } from "./VerifiedTick";
 
 interface Props {
@@ -601,14 +602,13 @@ function MessageThread({
                   {item.message.channel === "email" ? (
                     <EmailBody message={item.message} />
                   ) : (
-                    <Text
+                    <MessageText
+                      message={item.message}
                       style={[
                         styles.message,
                         item.message.direction === "outbound" && styles.outboundMessage,
                       ]}
-                    >
-                      {item.message.body}
-                    </Text>
+                    />
                   )}
                 </ReplyableBubble>
                 <MessageMedia message={item.message} />
@@ -1321,6 +1321,17 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
 }
 
+/** A chat message; one from someone else is shown in the reader's language, never stored (ADR 0022). */
+function MessageText({ message, style }: { message: Message; style: StyleProp<TextStyle> }) {
+  const translation = useTranslation(message.id, message.direction === "outbound" ? [] : [message.body], "private");
+  return (
+    <>
+      <Text style={style}>{translation.texts[0] ?? message.body}</Text>
+      <TranslationNote note={translation.note} />
+    </>
+  );
+}
+
 /** Email shown like a message: links as words, quoted history hidden, long mail collapsed. */
 function EmailBody({ message }: { message: Message }) {
   const { colors } = useOpenMediaTheme();
@@ -1329,13 +1340,16 @@ function EmailBody({ message }: { message: Message }) {
   const long = formatted.plain.length > 600 || formatted.plain.split("\n").length > 10;
   const [expanded, setExpanded] = useState(false);
   const outbound = message.direction === "outbound";
+  // Email is private: translated without being stored (ADR 0022). A translation is plain text.
+  const translation = useTranslation(message.id, outbound ? [] : [formatted.plain], "private");
+  const translated = translation.note && translation.texts[0] !== formatted.plain ? translation.texts[0] : undefined;
   return (
     <View>
       <Text
         numberOfLines={long && !expanded ? 10 : undefined}
         style={[styles.message, outbound && styles.outboundMessage]}
       >
-        {formatted.segments.map((segment, index) =>
+        {translated ?? formatted.segments.map((segment, index) =>
           segment.url ? (
             <Text
               key={index}
@@ -1350,6 +1364,7 @@ function EmailBody({ message }: { message: Message }) {
           ),
         )}
       </Text>
+      <TranslationNote note={translation.note} />
       {long ? (
         <Pressable accessibilityRole="button" onPress={() => setExpanded((value) => !value)}>
           <Text style={[styles.showMore, outbound && styles.outboundMessage]}>

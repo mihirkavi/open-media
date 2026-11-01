@@ -67,6 +67,8 @@ async function main() {
     // The local stack's own service key, for server-only steps such as payment checks (USDC on
     // Base Sepolia). Card payments stay off locally until Stripe test keys are added here.
     status.SECRET_KEY ? `SUPABASE_SECRET_KEY=${status.SECRET_KEY}` : '',
+    // Optional: translation and AI search through your own Workers AI (bills your Cloudflare account).
+    process.env.OPEN_MEDIA_LOCAL_AI === 'true' ? 'OPEN_MEDIA_LOCAL_AI=true' : '',
     // Local-only: lets the app read sign-in codes from the local test inbox.
     `LOCAL_INBOX_URL=${readSmtpEnv().enabled ? '' : inboxURL}`,
     // Bridged messaging (WhatsApp and others), when `npm run bridges` has been run.

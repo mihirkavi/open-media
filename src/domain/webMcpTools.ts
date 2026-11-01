@@ -64,6 +64,16 @@ export const webMcpTools: WebMcpToolDefinition[] = [
     inputSchema: { type: 'object', properties: { handle: { type: 'string', description: 'The Open Media handle, without @' } }, required: ['handle'] },
     path: '/v1/profiles/{handle}',
   },
+  {
+    name: 'translate_open_media_text', title: 'Translate public text',
+    description: 'Translates a public post, comment or event description into English (or another language), detecting its language, the way the Open Media app does automatically. Public text only: never pass private messages or email. Text already in the target language comes back unchanged with translated: false.',
+    inputSchema: { type: 'object', properties: {
+      text: { type: 'string', description: 'The public text to translate, up to 5,000 characters' },
+      to: { type: 'string', description: 'ISO 639-1 code of the language to translate into; default en' },
+      from: { type: 'string', description: 'ISO 639-1 code of the text’s language, if known; detected otherwise' },
+    }, required: ['text'] },
+    path: '/v1/translate', query: { text: 'text', to: 'to', from: 'from' },
+  },
 ];
 
 /** The API URL a tool call reads, from its definition and the agent's input. */

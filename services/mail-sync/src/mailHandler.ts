@@ -16,6 +16,7 @@ import { handleAgentRequest, isAgentPath } from './agentApi.js';
 import { handlePublicApiRequest, isPublicApiPath } from './publicApi.js';
 import { authenticate } from './session.js';
 import { runSearchAssist, SearchAssistEnv } from './searchAssist.js';
+import { runTranslate, TranslateEnv } from './translate.js';
 import { syncPop3, testPop3 } from './pop3.js';
 import { sendSmtp, SmtpConnection, testSmtp } from './smtp.js';
 import { SupabaseRestRepository } from './supabaseRestRepository.js';
@@ -24,7 +25,7 @@ import { describeValidationError } from './validation.js';
 
 export interface Limiter { limit(options: { key: string }): Promise<{ success: boolean }> }
 
-export interface MailEnv extends FarcasterSignerEnv, SearchAssistEnv, BridgesEnv {
+export interface MailEnv extends FarcasterSignerEnv, SearchAssistEnv, TranslateEnv, BridgesEnv {
   SUPABASE_URL: string;
   SUPABASE_PUBLISHABLE_KEY: string;
   MAIL_CREDENTIALS_KEY: string;
@@ -108,6 +109,20 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
       if (limiter && !(await limiter.limit({ key: `assist:${request.headers.get('cf-connecting-ip') ?? 'local'}` })).success) return rateLimited(headers);
       if (!env.AI) return json(503, { error: 'AI summaries aren’t available on this server.' }, headers);
       return json(200, await runSearchAssist(await readJSON(request), env), headers);
+    }
+
+    // Automatic translation (ADR 0022). Public text is cached by its hash; private text (messages,
+    // bridged chats, email) needs the person's session and is never stored, cached or logged.
+    if (url.pathname === '/v1/translate' && (request.method === 'POST' || request.method === 'GET')) {
+      const input = request.method === 'GET'
+        ? { texts: [url.searchParams.get('text') ?? ''], to: url.searchParams.get('to') ?? undefined, from: url.searchParams.get('from') ?? undefined }
+        : await readJSON(request, 98_304);
+      const privacy = request.method === 'POST' && (input as { private?: unknown } | null)?.private === true ? 'private' : 'public';
+      const caller = privacy === 'private' ? `user:${(await authenticate(request, env.SUPABASE_URL)).userId}` : `ip:${request.headers.get('cf-connecting-ip') ?? 'local'}`;
+      const limiter = env.PUBLIC_API_RATE_LIMITER;
+      if (limiter && !(await limiter.limit({ key: `translate:${caller}` })).success) return rateLimited(headers);
+      if (!env.AI) return json(503, { error: 'Translation isn’t available on this server.' }, headers);
+      return json(200, await runTranslate(input, env, privacy), { ...headers, 'cache-control': privacy === 'private' ? 'no-store' : 'private, max-age=300' });
     }
 
     // Sharp company logos for email senders (public site icons, cached; no account data).
@@ -251,10 +266,10 @@ async function smtpConnection(settings: SmtpSettings, env: MailEnv): Promise<Smt
   return { ...settings, address, allowPlaintext: local };
 }
 
-async function readJSON(request: Request): Promise<unknown> {
-  if (Number(request.headers.get('content-length') ?? '0') > 16_384) throw new Error('Request too large.');
+async function readJSON(request: Request, maxBytes = 16_384): Promise<unknown> {
+  if (Number(request.headers.get('content-length') ?? '0') > maxBytes) throw new Error('Request too large.');
   const text = await request.text();
-  if (new TextEncoder().encode(text).byteLength > 16_384) throw new Error('Request too large.');
+  if (new TextEncoder().encode(text).byteLength > maxBytes) throw new Error('Request too large.');
   return JSON.parse(text);
 }
 

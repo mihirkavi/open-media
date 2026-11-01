@@ -4,9 +4,11 @@
 // runtime, so local development uses Node.js. Settings come from .dev.vars,
 // which `npm run local` writes.
 import { createServer } from 'node:http';
+import { fileURLToPath } from 'node:url';
 
 import { handleMailRequest, Limiter, MailEnv } from './mailHandler.js';
 import { latestSignInCode } from './localSignIn.js';
+import { AiBinding } from './searchAssist.js';
 import { PaymentsEnv } from './payments.js';
 import { VerificationEnv } from './verification.js';
 
@@ -68,6 +70,15 @@ const env: MailEnv & PaymentsEnv & VerificationEnv = {
   MAIL_SEND_RATE_LIMITER: limiter(10),
   PUBLIC_API_RATE_LIMITER: limiter(120),
 };
+
+// Optional: translation and AI search through the owner's Workers AI, borrowed from Wrangler
+// (OPEN_MEDIA_LOCAL_AI=true npm run local). It bills that Cloudflare account; off by default.
+if (process.env.OPEN_MEDIA_LOCAL_AI === 'true') {
+  const { getPlatformProxy } = await import('wrangler');
+  const proxy = await getPlatformProxy<{ AI: AiBinding }>({ configPath: fileURLToPath(new URL('../wrangler.local-ai.jsonc', import.meta.url)) });
+  env.AI = proxy.env.AI;
+  console.log('Workers AI: on (translation and AI search use your Cloudflare account)');
+}
 
 const inboxURL = process.env.LOCAL_INBOX_URL;
 const appOrigin = process.env.CONVO_APP_ORIGIN ?? 'http://localhost:8081';
