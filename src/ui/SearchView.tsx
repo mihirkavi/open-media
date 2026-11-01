@@ -3,9 +3,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Keyboard, Platform, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from './Text';
 
-import { searchSharedLenses, StoredLens } from '../data/lensService';
+import { AssistedLens, draftLensWithAssistant, searchSharedLenses, StoredLens } from '../data/lensService';
 import { loadProfessionalProfile, saveProfessionalProfile } from '../data/openMediaService';
-import { builtInLensFor, lensFromRequest, lensSummary, looksLikeLensRequest } from '../domain/feedLenses';
+import { builtInLensFor, lensFromRequest, lensSummary, looksLikeLensRequest, looksLikeRefinement, refineLens } from '../domain/feedLenses';
 import { Conversation } from '../domain/models';
 import { networks, sourceName } from '../domain/networkPosts';
 import { SocialPost } from '../domain/posts';
@@ -116,17 +116,35 @@ function useProfileRows(query: string, signedIn: boolean): LensRow[] {
 const managePattern = /^(remove|delete|uninstall|forget|drop|share|publish|use|switch to|show me|open)\b/i;
 
 /**
- * Search is where people talk to the Feed (ADR 0017): a request like “only videos from people I
- * follow, no crypto” becomes one result row showing the lens it understood, and choosing the row
- * switches the Feed to it. Saved lenses can be switched to, shared or removed by name, and lenses
- * other people shared are offered for the same words. No other control exists for lenses.
+ * Search is where people talk to the Feed (ADR 0017, ADR 0020): a request like “only videos from
+ * people I follow, no crypto” becomes one result row showing the lens it understood, and choosing the
+ * row switches the Feed to it. It is a conversation: a follow-up such as “also hide hive” or “show
+ * hive again” changes the lens in use. Words the on-device rules can't read go to Open Media's lens
+ * assistant, whose answer is validated and shown the same way. Saved lenses can be switched to,
+ * shared or removed by name, and lenses other people shared are offered for the same words. No other
+ * control exists for lenses.
  */
 function useLensRows(query: string, lenses: FeedLenses | undefined, signedIn: boolean): LensRow[] {
   const [shared, setShared] = useState<StoredLens[]>([]);
   const [status, setStatus] = useState<Record<string, string>>({});
   const value = query.trim();
   const lower = value.toLocaleLowerCase();
-  const wantsLens = value.length > 3 && (looksLikeLensRequest(value) || /\b(lenses|feeds|algorithms?)\b/i.test(value));
+  const refining = Boolean(lenses) && value.length > 3 && looksLikeRefinement(value, lenses?.lens);
+  const wantsLens = value.length > 3 && (looksLikeLensRequest(value) || refining || /\b(lenses|feeds|algorithms?)\b/i.test(value));
+  // The assistant is asked only when the rules leave words unread, after typing pauses.
+  const [assisted, setAssisted] = useState<{ query: string; result: AssistedLens } | undefined>();
+  const rulesMissed = useMemo(() => {
+    if (!lenses || !wantsLens || value.length < 8 || managePattern.test(value)) return false;
+    const draft = refining ? refineLens(lenses.lens, value) : lensFromRequest(value);
+    return draft.unused.length > 0 || !draft.understood.length;
+  }, [lenses, wantsLens, refining, value]);
+  useEffect(() => {
+    if (!lenses || !rulesMissed) return;
+    let active = true;
+    const base = refining ? lenses.lens : undefined;
+    const timer = setTimeout(() => { draftLensWithAssistant(value, base).then((result) => { if (active && result) setAssisted({ query: value, result }); }).catch(() => undefined); }, 700);
+    return () => { active = false; clearTimeout(timer); };
+  }, [rulesMissed, value, refining, lenses]);
   useEffect(() => {
     setShared([]);
     if (!lenses || !wantsLens) return;
@@ -170,6 +188,18 @@ function useLensRows(query: string, lenses: FeedLenses | undefined, signedIn: bo
       }
     }
     if (!action || /^(show me|use)$/.test(action)) {
+      // A follow-up changes the lens in use; a built-in becomes the person's own copy.
+      if (!rows.length && refining) {
+        const refined = refineLens(lenses.lens, value);
+        if (refined.understood.length) {
+          const unused = refined.unused.length ? ` · Not used: ${refined.unused.join(', ')}` : '';
+          rows.push({ key: 'refine', title: lenses.lens.builtIn ? `Show the Feed as “${refined.lens.name}”` : `Update “${lenses.lens.name}”`, subtitle: `${lenses.lens.builtIn ? `${lenses.lens.name}, and: ` : 'Understood: '}${refined.understood.join(' · ')}${unused}`, run: async () => { lenses.apply(refined.lens); return true; } });
+        }
+      }
+      if (assisted?.query === value) {
+        const { lens, reply, byModel } = assisted.result;
+        rows.push({ key: 'assisted', title: !lens.builtIn && lens.id === lenses.lens.id ? `Update “${lens.name}”` : `Show the Feed as “${lens.name}”`, subtitle: `${reply || lensSummary(lens)}${byModel ? ' · Written with AI and checked against the lens rules' : ''}`, run: async () => { lenses.apply(lens); return true; } });
+      }
       if (!rows.length && looksLikeLensRequest(value)) {
         const draft = lensFromRequest(value);
         const understood = draft.understood.length ? `Understood: ${draft.understood.join(' · ')}` : lensSummary(draft.lens);
@@ -186,7 +216,7 @@ function useLensRows(query: string, lenses: FeedLenses | undefined, signedIn: bo
       }
     }
     return rows;
-  }, [value, lower, lenses, shared, status, signedIn]);
+  }, [value, lower, lenses, shared, status, signedIn, refining, assisted]);
 }
 
 function Section({ title, children, styles }: React.PropsWithChildren<{ title: string; styles: ReturnType<typeof createStyles> }>) {

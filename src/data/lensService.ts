@@ -57,3 +57,26 @@ export async function searchSharedLenses(query: string): Promise<StoredLens[]> {
   const rows = await rpc<LensRow[]>('open_media_public_feed_lenses', { p_query: query.slice(0, 80), p_limit: 5 });
   return (rows ?? []).flatMap((row) => fromRow(row) ?? []);
 }
+
+export interface AssistedLens { lens: FeedLens; reply: string; byModel: boolean }
+
+/**
+ * Asks Open Media's lens assistant (ADR 0020) to write or change a lens from words the on-device
+ * rules could not read. Send the lens in use as base to change it. The answer is validated here
+ * again before it can be shown, and nothing is saved until the person chooses it.
+ */
+export async function draftLensWithAssistant(request: string, base?: FeedLens): Promise<AssistedLens | undefined> {
+  const api = (process.env.EXPO_PUBLIC_OPEN_MEDIA_API_URL ?? '').replace(/\/$/, '');
+  if (!api) return undefined;
+  const response = await fetch(`${api}/v1/lenses/draft`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ request: request.slice(0, 400), ...(base ? { base: base.builtIn ? base.id : base } : {}) }),
+  });
+  if (!response.ok) return undefined;
+  const body = await response.json().catch(() => undefined) as { manifest?: unknown; reply?: string; writtenBy?: string } | undefined;
+  if (!body?.manifest) return undefined;
+  try {
+    const lens = parseLens({ ...(body.manifest as Record<string, unknown>), builtIn: false });
+    return { lens, reply: typeof body.reply === 'string' ? body.reply.slice(0, 240) : '', byModel: /^AI\b/.test(body.writtenBy ?? '') };
+  } catch { return undefined; }
+}

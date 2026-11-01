@@ -14,7 +14,7 @@ export const lensFormat = 'open-media.feed-lens/1';
 export type LensSource = 'open-media' | 'farcaster' | 'lens' | 'hive' | 'deso' | 'events';
 export type LensKind = 'text' | 'image' | 'video' | 'product' | 'service' | 'event' | 'job';
 /** Data about the viewer or the post's audience that a lens must ask for. Post text, time, network and kind are always readable. */
-export type LensPermission = 'follows' | 'interests' | 'public_engagement';
+export type LensPermission = 'follows' | 'interests' | 'language' | 'public_engagement';
 
 export interface LensFilters {
   /** Keep only posts from these networks. */
@@ -41,6 +41,8 @@ export interface LensObjectives {
   follows: number;
   interests: number;
   engagement: number;
+  /** Lifts posts written in a language the viewer reads (their device's languages). Needs the language permission. */
+  language: number;
   /** Spreads authors and networks out so one voice cannot fill the Feed. */
   diversity: number;
 }
@@ -70,6 +72,8 @@ export interface LensContext {
   followedAuthorIds?: ReadonlySet<string>;
   /** Topics the viewer chose. */
   interests?: string[];
+  /** Languages the viewer reads, as two-letter codes from their device settings (for example ["en", "mr"]). */
+  languages?: string[];
   now?: number;
 }
 
@@ -78,9 +82,9 @@ export const forbiddenSignals = ['Private messages', 'Exact location', 'Sensitiv
 
 export const lensSources: LensSource[] = ['open-media', 'farcaster', 'lens', 'hive', 'deso', 'events'];
 export const lensKinds: LensKind[] = ['text', 'image', 'video', 'product', 'service', 'event', 'job'];
-export const lensPermissions: LensPermission[] = ['follows', 'interests', 'public_engagement'];
+export const lensPermissions: LensPermission[] = ['follows', 'interests', 'language', 'public_engagement'];
 
-const noObjectives: LensObjectives = { recency: 0, follows: 0, interests: 0, engagement: 0, diversity: 0 };
+const noObjectives: LensObjectives = { recency: 0, follows: 0, interests: 0, engagement: 0, language: 0, diversity: 0 };
 
 export const rawLens: FeedLens = {
   format: lensFormat, id: 'raw', name: 'Raw', version: 1, builtIn: true, author: 'Open Media',
@@ -88,11 +92,18 @@ export const rawLens: FeedLens = {
   permissions: [], filters: {}, order: 'newest', objectives: { ...noObjectives, recency: 1 }, interests: [],
 };
 
+/**
+ * Relevant, version 3 (ADR 0020). Version 2 used only follows and chosen topics, which most people
+ * have not set up, so for them it was Raw with networks taking turns. Version 3 adds two signals that
+ * work from the first visit and that section 23 of the builder prompt allows: the languages the
+ * device is set to (worked out on the device, never sent) and the public like and repost counts each
+ * network already publishes. Both are small, so newness still leads; nothing is ever hidden.
+ */
 export const relevantLens: FeedLens = {
-  format: lensFormat, id: 'relevant', name: 'Relevant', version: 2, builtIn: true, author: 'Open Media',
-  description: 'Newer posts first, lifted when you follow the author or a post matches a topic you chose, with authors and networks spread out. Nothing else is used.',
-  permissions: ['follows', 'interests'], filters: {}, order: 'ranked',
-  objectives: { recency: 0.5, follows: 0.3, interests: 0.2, engagement: 0, diversity: 0.3 }, interests: [],
+  format: lensFormat, id: 'relevant', name: 'Relevant', version: 3, builtIn: true, author: 'Open Media',
+  description: 'Newer posts first, lifted when you follow the author, a post matches a topic you chose, it is in a language your device uses, or people liked and reposted it on its network. Authors and networks are spread out. Nothing is hidden and nothing else is used.',
+  permissions: ['follows', 'interests', 'language', 'public_engagement'], filters: {}, order: 'ranked',
+  objectives: { recency: 0.4, follows: 0.25, interests: 0.15, language: 0.1, engagement: 0.1, diversity: 0.4 }, interests: [],
 };
 
 /**
@@ -104,7 +115,7 @@ export const workLens: FeedLens = {
   description: 'Jobs, hiring, careers, launches and professional events, newer first and lifted when you follow the author or a post matches a topic you chose. Nothing else is used.',
   permissions: ['follows', 'interests'],
   filters: { about: ['job', 'jobs', 'hiring', 'hire', 'career', 'careers', 'role', 'resume', 'interview', 'internship', 'recruiting', 'networking', 'startup', 'founder', 'conference', 'launch', 'launched', 'opentowork', 'remote', 'freelance'] },
-  order: 'ranked', objectives: { recency: 0.5, follows: 0.35, interests: 0.25, engagement: 0, diversity: 0.3 }, interests: [],
+  order: 'ranked', objectives: { recency: 0.5, follows: 0.35, interests: 0.25, engagement: 0, language: 0, diversity: 0.3 }, interests: [],
 };
 
 export const builtInLenses: FeedLens[] = [relevantLens, rawLens, workLens];
@@ -176,11 +187,12 @@ export function parseLens(value: unknown): FeedLens {
     if (!Number.isFinite(weight) || weight < 0 || weight > 1) throw new LensError(`objectives.${key} must be between 0 and 1.`);
     objectives[key] = Math.round(weight * 100) / 100;
   }
-  if (order === 'ranked' && objectives.recency + objectives.follows + objectives.interests + objectives.engagement === 0) objectives.recency = 1;
+  if (order === 'ranked' && objectives.recency + objectives.follows + objectives.interests + objectives.engagement + objectives.language === 0) objectives.recency = 1;
   const needs: [boolean, LensPermission, string][] = [
     [Boolean(filters.followedOnly) || objectives.follows > 0, 'follows', 'who you follow'],
     [objectives.interests > 0, 'interests', 'your interests'],
     [objectives.engagement > 0, 'public_engagement', 'public like and repost counts'],
+    [objectives.language > 0, 'language', 'the languages your device uses'],
   ];
   for (const [needed, permission, label] of needs) {
     if (needed && !permissions.includes(permission)) throw new LensError(`This lens uses ${label}, so permissions must include "${permission}".`);
@@ -225,7 +237,7 @@ export function matchingTopics(post: SocialPost, topics: string[]): string[] {
   });
 }
 
-interface Signals { interestsAllowed: boolean; followsAllowed: boolean; followed: ReadonlySet<string>; interests: string[]; now: number }
+interface Signals { interestsAllowed: boolean; followsAllowed: boolean; followed: ReadonlySet<string>; interests: string[]; languages: string[]; now: number }
 
 /** Followed when the viewer's follows say so, or the source itself marked the author as followed. */
 function isFollowed(post: SocialPost, signals: Signals) {
@@ -239,6 +251,7 @@ function permittedSignals(lens: FeedLens, context: LensContext): Signals {
     followsAllowed: lens.permissions.includes('follows'),
     followed: lens.permissions.includes('follows') ? context.followedAuthorIds ?? new Set() : new Set(),
     interests: lens.permissions.includes('interests') ? unique([...lens.interests, ...(context.interests ?? [])]) : [],
+    languages: lens.permissions.includes('language') ? unique((context.languages ?? []).map(languageCode).filter(Boolean)) : [],
     now: context.now ?? Date.now(),
   };
 }
@@ -276,13 +289,26 @@ export function lensKeeps(post: SocialPost, lens: FeedLens, context: LensContext
 /** Each objective's 0–1 value for one post. */
 function objectiveValues(post: SocialPost, signals: Signals) {
   const ageHours = Math.max(0, (signals.now - createdAt(post)) / 3_600_000);
-  const engagement = post.engagement ? post.engagement.likes + post.engagement.reposts * 2 + post.engagement.replies : 0;
+  // Likes and reposts only, as every description of this signal says; reply counts are not used.
+  const engagement = post.engagement ? post.engagement.likes + post.engagement.reposts * 2 : 0;
   return {
     recency: Math.pow(0.5, ageHours / recencyHalfLifeHours),
     follows: isFollowed(post, signals) ? 1 : 0,
     interests: signals.interestsAllowed && (matchingTopics(post, signals.interests).length || post.relevance.selectedInterestMatches.length) ? 1 : 0,
     engagement: Math.min(1, Math.log1p(engagement) / Math.log1p(1000)),
+    language: languageValue(post, signals),
   };
+}
+
+/**
+ * 1 when the post is in one of the viewer's languages or its language can't be told, 0 when it is
+ * clearly in another. So the signal only ever lowers posts it is sure about, and does nothing at all
+ * when the device's languages are unknown.
+ */
+function languageValue(post: SocialPost, signals: Signals): number {
+  if (!signals.languages.length) return 1;
+  const language = postLanguage(post);
+  return !language || signals.languages.includes(language) || sameScript(language, signals.languages) ? 1 : 0;
 }
 
 export function lensScore(post: SocialPost, lens: FeedLens, context: LensContext = {}): number {
@@ -290,8 +316,9 @@ export function lensScore(post: SocialPost, lens: FeedLens, context: LensContext
   const values = objectiveValues(post, signals);
   const { objectives } = lens;
   const engagement = lens.permissions.includes('public_engagement') ? objectives.engagement : 0;
-  const total = objectives.recency + objectives.follows + objectives.interests + engagement || 1;
-  return (values.recency * objectives.recency + values.follows * objectives.follows + values.interests * objectives.interests + values.engagement * engagement) / total;
+  const language = lens.permissions.includes('language') ? objectives.language : 0;
+  const total = objectives.recency + objectives.follows + objectives.interests + engagement + language || 1;
+  return (values.recency * objectives.recency + values.follows * objectives.follows + values.interests * objectives.interests + values.engagement * engagement + values.language * language) / total;
 }
 
 /** Orders posts through a lens: filters first, then newest first or by score with authors spread out. */
@@ -344,11 +371,16 @@ export function explainLensPost(post: SocialPost, lens: FeedLens, context: LensC
   if (post.eligibility) used.push(post.eligibility.selection);
   const time = createdAt(post);
   if (time) used.push(`Posted ${postedLabel(now - time)}`);
-  if (lens.permissions.includes('public_engagement') && lens.objectives.engagement > 0 && post.engagement) used.push(`${post.engagement.likes} likes and ${post.engagement.reposts} reposts on ${sourceName(post.provenance.connectorId)}`);
+  if (lens.permissions.includes('public_engagement') && lens.objectives.engagement > 0 && post.engagement) used.push(`${post.engagement.likes} ${post.engagement.likes === 1 ? 'like' : 'likes'} and ${post.engagement.reposts} ${post.engagement.reposts === 1 ? 'repost' : 'reposts'} on ${sourceName(post.provenance.connectorId)}`);
+  if (signals.languages.length && lens.objectives.language > 0) {
+    const language = postLanguage(post);
+    if (language) used.push(languageValue(post, signals) ? `In ${languageName(language)}, a language your device uses` : `In ${languageName(language)}, which your device doesn’t use, so it sits a little lower`);
+  }
   used.push(lens.order === 'newest' ? `${lens.name}: newest first` : `Selected by ${lens.name}`);
   const notUsed: string[] = [];
   if (!lens.permissions.includes('follows')) notUsed.push('Who you follow');
   if (!lens.permissions.includes('interests')) notUsed.push('Your interests');
+  if (!lens.permissions.includes('language') || !lens.objectives.language) notUsed.push('Your languages');
   if (!lens.permissions.includes('public_engagement') || !lens.objectives.engagement) notUsed.push('Like and repost counts');
   notUsed.push(...forbiddenSignals);
   return { used, rules: describeLensRules(lens), notUsed };
@@ -370,7 +402,7 @@ export function describeLensRules(lens: FeedLens): string[] {
   if (lens.order === 'newest') rules.push('Newest first');
   else {
     const { objectives } = lens;
-    const parts: [number, string][] = [[objectives.recency, 'newness'], [objectives.follows, 'who you follow'], [objectives.interests, lens.interests.length ? `topics (${lens.interests.join(', ')})` : 'your topics'], [objectives.engagement, 'public likes and reposts']];
+    const parts: [number, string][] = [[objectives.recency, 'newness'], [objectives.follows, 'who you follow'], [objectives.interests, lens.interests.length ? `topics (${lens.interests.join(', ')})` : 'your topics'], [objectives.language, 'your languages'], [objectives.engagement, 'public likes and reposts']];
     const total = parts.reduce((sum, [weight]) => sum + weight, 0) || 1;
     rules.push(`Ranked by ${parts.filter(([weight]) => weight > 0).map(([weight, label]) => `${label} ${Math.round((weight / total) * 100)}%`).join(', ')}`);
     if (objectives.diversity) rules.push('Spreads authors and networks out');
@@ -381,6 +413,84 @@ export function describeLensRules(lens: FeedLens): string[] {
 /** One line for a lens: its rules joined, used as its summary in Search and in agent replies. */
 export function lensSummary(lens: FeedLens): string {
   return describeLensRules(lens).join(' · ');
+}
+
+// ---------- Languages ----------
+//
+// Relevant lifts posts in the viewer's languages (section 23 allows language). Networks rarely say
+// what language a post is in, so it is worked out here from the text, on the device, with two plain
+// rules anyone can check: the writing system, and for Latin letters the most common short words.
+// When the rules aren't sure the answer is "unknown", and unknown posts are never lowered.
+
+/** Writing systems by Unicode range, and the language each one most likely means on its own. */
+const scripts: [RegExp, string, string][] = [
+  [/[Ѐ-ӿ]/gu, 'cyrillic', 'ru'], [/[؀-ۿ]/gu, 'arabic', 'ar'], [/[ऀ-ॿ]/gu, 'devanagari', 'hi'],
+  [/[ঀ-৿]/gu, 'bengali', 'bn'], [/[஀-௿]/gu, 'tamil', 'ta'], [/[ఀ-౿]/gu, 'telugu', 'te'],
+  [/[઀-૿]/gu, 'gujarati', 'gu'], [/[਀-੿]/gu, 'gurmukhi', 'pa'], [/[ಀ-೿]/gu, 'kannada', 'kn'],
+  [/[ഀ-ൿ]/gu, 'malayalam', 'ml'], [/[฀-๿]/gu, 'thai', 'th'], [/[Ͱ-Ͽ]/gu, 'greek', 'el'],
+  [/[֐-׿]/gu, 'hebrew', 'he'], [/[぀-ヿ]/gu, 'kana', 'ja'], [/[가-힯]/gu, 'hangul', 'ko'],
+  [/[一-鿿]/gu, 'han', 'zh'],
+];
+/** Languages that share a writing system, so a Marathi reader isn't shown Hindi as foreign by script alone. */
+const scriptOf: Record<string, string> = {
+  ru: 'cyrillic', uk: 'cyrillic', be: 'cyrillic', bg: 'cyrillic', sr: 'cyrillic', mk: 'cyrillic', kk: 'cyrillic', mn: 'cyrillic',
+  ar: 'arabic', fa: 'arabic', ur: 'arabic', ps: 'arabic', hi: 'devanagari', mr: 'devanagari', ne: 'devanagari', sa: 'devanagari',
+  bn: 'bengali', as: 'bengali', ta: 'tamil', te: 'telugu', gu: 'gujarati', pa: 'gurmukhi', kn: 'kannada', ml: 'malayalam',
+  th: 'thai', el: 'greek', he: 'hebrew', yi: 'hebrew', ja: 'kana', ko: 'hangul', zh: 'han',
+};
+/** The most common short words of languages written in Latin letters. Two or more hits, and a clear lead, are needed. */
+const commonWords: Record<string, string[]> = {
+  en: ['the', 'and', 'is', 'are', 'was', 'you', 'this', 'that', 'with', 'for', 'have', 'it', 'of', 'to', 'in', 'my', 'what', 'just', 'be', 'not'],
+  es: ['el', 'la', 'los', 'las', 'de', 'que', 'y', 'en', 'un', 'una', 'es', 'por', 'con', 'para', 'del', 'se', 'lo', 'como', 'pero', 'muy'],
+  pt: ['o', 'os', 'as', 'de', 'que', 'e', 'em', 'um', 'uma', 'para', 'com', 'não', 'do', 'da', 'se', 'mais', 'por', 'como', 'muito', 'é'],
+  fr: ['le', 'la', 'les', 'de', 'des', 'et', 'est', 'un', 'une', 'du', 'en', 'que', 'pour', 'dans', 'pas', 'qui', 'sur', 'avec', 'je', 'ce'],
+  de: ['der', 'die', 'das', 'und', 'ist', 'nicht', 'ich', 'ein', 'eine', 'zu', 'den', 'mit', 'auf', 'für', 'auch', 'es', 'sie', 'von', 'dem', 'wir'],
+  it: ['il', 'la', 'di', 'che', 'e', 'un', 'una', 'per', 'non', 'sono', 'con', 'del', 'della', 'gli', 'mi', 'è', 'anche', 'come', 'ma', 'questo'],
+  id: ['yang', 'dan', 'di', 'ini', 'itu', 'dengan', 'untuk', 'tidak', 'ada', 'saya', 'akan', 'dari', 'ke', 'juga', 'kita', 'bisa', 'sudah', 'aku', 'kamu', 'karena'],
+  nl: ['de', 'het', 'een', 'en', 'van', 'is', 'niet', 'dat', 'op', 'ik', 'te', 'zijn', 'met', 'voor', 'maar', 'ook', 'wat', 'je', 'er', 'nog'],
+  tr: ['bir', 've', 'bu', 'da', 'de', 'için', 'ile', 'çok', 'ne', 'ama', 'gibi', 'daha', 'var', 'ben', 'sen', 'olarak', 'mi', 'değil', 'her', 'kadar'],
+};
+const languageNames: Record<string, string> = {
+  en: 'English', es: 'Spanish', pt: 'Portuguese', fr: 'French', de: 'German', it: 'Italian', id: 'Indonesian', nl: 'Dutch', tr: 'Turkish',
+  ru: 'a Cyrillic-script language', ar: 'an Arabic-script language', hi: 'a Devanagari-script language', bn: 'Bengali', ta: 'Tamil', te: 'Telugu',
+  gu: 'Gujarati', pa: 'Punjabi', kn: 'Kannada', ml: 'Malayalam', th: 'Thai', el: 'Greek', he: 'Hebrew', ja: 'Japanese', ko: 'Korean', zh: 'Chinese',
+};
+
+/** "en-US" → "en". */
+export function languageCode(tag: string): string {
+  const code = tag.trim().toLocaleLowerCase().split(/[-_]/)[0];
+  return /^[a-z]{2,3}$/.test(code) ? code : '';
+}
+
+function languageName(code: string) {
+  return languageNames[code] ?? code;
+}
+
+/** Whether a post's language shares a writing system with one the viewer reads, for languages told apart only by script. */
+function sameScript(language: string, viewer: string[]) {
+  const script = scriptOf[language];
+  return Boolean(script) && language === scripts.find(([, name]) => name === script)?.[2] && viewer.some((code) => scriptOf[code] === script);
+}
+
+/**
+ * The language a post is written in, as a two-letter code, or undefined when the rules aren't sure.
+ * Non-Latin writing systems decide by script; Latin text decides by common words.
+ */
+export function postLanguage(post: Pick<SocialPost, 'body' | 'title'>): string | undefined {
+  const text = `${post.title ?? ''} ${post.body}`.replace(/https?:\/\/\S+|[@#][\p{L}\p{N}_.-]+/gu, ' ').slice(0, 1200);
+  const letters = (text.match(/\p{L}/gu) ?? []).length;
+  if (letters < 12) return undefined;
+  let best: [number, string] = [0, ''];
+  for (const [pattern, , code] of scripts) {
+    const count = (text.match(pattern) ?? []).length;
+    if (count > best[0]) best = [count, code];
+  }
+  if (best[0] / letters > 0.4) return best[1];
+  const words = text.toLocaleLowerCase().split(/[^\p{L}]+/u).filter(Boolean);
+  if (words.length < 4) return undefined;
+  const votes = Object.entries(commonWords).map(([code, list]) => [code, words.filter((word) => list.includes(word)).length] as const).sort((a, b) => b[1] - a[1]);
+  const [first, second] = votes;
+  return first[1] >= 2 && first[1] >= second[1] * 1.5 + 1 ? first[0] : undefined;
 }
 
 // ---------- Writing a lens in plain words ----------
@@ -497,6 +607,10 @@ export function lensFromRequest(input: string): LensDraft {
     permissions.add('follows'); objectives.follows = relevantLens.objectives.follows;
   }
   if (order === 'ranked' && !permissions.has('interests')) { permissions.add('interests'); objectives.interests = relevantLens.objectives.interests; }
+  // Ranked lenses also read languages and public counts like Relevant; newest-first ones read neither
+  // unless the request asked for popular posts.
+  if (order === 'ranked') { permissions.add('language'); if (objectives.engagement) permissions.add('public_engagement'); }
+  else { objectives.language = 0; if (!permissions.has('public_engagement')) objectives.engagement = 0; }
   const lens = parseLens({
     format: lensFormat,
     name: name || defaultName(filters, interests),
@@ -504,6 +618,87 @@ export function lensFromRequest(input: string): LensDraft {
     permissions: [...permissions], filters, order, objectives, interests: unique(interests),
   });
   return { lens, understood: unique(understood), unused: unique(unused) };
+}
+
+// ---------- Talking to a lens: follow-up requests ----------
+
+/**
+ * Whether a request reads like a change to the lens already in use. Words that continue a
+ * conversation (“also hide hive”, “show hive again”, “call it Calm”) always do. Short tweaks
+ * (“hide hive”, “no crypto”, “more about design”) do only when the person is on their own lens; on
+ * Raw or Relevant they start a new lens, so “only videos …” is never read as a change to Relevant.
+ */
+export function looksLikeRefinement(input: string, current?: FeedLens): boolean {
+  if (/^\s*(also|and|plus|but|add|now|then|actually|instead|unmute|stop hiding|stop muting|bring back|rename|call it|name it|make it)\b/i.test(input) || /^\s*show\b.+\bagain\s*$/i.test(input)) return true;
+  return Boolean(current && !current.builtIn) && /^\s*(no|hide|mute|without|less|fewer|more|except)\b/i.test(input);
+}
+
+const unmutePattern = /\b(?:unmute|stop (?:hiding|muting)|bring back|allow|show)\s+(.+?)(?:\s+again)?\s*$/i;
+
+/**
+ * Changes an existing lens with a follow-up request, the way a person keeps talking to the Feed:
+ * “also no hive”, “more about design”, “show hive again”, “call it Calm”. What the request adds is
+ * merged into the lens; “show … again” and “unmute …” take things back out. The result keeps the
+ * lens's id, so saving it replaces the old version.
+ */
+export function refineLens(base: FeedLens, input: string): LensDraft {
+  const request = input.trim().slice(0, 400);
+  const understood: string[] = [];
+  const filters: LensFilters = JSON.parse(JSON.stringify(base.filters)) as LensFilters;
+  let interests = [...base.interests];
+  const permissions = new Set(base.permissions);
+  const objectives = { ...base.objectives };
+  let order = base.order;
+  // Changing a built-in lens makes the person's own copy; the built-in itself never changes.
+  let name = base.builtIn ? `My ${base.name}` : base.name;
+
+  const back = request.match(unmutePattern);
+  if (back && /\b(again|unmute|stop hiding|stop muting|bring back|allow)\b/i.test(request)) {
+    const words = back[1].toLocaleLowerCase().replace(/[^\p{L}\p{N}@#\s-]+/gu, ' ').split(/\s+/).filter((word) => word && !filler.has(word));
+    const sources = sourceWords.filter(([pattern]) => new RegExp(pattern.source, 'i').test(back[1])).map(([, source]) => source);
+    const kinds = kindWords.filter(([pattern]) => new RegExp(pattern.source, 'i').test(back[1])).flatMap(([, list]) => list);
+    if (sources.length) { filters.hideSources = filters.hideSources?.filter((source) => !sources.includes(source)); understood.push(`Show ${listNames(sources)} again`); }
+    if (kinds.length) { filters.hideKinds = filters.hideKinds?.filter((kind) => !kinds.includes(kind)); understood.push(`Show ${listKinds(kinds)} again`); }
+    const handles = words.filter((word) => word.startsWith('@')).map((word) => word.slice(1));
+    if (handles.length) { filters.muteAuthors = filters.muteAuthors?.filter((handle) => !handles.includes(handle)); understood.push(`Unmute ${handles.map((handle) => `@${handle}`).join(', ')}`); }
+    const plain = words.filter((word) => !word.startsWith('@') && filters.mute?.includes(word.replace(/^#/, '')));
+    if (plain.length) { filters.mute = filters.mute?.filter((word) => !plain.includes(word)); understood.push(`Unmute ${plain.join(', ')}`); }
+    for (const key of ['hideSources', 'hideKinds', 'muteAuthors', 'mute'] as const) if (!filters[key]?.length) delete filters[key];
+    if (understood.length) return finish();
+  }
+
+  const draft = lensFromRequest(request.replace(/^\s*(also|and also|and|plus|but|add|now|then|actually|instead)\b\s*/i, ''));
+  const added = draft.lens;
+  for (const key of ['sources', 'kinds', 'about', 'hideSources', 'hideKinds', 'mute', 'muteAuthors'] as const) {
+    const incoming = added.filters[key] as string[] | undefined;
+    if (incoming?.length) (filters as Record<string, string[]>)[key] = unique([...((filters[key] as string[] | undefined) ?? []), ...incoming]);
+  }
+  // A network or kind asked for again is no longer hidden, and the other way round.
+  if (added.filters.sources && filters.hideSources) filters.hideSources = filters.hideSources.filter((source) => !added.filters.sources!.includes(source));
+  if (added.filters.hideSources && filters.sources) filters.sources = filters.sources.filter((source) => !added.filters.hideSources!.includes(source));
+  for (const key of ['sources', 'hideSources'] as const) if (!filters[key]?.length) delete filters[key];
+  if (added.filters.followedOnly) { filters.followedOnly = true; permissions.add('follows'); }
+  if (added.filters.maxAgeHours) filters.maxAgeHours = added.filters.maxAgeHours;
+  if (/\b(newest first|latest first|chronological|in order|by time|no ranking)\b/i.test(request)) order = 'newest';
+  else if (/\b(rank|ranked|smart|relevant)\b/i.test(request)) order = 'ranked';
+  if (added.interests.length) { interests = unique([...interests, ...added.interests]); permissions.add('interests'); objectives.interests = Math.max(objectives.interests, added.objectives.interests); }
+  if (added.permissions.includes('public_engagement') && /\b(popular|trending|most liked|top posts)\b/i.test(request)) { permissions.add('public_engagement'); objectives.engagement = Math.max(objectives.engagement, added.objectives.engagement); }
+  if (/\b(surprise me|variety|diverse|diversity|mix it up|discover|serendipity)\b/i.test(request)) objectives.diversity = Math.max(objectives.diversity, added.objectives.diversity);
+  if (/\bmore\b[^,.;]*\b(?:people|accounts|those|folks|friends)\s+i\s+follow/i.test(request)) { permissions.add('follows'); objectives.follows = Math.max(objectives.follows, 0.5); }
+  const rename = request.match(/\b(?:called|named|name it|call it|rename (?:it )?to)\s+["“']?([^"”',.;]{2,40})/i);
+  if (rename) { name = rename[1].trim(); understood.push(`Named “${name}”`); }
+  understood.push(...draft.understood);
+  if (order !== base.order) understood.push(order === 'newest' ? 'Newest first' : 'Ranked');
+  return finish(draft.unused);
+
+  function finish(unused: string[] = []): LensDraft {
+    const lens = parseLens({
+      format: lensFormat, id: base.builtIn ? undefined : base.id, name, version: base.builtIn ? 1 : base.version + 1,
+      description: base.builtIn ? `Made from ${base.name} and: “${request.slice(0, 200)}”` : base.description,
+      permissions: [...permissions], filters, order, objectives, interests,
+    });
+    return { lens, understood: unique(understood), unused: unique(unused) };
+  }
 }
 
 function defaultName(filters: LensFilters, interests: string[]): string {

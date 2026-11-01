@@ -416,6 +416,7 @@ export function OpenMediaApp({
             lenses={lenses.lenses}
             onLensChange={lenses.choose}
             lensContext={lenses.context}
+            horizon={feed.horizon}
             posts={feed.posts}
             loading={feed.loading}
             error={feed.error}

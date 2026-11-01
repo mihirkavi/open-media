@@ -90,18 +90,20 @@ Open Media is free: no ads by default, no subscription and no API key for public
 
 Every way of ordering the Open Media Feed is a **lens**: a small JSON manifest, never code. Raw, Relevant and Work are built in; Work is the professional feed of jobs, hiring and networking (ADR 0018). People can describe a new lens in plain words in Search, or ask an AI agent to write one, then keep it, share it publicly, or install someone else's.
 
-One open-source runner orders the posts: [src/domain/feedLenses.ts](${sourceRepository}/blob/main/src/domain/feedLenses.ts). The app, the REST API and the MCP servers all use it, so an agent's preview matches the person's Feed. The design is [ADR 0017](${sourceRepository}/blob/main/docs/adrs/0017-feed-lenses.md).
+One open-source runner orders the posts: [src/domain/feedLenses.ts](${sourceRepository}/blob/main/src/domain/feedLenses.ts). Merging the networks page by page is [src/domain/feedMerge.ts](${sourceRepository}/blob/main/src/domain/feedMerge.ts), and the lens assistant is [services/mail-sync/src/lensAssist.ts](${sourceRepository}/blob/main/services/mail-sync/src/lensAssist.ts). The app, the REST API and the MCP servers all use the same code, so an agent's preview matches the person's Feed. Plain-English guide: [docs/FEED_ALGORITHMS.md](${sourceRepository}/blob/main/docs/FEED_ALGORITHMS.md). Design: [ADR 0017](${sourceRepository}/blob/main/docs/adrs/0017-feed-lenses.md) and [ADR 0020](${sourceRepository}/blob/main/docs/adrs/0020-working-default-feeds-and-lens-assistant.md).
 
 ## The built-in lenses
 
 ${builtInLenses.map((lens) => `### ${lens.name}\n\n${lens.description}\n\n${describeLensRules(lens).map((rule) => `- ${rule}`).join('\n')}\n\n\`\`\`json\n${JSON.stringify(lens, null, 2)}\n\`\`\``).join('\n\n')}
 
-Relevant's recency counts half as much every ${recencyHalfLifeHours} hours, so older posts still appear in time order rather than all at the bottom.
+Relevant's recency counts half as much every ${recencyHalfLifeHours} hours, so older posts still appear in time order rather than all at the bottom. Its language signal compares each post's language, worked out from the text on the device (writing system, then common words), with the languages the device is set to; posts it can't place are never lowered. Agents can pass \`Accept-Language\` to get the same effect.
+
+Raw is newest first across every network, and stays in order as you scroll: each network pages separately (one Hive page is minutes, one Farcaster page can be days), so the Feed shows posts only down to the time every network has reached, and loads more from the networks that are behind. The API's \`nextCursor\` does the same, so paging \`GET ${origin}/v1/feed\` returns every post once, in time order.
 
 ## What a lens can and cannot read
 
 - Always: each post's text, time, network and kind (video, image, product, service, event).
-- Only when its manifest lists the permission: \`follows\` (who the person follows on Open Media), \`interests\` (topics the person or the lens chose), \`public_engagement\` (like and repost counts a network publishes).
+- Only when its manifest lists the permission: \`follows\` (who the person follows on Open Media), \`interests\` (topics the person or the lens chose), \`language\` (the languages the person's device is set to), \`public_engagement\` (like and repost counts a network publishes).
 - Never, for any lens: ${forbiddenSignals.join(', ')}. These cannot be written in a manifest; unknown fields are refused.
 
 ## Writing a lens
@@ -113,12 +115,12 @@ Relevant's recency counts half as much every ${recencyHalfLifeHours} hours, so o
   "permissions": ["follows"],
   "filters": { "kinds": ["video"], "about": ["cooking"], "mute": ["crypto"], "hideSources": ["hive"] },
   "order": "ranked",
-  "objectives": { "recency": 0.6, "follows": 0.4, "interests": 0, "engagement": 0, "diversity": 0.3 },
+  "objectives": { "recency": 0.6, "follows": 0.4, "interests": 0, "language": 0, "engagement": 0, "diversity": 0.3 },
   "interests": []
 }
 \`\`\`
 
-Fields: \`filters\` keep posts (\`sources\`, \`kinds\`, \`about\`, \`followedOnly\`, \`maxAgeHours\`) and leave them out (\`hideSources\`, \`hideKinds\`, \`mute\`, \`muteAuthors\`). \`order\` is \`newest\` or \`ranked\`. \`objectives\` weigh recency, follows, interests and engagement (normalized), and \`diversity\` spreads authors out. The full field list is in \`GET ${origin}/v1/lenses\`.
+Fields: \`filters\` keep posts (\`sources\`, \`kinds\`, \`about\`, \`followedOnly\`, \`maxAgeHours\`) and leave them out (\`hideSources\`, \`hideKinds\`, \`mute\`, \`muteAuthors\`). \`order\` is \`newest\` or \`ranked\`. \`objectives\` weigh recency, follows, interests, language and engagement (normalized), and \`diversity\` spreads authors out. The full field list is in \`GET ${origin}/v1/lenses\`.
 
 ## For agents
 
@@ -126,7 +128,7 @@ Public, no key (\`${origin}/open/mcp\` or REST):
 
 - \`list_feed_lenses\` / \`GET ${origin}/v1/lenses?q=\`: the built-in and shared lenses, with rules in words.
 - \`get_feed_lens\` / \`GET ${origin}/v1/lenses/{id}\`.
-- \`draft_feed_lens\` / \`POST ${origin}/v1/lenses/draft\` \`{"request": "only videos about cooking, no crypto"}\`: plain words to a manifest, with what was and was not understood.
+- \`draft_feed_lens\` / \`POST ${origin}/v1/lenses/draft\` \`{"request": "only videos about cooking, no crypto"}\`: plain words to a manifest, with what was and was not understood and a one-line \`reply\` for the person. It is a conversation: send the next words with the lens as \`base\` (\`{"request": "also hide hive", "base": {…}}\`, or \`"base": "relevant"\`) and that lens changes. Fixed rules answer first; an AI model writes the lens only when the rules can't read some words, and \`writtenBy\` says which.
 - \`preview_feed_lens\` / \`POST ${origin}/v1/lenses/preview\` \`{"lens": {…}}\` or \`{"request": "…"}\`: the public Feed through that lens, each post with its "why".
 - \`get_feed\` with \`lens\` / \`GET ${origin}/v1/feed?lens=relevant\`.
 
@@ -138,7 +140,7 @@ Show the person a lens's summary and rules before saving it, and ask before shar
 
 ## In the app
 
-There is no lens editor. People write what they want in Search ("only videos from people I follow, no crypto"); Search shows the lens it understood, and choosing it switches the Feed. The Feed's picker shows Relevant, Raw and the lens in use. "Why this?" on every post lists the signals used, the lens's rules and what was never used.
+There is no lens editor and no extra button. People write what they want in Search ("only videos from people I follow, no crypto"); Search shows the lens it understood, and choosing it switches the Feed. Follow-ups keep the conversation going: "also hide hive", "show hive again", "call it Calm" change the lens in use (a built-in becomes the person's own copy). "share Calm" shares it; lenses others shared appear for matching words. The Feed's picker shows Relevant, Raw and the lens in use. "Why this?" on every post lists the signals used, the lens's rules, what was never used, and links here.
 `,
   },
   {

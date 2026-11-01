@@ -55,7 +55,7 @@ test('the lens directory lists the built-ins and valid shared lenses with their 
 test('one lens by id; unknown ids are a 404 with a hint', async () => {
   const relevant = await (await get('/v1/lenses/relevant')).json() as { name: string; reads: string[] };
   assert.equal(relevant.name, 'Relevant');
-  assert.deepEqual(relevant.reads, ['follows', 'interests']);
+  assert.deepEqual(relevant.reads, ['follows', 'interests', 'language', 'public_engagement']);
   assert.equal((await get('/v1/lenses/not-a-lens')).status, 404);
   const shared = await withDatabase(async () => (await get(`/v1/lenses/${sharedId}`)).json()) as { manifest: { author: string } };
   assert.equal(shared.manifest.author, '@maker');
@@ -83,7 +83,7 @@ test('previews validate manifests and refuse ones that reach for private data', 
 test('the feed accepts a lens id and reports which lens ordered it', async () => {
   const page = await withDatabase(async () => (await get('/v1/feed?sources=open-media&lens=relevant')).json()) as { lens: { id: string; summary: string } };
   assert.equal(page.lens.id, 'relevant');
-  assert.match(page.lens.summary, /Ranked by newness 50%/);
+  assert.match(page.lens.summary, /Ranked by newness 40%/);
   assert.equal((await get('/v1/feed?lens=nope')).status, 404);
 });
 
