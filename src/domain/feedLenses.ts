@@ -289,7 +289,8 @@ export function lensKeeps(post: SocialPost, lens: FeedLens, context: LensContext
 /** Each objective's 0–1 value for one post. */
 function objectiveValues(post: SocialPost, signals: Signals) {
   const ageHours = Math.max(0, (signals.now - createdAt(post)) / 3_600_000);
-  const engagement = post.engagement ? post.engagement.likes + post.engagement.reposts * 2 + post.engagement.replies : 0;
+  // Likes and reposts only, as every description of this signal says; reply counts are not used.
+  const engagement = post.engagement ? post.engagement.likes + post.engagement.reposts * 2 : 0;
   return {
     recency: Math.pow(0.5, ageHours / recencyHalfLifeHours),
     follows: isFollowed(post, signals) ? 1 : 0,

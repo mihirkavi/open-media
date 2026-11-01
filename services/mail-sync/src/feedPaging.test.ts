@@ -39,3 +39,27 @@ test('Raw pages through the networks in time order, never jumping back for one o
   // Farcaster's first page was asked again while Hive caught up, never skipped past.
   assert.ok(asked.filter((call) => call === 'farcaster:first').length >= 2);
 });
+
+test('Posts sharing the horizon timestamp across a page boundary are all returned once', async (t) => {
+  const tied = new Date(now - 5 * 60_000).toISOString();
+  const at = (id: string, source: string, createdAt: string): SocialPost => ({ ...post(id, source, 0), createdAt });
+  const tiedPages: Record<string, Record<string, { posts: SocialPost[]; cursor?: string }>> = {
+    hive: { first: { posts: [post('h1', 'hive', 1), at('h2', 'hive', tied)], cursor: 'h-2' }, 'h-2': { posts: [at('h3', 'hive', tied), post('h4', 'hive', 20)], cursor: undefined } },
+    farcaster: { first: { posts: [post('f1', 'farcaster', 3), post('f2', 'farcaster', 3000)], cursor: undefined } },
+  };
+  for (const connector of networkConnectors) {
+    if (!tiedPages[connector.id]) continue;
+    t.mock.method(connector as unknown as { fetchFeed: (cursor?: string) => Promise<unknown> }, 'fetchFeed', async (cursor?: string) => tiedPages[connector.id][cursor ?? 'first']);
+  }
+  const env = {} as Parameters<typeof feed>[0];
+  const seen: string[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < 6; page += 1) {
+    const result = await feed(env, 'https://example.test', { sources: ['hive', 'farcaster'], cursor });
+    seen.push(...result.data.map((item) => item.id.split(':').pop()!));
+    cursor = result.nextCursor ?? undefined;
+    if (!cursor) break;
+  }
+  assert.equal(new Set(seen).size, seen.length);
+  for (const id of ['h1', 'h2', 'h3', 'h4', 'f1', 'f2']) assert.ok(seen.includes(id), id);
+});

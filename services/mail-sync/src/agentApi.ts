@@ -149,7 +149,7 @@ export function agentPost(post: SocialPost, mode: FeedMode | FeedLens, origin: s
 const firstPage = 'first';
 
 /** Each source's next page, plus (for newest-first lenses) the horizon already returned, ADR 0020. */
-type FeedCursor = Partial<Record<Source, string | { createdAt: string; id: string }>> & { before?: number };
+type FeedCursor = Partial<Record<Source, string | { createdAt: string; id: string }>> & { before?: number; beforeIds?: string[] };
 
 export async function feed(env: AgentEnv, origin: string, options: { sources?: Source[]; kind?: 'feed' | 'clips'; mode?: FeedMode; lens?: FeedLens; context?: LensContext; cursor?: string }) {
   const chosen = options.sources?.length ? options.sources : [...sources];
@@ -184,7 +184,11 @@ export async function feed(env: AgentEnv, origin: string, options: { sources?: S
   // page continues exactly where this one stopped instead of jumping hours back for one network.
   const newestFirst = (lens ?? rawLens).order === 'newest' && kind === 'feed';
   const before = typeof cursor.before === 'number' ? cursor.before : undefined;
-  const pages = results.flatMap((result) => result.status === 'fulfilled' ? [{ ...result.value, posts: before ? result.value.posts.filter((post) => (Date.parse(post.createdAt) || 0) < before) : result.value.posts }] : []);
+  // Posts exactly at the previous horizon that were already returned are named in beforeIds, so a
+  // post sharing that timestamp but on the next page is kept rather than dropped.
+  const returnedAtBefore = new Set(Array.isArray(cursor.beforeIds) ? cursor.beforeIds.filter((id): id is string => typeof id === 'string') : []);
+  const notYetReturned = (post: SocialPost) => { const time = Date.parse(post.createdAt) || 0; return time < before! || (time === before && !returnedAtBefore.has(post.id)); };
+  const pages = results.flatMap((result) => result.status === 'fulfilled' ? [{ ...result.value, posts: before ? result.value.posts.filter(notYetReturned) : result.value.posts }] : []);
   const horizon = newestFirst ? feedHorizon(pages.map((page) => ({ id: page.source, oldest: oldestPostTime(page.posts), hasMore: Boolean(page.next) }))) : 0;
   const posts: SocialPost[] = [];
   const next: FeedCursor = {};
@@ -197,7 +201,12 @@ export async function feed(env: AgentEnv, origin: string, options: { sources?: S
   }
   // A network that failed this time is asked for the same page next time instead of being dropped.
   for (const source of unavailable) next[source as Source] = cursor[source as Source] ?? firstPage;
-  if (horizon && Object.keys(next).length) next.before = horizon;
+  if (horizon && Object.keys(next).length) {
+    next.before = horizon;
+    // Everything returned at exactly the horizon, including ties already returned on earlier pages.
+    const atHorizon = posts.filter((post) => (Date.parse(post.createdAt) || 0) === horizon).map((post) => post.id);
+    next.beforeIds = [...new Set([...(before === horizon ? returnedAtBefore : []), ...atHorizon])].slice(0, 200);
+  }
   const chosenLens = lens ?? 'raw';
   // Each page is ordered through the lens on its own; a lens that filters can return a short page.
   const ordered = selectFeed(collapseRepeatedPosts(posts), chosenLens, context);
