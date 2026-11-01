@@ -21,11 +21,15 @@ export type SearchTarget = 'feed' | 'messages' | 'settings';
 
 const suggestions = ['videos about cooking today', 'ethereum on lens', 'only videos from people I follow', 'dark mode'];
 
+/** One result Search can open: chosen with a tap, or with ↑ ↓ and Return. */
+interface ResultItem { key: string; section: string; icon: keyof typeof Ionicons.glyphMap; title: string; subtitle?: string; run: () => void }
+
 /**
  * Universal search: everything Open Media knows plus public posts across every network, with a
- * basic AI summary. Messages and email are matched on this device only.
+ * basic AI summary. Messages and email are matched on this device only. Laid out like Spotlight:
+ * one large field, then grouped results with the first one ready to open with Return.
  */
-export function SearchView({ posts, conversations, viewer, lenses, onNavigate, onClose, initialQuery = '' }: { posts: SocialPost[]; conversations: Conversation[]; viewer?: FeedViewer; lenses?: FeedLenses; onNavigate?: (target: SearchTarget) => void; onClose?: () => void; initialQuery?: string }) {
+export function SearchView({ posts, conversations, viewer, lenses, onNavigate, onOpenConversation, onClose, initialQuery = '' }: { posts: SocialPost[]; conversations: Conversation[]; viewer?: FeedViewer; lenses?: FeedLenses; onNavigate?: (target: SearchTarget) => void; onOpenConversation?: (id: string) => void; onClose?: () => void; initialQuery?: string }) {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
   const [query, setQuery] = useState(initialQuery);
   // A hashtag tapped in a post opens Search with it filled in.
@@ -39,25 +43,45 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
   // Choosing a lens shows the Feed through it.
   const showFeed = () => { if (onNavigate) onNavigate('feed'); else onClose?.(); };
 
-  return <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-    <View style={styles.titleRow}>
-      {onClose ? <Pressable accessibilityRole="button" accessibilityLabel="Close search" onPress={onClose} style={styles.close}><Ionicons name="chevron-back" size={22} color={colors.text} /></Pressable> : null}
-      <Text style={styles.title}>Search</Text>
-    </View>
-    <Text style={styles.subtitle}>People, posts on every network, Clips, messages, email, and settings, in one place.</Text>
-    <View style={styles.field}>
-      <Ionicons name="search" size={18} color={colors.textSecondary} />
-      <TextInput accessibilityLabel="Search everything" autoFocus value={query} onChangeText={setQuery} placeholder="Search everything" placeholderTextColor={colors.textTertiary} returnKeyType="search" onSubmitEditing={() => Keyboard.dismiss()} style={styles.input} />
-      {query ? <Pressable accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => setQuery('')} style={styles.clear}><Ionicons name="close-circle" size={18} color={colors.textTertiary} /></Pressable> : null}
+  const items: ResultItem[] = hasQuery ? [
+    ...lensRows.map((row) => ({ key: row.key, section: 'Feed', icon: 'options-outline' as const, title: row.title, subtitle: row.subtitle, run: () => { row.run().then((leave) => { if (leave) showFeed(); }).catch(() => undefined); } })),
+    ...profileRows.map((row) => ({ key: row.key, section: 'Your profile', icon: 'briefcase-outline' as const, title: row.title, subtitle: row.subtitle, run: () => { row.run().catch(() => undefined); } })),
+    ...search.settings.map((setting) => ({ key: setting.id, section: 'Settings', icon: 'settings-outline' as const, title: setting.title, subtitle: setting.description, run: () => onNavigate?.('settings') })),
+    ...search.messages.map((conversation) => ({ key: conversation.id, section: 'Messages and email', icon: (conversation.email ? 'mail-outline' : 'chatbubble-outline') as keyof typeof Ionicons.glyphMap, title: conversationTitle(conversation), subtitle: conversation.preview, run: () => onOpenConversation ? onOpenConversation(conversation.id) : onNavigate?.('messages') })),
+  ] : suggestions.map((item) => ({ key: item, section: 'Try', icon: 'search' as const, title: item, run: () => setQuery(item) }));
+
+  // The first result is the top hit; ↑ and ↓ move, Return opens, Esc clears.
+  const [active, setActive] = useState(0);
+  useEffect(() => { setActive(0); }, [query]);
+  const selected = Math.min(active, items.length - 1);
+  const onKey = (event: { nativeEvent: { key: string }; preventDefault?: () => void }) => {
+    const key = event.nativeEvent.key;
+    if (key === 'ArrowDown' || key === 'ArrowUp') {
+      event.preventDefault?.();
+      if (items.length) setActive((selected + (key === 'ArrowDown' ? 1 : items.length - 1)) % items.length);
+    } else if (key === 'Escape') setQuery('');
+  };
+  const sections = items.reduce<{ title: string; rows: { item: ResultItem; index: number }[] }[]>((all, item, index) => {
+    const last = all[all.length - 1];
+    if (last?.title === item.section) last.rows.push({ item, index }); else all.push({ title: item.section, rows: [{ item, index }] });
+    return all;
+  }, []);
+  const sources = search.sources.filter((source) => source.status !== 'skipped');
+
+  return <ScrollView style={styles.screen} contentContainerStyle={styles.content} stickyHeaderIndices={[0]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+    <View style={styles.header}>
+      <View style={styles.fieldRow}>
+        {onClose ? <Pressable accessibilityRole="button" accessibilityLabel="Close search" onPress={onClose} style={styles.close}><Ionicons name="chevron-back" size={22} color={colors.text} /></Pressable> : null}
+        <View style={styles.field}>
+          <Ionicons name="search" size={21} color={colors.textSecondary} />
+          <TextInput accessibilityLabel="Search everything" autoFocus value={query} onChangeText={setQuery} onKeyPress={onKey} placeholder="Search everything" placeholderTextColor={colors.textTertiary} returnKeyType="search" onSubmitEditing={() => { const item = items[selected]; if (item && hasQuery) item.run(); else Keyboard.dismiss(); }} style={styles.input} />
+          {query ? <Pressable accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => setQuery('')} style={styles.clear}><Ionicons name="close-circle" size={20} color={colors.textTertiary} /></Pressable> : null}
+        </View>
+      </View>
     </View>
 
-    {!hasQuery ? <View style={styles.block}>
-      <Text style={styles.sectionLabel}>Try</Text>
-      <View style={styles.chips}>{suggestions.map((item) => <Pressable key={item} accessibilityRole="button" onPress={() => setQuery(item)} style={styles.chip}><Text style={styles.chipText}>{item}</Text></Pressable>)}</View>
-      <Text style={styles.note}>Write naturally: “videos”, “on Lens”, or “today” narrow the search. Messages and email are searched on this device only.</Text>
-    </View> : null}
-
-    {hasQuery && search.parsed.understood.length ? <Text style={styles.understood}>Understood: {search.parsed.understood.join(' · ')}{search.parsed.text ? ` · “${search.parsed.text}”` : ''}</Text> : null}
+    {!hasQuery ? <Text style={styles.hint}>People, posts on every network, Clips, messages, email and settings. Write naturally: “videos”, “on Lens” or “today” narrow it. Messages and email are searched on this device only.</Text> : null}
+    {hasQuery && search.parsed.understood.length ? <Text style={styles.hint}>Understood: {search.parsed.understood.join(' · ')}{search.parsed.text ? ` · “${search.parsed.text}”` : ''}</Text> : null}
 
     {search.ai.status === 'loading' || search.ai.status === 'done' || search.ai.status === 'failed' ? <View accessibilityLiveRegion="polite" style={styles.ai}>
       <View style={styles.aiHeader}><Ionicons name="sparkles-outline" size={16} color={colors.text} /><Text style={styles.aiTitle}>AI summary</Text></View>
@@ -70,21 +94,21 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
       </> : null}
     </View> : null}
 
-    {lensRows.length ? <Section title="Feed" styles={styles}>{lensRows.map((row) => <Row key={row.key} icon="options-outline" title={row.title} subtitle={row.subtitle} onPress={() => { row.run().then((leave) => { if (leave) showFeed(); }).catch(() => undefined); }} styles={styles} colors={colors} />)}</Section> : null}
+    {sections.length ? <View style={styles.panel}>
+      {sections.map((section) => <View key={section.title} style={styles.group}>
+        <Text style={styles.groupLabel}>{section.title === 'Messages and email' ? 'Messages and email · on this device' : section.title}</Text>
+        {section.rows.map(({ item, index }) => <ResultRow key={item.key} item={item} selected={hasQuery && index === selected} onHover={() => setActive(index)} styles={styles} colors={colors} />)}
+      </View>)}
+    </View> : null}
 
-    {profileRows.length ? <Section title="Your profile" styles={styles}>{profileRows.map((row) => <Row key={row.key} icon="briefcase-outline" title={row.title} subtitle={row.subtitle} onPress={() => { row.run().catch(() => undefined); }} styles={styles} colors={colors} />)}</Section> : null}
-
-    {search.settings.length ? <Section title="Settings" styles={styles}>{search.settings.map((setting) => <Row key={setting.id} icon="settings-outline" title={setting.title} subtitle={setting.description} onPress={() => onNavigate?.('settings')} styles={styles} colors={colors} />)}</Section> : null}
-
-    {search.messages.length ? <Section title="Messages and email · on this device" styles={styles}>{search.messages.map((conversation) => <Row key={conversation.id} icon="chatbubble-outline" title={conversationTitle(conversation)} subtitle={conversation.preview} onPress={() => onNavigate?.('messages')} styles={styles} colors={colors} />)}</Section> : null}
-
-    {hasQuery && search.sources.length ? <View style={styles.block}>
-      <Text style={styles.sectionLabel}>Posts from everywhere</Text>
-      <Text style={styles.note}>{search.sources.filter((source) => source.status !== 'skipped').map((source) => `${networks[source.id].displayName}: ${source.status === 'searching' ? 'searching…' : source.status === 'failed' ? 'unavailable' : `${source.count} (${source.method})`}`).join(' · ')}</Text>
+    {hasQuery && sources.length ? <View style={styles.postsHeader}>
+      <Text style={[styles.groupLabel, styles.flushLabel]}>Posts from everywhere</Text>
+      <Text style={styles.note}>{sources.map((source) => `${networks[source.id].displayName} ${source.status === 'searching' ? '…' : source.status === 'failed' ? 'unavailable' : source.count}`).join('  ·  ')}</Text>
+      {sources.filter((source) => source.status === 'done' && /only/.test(source.method)).map((source) => <Text key={source.id} style={styles.note}>{networks[source.id].displayName}: {source.method}</Text>)}
     </View> : null}
     {search.posts.map((post) => <PostCard key={post.id} post={post} mode="raw" viewer={viewer} />)}
     {hasQuery && search.searching && !search.posts.length ? <View style={styles.status}><ActivityIndicator color={colors.text} /></View> : null}
-    {nothing ? <Text style={styles.empty}>Nothing found. Try fewer or different words.</Text> : null}
+    {nothing ? <View style={styles.status}><Ionicons name="search-outline" size={26} color={colors.textTertiary} /><Text style={styles.empty}>No results for “{search.parsed.raw}”. Try fewer or different words.</Text></View> : null}
   </ScrollView>;
 }
 
@@ -239,46 +263,48 @@ function timeAgo(iso: string) {
   return hours < 24 ? `${hours} h ago` : `${Math.round(hours / 24)} d ago`;
 }
 
-function Section({ title, children, styles }: React.PropsWithChildren<{ title: string; styles: ReturnType<typeof createStyles> }>) {
-  return <View style={styles.block}><Text style={styles.sectionLabel}>{title}</Text><View style={styles.card}>{children}</View></View>;
-}
-
-function Row({ icon, title, subtitle, onPress, styles, colors }: { icon: keyof typeof Ionicons.glyphMap; title: string; subtitle: string; onPress: () => void; styles: ReturnType<typeof createStyles>; colors: ThemeColors }) {
-  return <Pressable accessibilityRole="button" onPress={onPress} style={styles.row}>
-    <View style={styles.rowIcon}><Ionicons name={icon} size={17} color={colors.text} /></View>
-    <View style={styles.rowCopy}><Text numberOfLines={1} style={styles.rowTitle}>{title}</Text><Text numberOfLines={2} style={styles.rowSubtitle}>{subtitle}</Text></View>
-    <Ionicons name="chevron-forward" size={17} color={colors.textTertiary} />
+function ResultRow({ item, selected, onHover, styles, colors }: { item: ResultItem; selected: boolean; onHover: () => void; styles: ReturnType<typeof createStyles>; colors: ThemeColors }) {
+  return <Pressable accessibilityRole="button" accessibilityState={{ selected }} onPress={item.run} onHoverIn={onHover} style={({ pressed }) => [styles.row, selected && styles.rowSelected, pressed && styles.rowPressed]}>
+    <View style={[styles.rowIcon, selected && styles.rowIconSelected]}><Ionicons name={item.icon} size={17} color={selected ? colors.surface : colors.text} /></View>
+    <View style={styles.rowCopy}>
+      <Text numberOfLines={1} style={[styles.rowTitle, selected && styles.rowTextSelected]}>{item.title}</Text>
+      {item.subtitle ? <Text numberOfLines={2} style={[styles.rowSubtitle, selected && styles.rowSubtitleSelected]}>{item.subtitle}</Text> : null}
+    </View>
+    {selected && Platform.OS === 'web' ? <Ionicons name="return-down-back" size={16} color={colors.surface} /> : null}
   </Pressable>;
 }
 
 function createStyles(colors: ThemeColors) { return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.surface },
-  content: { width: '100%', maxWidth: 680, alignSelf: 'center', paddingHorizontal: 18, paddingTop: 24, paddingBottom: 80 },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  content: { width: '100%', maxWidth: 680, alignSelf: 'center', paddingHorizontal: 18, paddingBottom: 80 },
+  header: { paddingTop: 20, paddingBottom: 10, backgroundColor: colors.surface },
+  fieldRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   close: { width: 36, height: 36, marginLeft: -8, alignItems: 'center', justifyContent: 'center' },
-  title: { color: colors.text, fontSize: 28, fontWeight: '800', letterSpacing: -0.8 },
-  subtitle: { marginTop: 5, color: colors.textSecondary, fontSize: 13, lineHeight: 19 },
-  field: { minHeight: 48, marginTop: 16, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, borderRadius: 16, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceAlt },
-  input: { flex: 1, minHeight: 46, color: colors.text, fontSize: 16, letterSpacing: 0, paddingVertical: 0, outlineStyle: 'none' } as object,
-  clear: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
-  block: { marginTop: 18, gap: 8 },
-  sectionLabel: { color: colors.textTertiary, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4 },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: { minHeight: 36, paddingHorizontal: 14, justifyContent: 'center', borderRadius: 18, borderWidth: 1, borderColor: colors.border },
-  chipText: { color: colors.text, fontSize: 13 },
+  field: { flex: 1, minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 18, paddingRight: 10, borderRadius: 28, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, backgroundColor: colors.surfaceAlt, boxShadow: '0 1px 2px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.06)' } as object,
+  input: { flex: 1, minHeight: 54, color: colors.text, fontSize: 20, letterSpacing: -0.2, paddingVertical: 0, outlineStyle: 'none' } as object,
+  clear: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+  hint: { marginTop: 4, marginHorizontal: 6, color: colors.textTertiary, fontSize: 12, lineHeight: 17 },
   note: { color: colors.textTertiary, fontSize: 12, lineHeight: 17 },
-  understood: { marginTop: 12, color: colors.textSecondary, fontSize: 12, lineHeight: 17 },
-  ai: { marginTop: 16, gap: 8, padding: 14, borderRadius: 16, backgroundColor: colors.chrome },
+  ai: { marginTop: 14, gap: 8, padding: 16, borderRadius: 20, backgroundColor: colors.chrome },
   aiHeader: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   aiTitle: { color: colors.text, fontSize: 13, fontWeight: '700' },
   aiRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   aiText: { color: colors.text, fontSize: 15, lineHeight: 22 },
-  card: { borderRadius: 16, borderWidth: 1, borderColor: colors.border, overflow: 'hidden' },
-  row: { minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
-  rowIcon: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center', borderRadius: 16, backgroundColor: colors.chrome },
+  panel: { marginTop: 14, padding: 6, gap: 4, borderRadius: 20, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, backgroundColor: colors.surfaceAlt },
+  group: { gap: 2 },
+  groupLabel: { paddingHorizontal: 10, paddingTop: 8, paddingBottom: 4, color: colors.textTertiary, fontSize: 12, fontWeight: '600' },
+  row: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 12 },
+  rowSelected: { backgroundColor: colors.text },
+  rowPressed: { opacity: 0.7 },
+  rowIcon: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center', borderRadius: 9, backgroundColor: colors.chrome },
+  rowIconSelected: { backgroundColor: 'rgba(127,127,127,0.28)' },
   rowCopy: { flex: 1 },
-  rowTitle: { color: colors.text, fontSize: 14, fontWeight: '600' },
-  rowSubtitle: { marginTop: 2, color: colors.textSecondary, fontSize: 12, lineHeight: 16 },
-  status: { alignItems: 'center', paddingVertical: 30 },
-  empty: { marginTop: 24, color: colors.textSecondary, fontSize: 14, textAlign: 'center' },
+  rowTitle: { color: colors.text, fontSize: 15, fontWeight: '500' },
+  rowTextSelected: { color: colors.surface },
+  rowSubtitle: { marginTop: 1, color: colors.textSecondary, fontSize: 12, lineHeight: 16 },
+  rowSubtitleSelected: { color: colors.surface, opacity: 0.75 },
+  flushLabel: { paddingHorizontal: 0 },
+  postsHeader: { marginTop: 22, marginBottom: 4, gap: 2 },
+  status: { alignItems: 'center', gap: 10, paddingVertical: 30 },
+  empty: { color: colors.textSecondary, fontSize: 14, textAlign: 'center' },
 }); }

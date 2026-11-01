@@ -483,6 +483,7 @@ export function OpenMediaApp({
             viewer={viewer}
             lenses={lenses}
             onNavigate={navigate}
+            onOpenConversation={(id) => { setOpenConversationId(id); navigate("messages"); }}
           />
         ) : null}
         {!person && destination === "profile" ? (
