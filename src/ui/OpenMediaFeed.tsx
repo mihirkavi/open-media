@@ -18,7 +18,7 @@ import { reportChoices } from '../domain/listingSafety';
 import { crossPostVideo, discardPreparedVideo, draftCrossPostVideo, prepareVideo, PreparedVideo, uploadPostVideo, UploadedVideo, VideoError } from '../data/videoUpload';
 import { CrossPostOutcome, CrossPostVideo, destinationSummary, outcomeSummary, prepareCrossPost } from '../domain/crossPosting';
 import { NetworkId, networks, safeHttpsUrl, sourceName } from '../domain/networkPosts';
-import { FeedLens, LensContext, lensKeeps } from '../domain/feedLenses';
+import { FeedLens, LensContext, lensKeeps, ownCopyId, relevantLens } from '../domain/feedLenses';
 import { explainFeedPost, FeedMode, selectFeed, SocialPost } from '../domain/posts';
 import { formatBytes, formatDuration, maxVideoBytes, maxVideoSeconds } from '../domain/postVideo';
 import { formatRelativeTime, maxPostLength } from '../domain/publicPosts';
@@ -292,10 +292,14 @@ function listFormat(items: string[]) {
  */
 export function FeedPicker({ value, lenses = [], onChange }: { value: string; lenses?: FeedLens[]; onChange: (id: string) => void }) {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
+  // Your tuned copy of Relevant (ADR 0021) takes Relevant's place, so there is one Relevant to choose.
+  // Open Media's own Relevant comes back from Search (“original relevant”) or when the copy is removed.
+  const own = value === 'relevant' ? undefined : lenses.find((item) => item.id === ownCopyId(relevantLens));
+  const first = own ? { id: own.id, name: own.name } : { id: 'relevant', name: 'Relevant' };
   // Work and saved lenses share the third place: the one in use, or the most recent saved lens.
-  const custom = lenses.filter((item) => !item.builtIn || (item.id !== 'relevant' && item.id !== 'raw'));
+  const custom = lenses.filter((item) => item.id !== ownCopyId(relevantLens) && (!item.builtIn || (item.id !== 'relevant' && item.id !== 'raw')));
   const third = custom.find((item) => item.id === value) ?? custom.find((item) => !item.builtIn);
-  const choices = [{ id: 'relevant', name: 'Relevant' }, { id: 'raw', name: 'Raw' }, ...(third ? [{ id: third.id, name: third.name }] : [])];
+  const choices = [first, { id: 'raw', name: 'Raw' }, ...(third ? [{ id: third.id, name: third.name }] : [])];
   return <View accessibilityRole="tablist" accessibilityLabel="Feed lens" style={styles.segment}>{choices.map((choice) => <Pressable key={choice.id} accessibilityRole="tab" accessibilityLabel={choice.id === third?.id ? `${choice.name}, your lens` : choice.name} accessibilityState={{ selected: value === choice.id }} onPress={() => onChange(choice.id)} style={[styles.segmentButton, value === choice.id && styles.segmentActive]}><Text numberOfLines={1} style={[styles.segmentText, choice.id === third?.id && styles.segmentCustom, value === choice.id && styles.segmentTextActive]}>{choice.name}</Text></Pressable>)}</View>;
 }
 

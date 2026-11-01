@@ -396,6 +396,9 @@ export function lensScore(post: SocialPost, lens: FeedLens, context: LensContext
   return lensScoreParts(post, lens, context).score / 100;
 }
 
+/** How many of the latest posts count when spreading networks out. */
+const networkWindow = 3;
+
 /** Orders posts through a lens: filters first, then newest first or by score with authors spread out. */
 export function runLens(posts: SocialPost[], lens: FeedLens, context: LensContext = {}): SocialPost[] {
   const kept = posts.filter((post) => lensKeeps(post, lens, context).kept);
@@ -403,25 +406,26 @@ export function runLens(posts: SocialPost[], lens: FeedLens, context: LensContex
   const scored = kept.map((post) => ({ post, score: lensScore(post, lens, context) })).sort((a, b) => b.score - a.score || newestFirst(a.post, b.post));
   const diversity = lens.objectives.diversity;
   if (!diversity) return scored.map((item) => item.post);
-  // Greedy re-rank: each post already shown from the same author (and, more lightly, the same
-  // network) lowers the next one's score, so the Feed alternates voices without hiding anyone.
+  // Greedy re-rank: each post already shown from the same author lowers the next one's score, and so
+  // does each of the last few posts from the same network, so the Feed alternates voices and one
+  // busy network can't fill a screen. Nobody is hidden; they only move down.
   const authorSeen = new Map<string, number>();
-  const sourceSeen = new Map<string, number>();
   const ordered: SocialPost[] = [];
   const remaining = [...scored];
   while (remaining.length) {
     let best = 0;
     let bestScore = -Infinity;
+    const recent = ordered.slice(-networkWindow).map((post) => post.provenance.connectorId);
     // Looking ahead a bounded window keeps this fast on long feeds; scores only fall further down.
     for (let index = 0; index < Math.min(remaining.length, 40); index += 1) {
       const { post, score } = remaining[index];
-      const adjusted = score * Math.pow(1 - diversity * 0.5, authorSeen.get(post.author.id) ?? 0) * Math.pow(1 - diversity * 0.15, sourceSeen.get(post.provenance.connectorId) ?? 0);
+      const sameNetwork = recent.filter((source) => source === post.provenance.connectorId).length;
+      const adjusted = score * Math.pow(1 - diversity * 0.5, authorSeen.get(post.author.id) ?? 0) * Math.pow(1 - diversity, sameNetwork);
       if (adjusted > bestScore) { best = index; bestScore = adjusted; }
     }
     const [{ post }] = remaining.splice(best, 1);
     ordered.push(post);
     authorSeen.set(post.author.id, (authorSeen.get(post.author.id) ?? 0) + 1);
-    sourceSeen.set(post.provenance.connectorId, (sourceSeen.get(post.provenance.connectorId) ?? 0) + 1);
   }
   return ordered;
 }
@@ -454,11 +458,16 @@ function formatFactor(value: number) {
 }
 
 /** The words that would lean the lens away from this post's network and toward its kind. */
-function tuneHintFor(post: SocialPost, lens: FeedLens): string {
+function tuneHintFor(post: SocialPost, lens: FeedLens, signals: Signals): string {
   const kind = postKinds(post)[0];
   const source = sourceName(post.provenance.connectorId).toLocaleLowerCase();
   const name = lens.builtIn ? `your own ${lens.name}` : lens.name;
-  return `To change ${name}, search “less ${source}” or “more ${kindLabels[kind]}”.`;
+  const tune = `To change ${name}, search “less ${source}” or “more ${kindLabels[kind]}”.`;
+  // With nobody followed and no topics, a lens that reads only those has little to go on: say so.
+  const reads = (lens.objectives.follows > 0 && signals.followsAllowed) || (lens.objectives.interests > 0 && signals.interestsAllowed);
+  const hasSignals = signals.followed.size > 0 || signals.interests.length > 0;
+  if (lens.order !== 'ranked' || !reads || hasSignals) return tune;
+  return `${lens.name} has only newness and the network mix to go on: you follow no one yet and chose no topics. Follow people, or search “more about design” (any topic), and it will lift those posts. ${tune}`;
 }
 
 export function explainLensPost(post: SocialPost, lens: FeedLens, context: LensContext = {}): LensExplanation {
@@ -479,7 +488,7 @@ export function explainLensPost(post: SocialPost, lens: FeedLens, context: LensC
   if (!lens.permissions.includes('interests')) notUsed.push('Your interests');
   if (!lens.permissions.includes('public_engagement') || !lens.objectives.engagement) notUsed.push('Like and repost counts');
   notUsed.push(...forbiddenSignals);
-  return { used, rules: describeLensRules(lens), scoring: describeScore(post, lens, context), tuneHint: tuneHintFor(post, lens), notUsed };
+  return { used, rules: describeLensRules(lens), scoring: describeScore(post, lens, context), tuneHint: tuneHintFor(post, lens, signals), notUsed };
 }
 
 /** The lens's filters and ordering as short plain sentences, for “Why this?”, Search and agents. */

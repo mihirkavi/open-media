@@ -257,11 +257,28 @@ test('“Why this?” shows the post’s score under the person’s own weights,
   const tuned = tuneLens(tuneLens(relevantLens, 'less hive').lens, 'more videos').lens;
   const explained = explainLensPost(item, tuned, { now });
   assert.deepEqual(explained.scoring.slice(0, 3), ['Score 47 of 100', 'Newness 50 of 50 · Who you follow 0 of 30 · Your topics 0 of 20', 'Less Hive ×0.75 · More videos ×1.25']);
-  assert.equal(explained.tuneHint, 'To change My Relevant, search “less hive” or “more videos”.');
+  assert.equal(explained.tuneHint, 'My Relevant has only newness and the network mix to go on: you follow no one yet and chose no topics. Follow people, or search “more about design” (any topic), and it will lift those posts. To change My Relevant, search “less hive” or “more videos”.');
+  // Once there is something to go on, only the tuning words are shown.
+  assert.equal(explainLensPost(item, tuned, { now, interests: ['design'] }).tuneHint, 'To change My Relevant, search “less hive” or “more videos”.');
   assert.deepEqual(explainLensPost(item, rawLens, { now }).scoring, ['Raw is newest first: posts have no score']);
 });
 
 test('Search tells changes to the lens in use from new lenses and ordinary searches', () => {
   for (const value of ['less hive', 'more videos', 'a lot more about design', 'fewer events', 'show hive again', 'unmute crypto', 'mute crypto and more farcaster']) assert.equal(looksLikeTuneRequest(value), true, value);
   for (const value of ['ethereum on lens', 'only videos from people I follow', 'more', 'cooking videos']) assert.equal(looksLikeTuneRequest(value), false, value);
+});
+
+test('Relevant spreads networks out, so one busy network can’t fill the top of the Feed like it does in Raw', () => {
+  // Hive posts every few minutes; the other networks less often. Raw shows Hive first, all of it.
+  const hive = Array.from({ length: 8 }, (_, index) => post(`hive-${index}`, { hours: index * 0.1, source: 'hive' }));
+  const others = [post('farcaster-1', { hours: 1, source: 'farcaster' }), post('lens-1', { hours: 1.5, source: 'lens' }), post('deso-1', { hours: 2, source: 'deso' })];
+  const posts = [...hive, ...others];
+  assert.deepEqual(ids(runLens(posts, rawLens, { now })).slice(0, 8).map((id) => id.split('-')[0]), Array(8).fill('hive'));
+  const relevant = runLens(posts, relevantLens, { now });
+  const top = relevant.slice(0, 6).map((item) => item.provenance.connectorId);
+  assert.equal(new Set(top).size, 4, `every network shows in the first six: ${top.join(', ')}`);
+  // Never three in a row from one network while another network still has posts nearby.
+  for (let index = 2; index < 6; index += 1) assert.ok(!(top[index] === top[index - 1] && top[index] === top[index - 2]), top.join(', '));
+  // Nobody is hidden: every post is still there.
+  assert.equal(relevant.length, posts.length);
 });

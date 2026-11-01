@@ -5,7 +5,7 @@ import { Text, TextInput } from './Text';
 
 import { LensVersion, searchSharedLenses, StoredLens } from '../data/lensService';
 import { loadProfessionalProfile, saveProfessionalProfile } from '../data/openMediaService';
-import { builtInLensFor, lensFromRequest, lensSummary, looksLikeLensRequest, looksLikeTuneRequest, tuneLens } from '../domain/feedLenses';
+import { builtInLensFor, lensFromRequest, lensSummary, looksLikeLensRequest, looksLikeTuneRequest, ownCopyId, relevantLens, tuneLens } from '../domain/feedLenses';
 import { Conversation } from '../domain/models';
 import { networks, sourceName } from '../domain/networkPosts';
 import { SocialPost } from '../domain/posts';
@@ -117,6 +117,7 @@ function useProfileRows(query: string, signedIn: boolean): LensRow[] {
 
 const managePattern = /^(remove|delete|uninstall|forget|drop|share|publish|use|switch to|show me|open)\b/i;
 const historyPattern = /^(undo|go back|revert|history|versions?|earlier versions?|previous versions?)\b/i;
+const originalRelevantPattern = /\b(original|default|reset|plain|built[- ]?in|open media[’']?s)\s+relevant\b|\brelevant\s+(again|as it was)\b/i;
 
 /**
  * Search is where people talk to the Feed (ADR 0017): a request like “only videos from people I
@@ -184,6 +185,12 @@ function useLensRows(query: string, lenses: FeedLenses | undefined, signedIn: bo
       } else if (lenses.lens.id !== lens.id && (action || lower === lens.name.toLocaleLowerCase() || lens.id === alias?.id || /\b(feed|lens)\b/.test(lower))) {
         rows.push({ key: `use-${lens.id}`, title: `Show the Feed through ${lens.name}`, subtitle: lensSummary(lens), run: async () => { lenses.choose(lens.id); return true; } });
       }
+    }
+    // Your tuned copy replaces Relevant in the Feed's picker; these words bring Open Media's own back.
+    const ownRelevant = lenses.lenses.find((lens) => lens.id === ownCopyId(relevantLens));
+    if (ownRelevant && originalRelevantPattern.test(value)) {
+      if (lenses.lens.id !== 'relevant') rows.push({ key: 'original-relevant', title: 'Show the Feed through Open Media’s Relevant', subtitle: `Your changes stay saved as ${ownRelevant.name}; search “${ownRelevant.name.toLocaleLowerCase()}” to use them again.`, run: async () => { lenses.choose('relevant'); return true; } });
+      return rows;
     }
     if (wantsHistory && lenses) {
       const base = lenses.tuneBase;

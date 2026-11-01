@@ -123,6 +123,19 @@ Person's account `/me/mcp` (bearer) and REST:
 
 The `open-media-feed-lenses` agent skill (in `src/domain/agentSkills.ts`, synced to the Claude and Codex plugin with `npm run agent-plugin:sync`) explains tuning, history and the confirmation rule. `/docs/feed-lenses` documents format `/2` from the same constants.
 
+### 8. One Relevant, and a Relevant that differs from Raw (2026-11-01)
+
+The owner reported two problems after trying phase 1:
+- Relevant and Raw looked the same.
+- The picker showed both "Relevant" and "My Relevant", with nothing saying how they differ.
+
+**Why they looked the same.** Section 23 limits Relevant to follows, chosen topics, recency, language, region and community. It rules out engagement by default. Someone who follows nobody and chose no topics leaves Relevant with recency alone. Its network spreading was weak: each earlier post from the same network lowered a score by only 4.5%. So both feeds showed the same newest posts. Hive posts every few minutes, so ten Hive posts in a row topped both.
+
+**What changed:**
+- **Networks are spread by what was just shown.** Before, every earlier post from a network counted a little. Now each of the last 3 posts from the same network multiplies a post's score by `1 − diversity`, which is ×0.7 for Relevant. One busy network can no longer fill a screen. Nothing is hidden; posts only move down. The runner is shared, so this applies on the device and in the Worker, and to every ranked lens with `diversity`. No manifest field changed, so lens versions are unchanged.
+- **"Why this?" says when Relevant has nothing else to go on.** This shows when a ranked lens reads follows or topics but the person has neither. It tells them to follow people or search "more about …".
+- **Your copy takes Relevant's place in the picker.** The picker still has at most three choices: My Relevant (or Relevant), Raw, and Work or a saved lens. To get Open Media's own Relevant back, search "original relevant" (also "reset relevant" or "relevant again"). That switches the Feed and keeps your copy. Searching "my relevant" brings your copy back. No new buttons.
+
 ## Consequences
 
 - People can now *develop* an algorithm: start from Relevant, Raw, Work or anyone's shared lens, and lean it a little at a time in their own words. Each step is visible in “Why this?”, can be undone, and can be audited if shared.
