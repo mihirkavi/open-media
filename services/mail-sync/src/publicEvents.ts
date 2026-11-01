@@ -36,6 +36,14 @@ function sortKey(event: CanonicalEvent): number {
   return event.dateOnly ? Date.parse(`${event.startsAt.slice(0, 10)}T23:59:00-07:00`) : Date.parse(event.startsAt);
 }
 
+/** Shortens long text at a word boundary, ending it with an ellipsis. */
+function clip(text: string | undefined, max: number): string | undefined {
+  const value = text?.trim();
+  if (!value || value.length <= max) return value || undefined;
+  const cut = value.slice(0, max - 1);
+  return `${cut.slice(0, Math.max(cut.lastIndexOf(' '), max / 2)).trimEnd()}…`;
+}
+
 export function publicEvent(event: CanonicalEvent, area: string): PublicEvent | undefined {
   const registration = event.registration?.url ?? event.sources[0]?.url;
   if (!registration?.startsWith('https://')) return undefined;
@@ -48,7 +56,7 @@ export function publicEvent(event: CanonicalEvent, area: string): PublicEvent | 
   return {
     id: event.id,
     title: event.title,
-    description: event.description?.slice(0, 500),
+    description: clip(event.description, 500),
     imageUrl: event.imageUrl?.startsWith('https://') ? event.imageUrl : undefined,
     startsAt: event.startsAt,
     endsAt: event.endsAt,
@@ -65,6 +73,28 @@ export function publicEvent(event: CanonicalEvent, area: string): PublicEvent | 
     area,
     updatedAt: event.updatedAt,
   };
+}
+
+const descriptionBudgetMs = 4000;
+const maxDescribed = 20;
+
+/**
+ * Luma's nearby search has no descriptions; its single-event call does. Fetches them only for the
+ * events being returned (cached for 3 hours per event), within a short time budget, so a slow or
+ * failing lookup leaves that event without a description instead of delaying the Feed.
+ */
+export async function withLumaDescriptions(events: CanonicalEvent[], source: Pick<ProviderRouter, 'lumaEvent'>): Promise<CanonicalEvent[]> {
+  let looked = 0;
+  return Promise.all(events.map(async (event) => {
+    const luma = event.sources.find((item) => item.provider === 'luma');
+    if (event.description || !luma || looked >= maxDescribed) return event;
+    looked += 1;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), descriptionBudgetMs); });
+    const detail = await Promise.race([source.lumaEvent(luma.providerEventId).catch(() => undefined), timeout]).finally(() => clearTimeout(timer));
+    const description = detail?.description?.trim();
+    return description ? { ...event, description } : event;
+  }));
 }
 
 export async function upcomingEvents(env: PublicEventsEnv, options: { area?: string; days?: number; query?: string; limit?: number } = {}, now = new Date()) {
@@ -90,12 +120,14 @@ export async function upcomingEvents(env: PublicEventsEnv, options: { area?: str
     .filter(matches)
     // Events with only a date sort after that day's timed events.
     .sort((left, right) => sortKey(left) - sortKey(right))
-    .map((event) => publicEvent(event, area.name))
-    .filter((event): event is PublicEvent => Boolean(event))
+    .map((event) => ({ event, shown: publicEvent(event, area.name) }))
+    .filter((item) => Boolean(item.shown))
     .slice(0, Math.min(50, Math.max(1, options.limit ?? 20)));
+  const described = await withLumaDescriptions(upcoming.map((item) => item.event), router);
+  const data = described.map((event) => publicEvent(event, area.name)).filter((event): event is PublicEvent => Boolean(event));
   return {
     area: area.name,
-    data: upcoming,
+    data,
     providers: discovery.statuses.filter((status) => status.provider !== 'feeds').map((status) => ({ provider: status.provider, status: status.status })),
     note: 'Public listings only. Register on the official page; Open Media never registers anyone.',
   };

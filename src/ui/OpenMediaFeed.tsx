@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Image, KeyboardAvoidingView, Linking, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { EventCard, ListingCard, ListingFields, PaidPostBlock, PaidPostFields, PaidPostInput } from './ListingCards';
+import { EventMeta, ListingCard, ListingFields, PaidPostBlock, PaidPostFields, PaidPostInput } from './ListingCards';
 import { PaymentSheet, PaymentTarget } from './PaymentSheet';
 import { PersonLink, targetForPost, usePeople } from './people';
 import { PostActions } from './PostActions';
@@ -12,7 +12,7 @@ import { crossPost } from '../data/crossPostService';
 import { interleaveEvents, loadUpcomingEvents } from '../data/eventsService';
 import { PostReportReason, publishListing, publishPaidPost, publishPost, rateListing } from '../data/postService';
 import { loadPaidContent } from '../data/paymentsService';
-import { ListingInput, listingLine, parsePrice, validateListing } from '../domain/listings';
+import { eventRegistration, ListingInput, listingLine, parsePrice, validateListing } from '../domain/listings';
 import { reportChoices } from '../domain/listingSafety';
 import { crossPostVideo, discardPreparedVideo, draftCrossPostVideo, prepareVideo, PreparedVideo, uploadPostVideo, UploadedVideo, VideoError } from '../data/videoUpload';
 import { CrossPostOutcome, CrossPostVideo, destinationSummary, outcomeSummary, prepareCrossPost } from '../domain/crossPosting';
@@ -302,12 +302,14 @@ export function PostCard({ post, mode, lensContext, viewer, onDelete, onReport }
   const native = post.provenance.connectorId === 'open-media';
   const own = Boolean(native && viewer && viewer.id === post.author.id);
   const canAct = native && (own ? Boolean(onDelete) : Boolean(viewer && onReport));
-  // Event cards carry their own link to the official page.
+  // Events link to their official page with Register in the action row instead.
   const original = native || post.event ? undefined : safeHttpsUrl(post.provenance.canonicalURL);
+  const registration = post.event ? eventRegistration(post.event) : undefined;
+  const registerUrl = registration ? safeHttpsUrl(registration.url) : undefined;
   const network = networks[post.provenance.connectorId as keyof typeof networks];
   const image = post.media?.[0];
   // External posts can be long; Open Media posts are short enough to show whole.
-  const long = !native && !post.title && (post.body.length > 420 || post.body.split('\n').length > 8);
+  const long = !native && (!post.title || Boolean(post.event)) && (post.body.length > 420 || post.body.split('\n').length > 8);
   const [showAll, setShowAll] = useState(false);
   const [payTarget, setPayTarget] = useState<PaymentTarget>();
   const [paid, setPaid] = useState(post.paid);
@@ -316,15 +318,16 @@ export function PostCard({ post, mode, lensContext, viewer, onDelete, onReport }
   return <View style={styles.post}>
     <View style={styles.postHeader}><PersonLink target={targetForPost(post)} label={`Open ${post.author.displayName}’s profile`} style={styles.authorLink}><View style={styles.authorLinkInner}><Avatar initials={post.author.initials} imageUrl={post.author.avatarUrl} /><View style={styles.author}><View style={styles.nameLine}><Text numberOfLines={1} style={[styles.authorName, styles.nameShrink]}>{post.author.displayName}</Text>{post.author.verified ? <VerifiedTick size={14} /> : null}</View><Text numberOfLines={1} style={styles.meta}>{post.event ? `Upcoming event · from ${post.author.handle}` : `${post.author.handle} · ${formatRelativeTime(post.createdAt)} · ${sourceName(post.provenance.connectorId)}`}</Text></View></View></PersonLink>{canAct ? <Pressable accessibilityRole="button" accessibilityLabel="Post options" accessibilityState={{ expanded: menuOpen }} onPress={() => setMenuOpen((value) => !value)} style={styles.menuButton}><Ionicons name={menuOpen ? 'close' : 'ellipsis-horizontal'} size={18} color={colors.textSecondary} /></Pressable> : null}</View>
     {menuOpen ? <PostMenu own={own} listing={Boolean(post.listing)} onDelete={() => onDelete!(post.id)} onReport={(reason) => onReport!(post.id, reason)} onTip={native && !own && viewer && post.author.tipsEnabled ? () => { setMenuOpen(false); setPayTarget({ kind: 'tip', postId: post.id }); } : undefined} tipTo={post.author.handle} /> : null}
+    {post.event && image?.kind === 'image' && image.url ? <PostImage url={image.url} altText={image.altText} /> : null}
     {post.title ? <Text selectable style={styles.postTitle}>{post.title}</Text> : null}
+    {post.event ? <EventMeta event={post.event} /> : null}
     {post.body && post.body !== post.listing?.title ? <Text selectable numberOfLines={long && !showAll ? 8 : undefined} style={[styles.body, post.title ? styles.bodyAfterTitle : null]}>{post.body}</Text> : null}
     {post.listing ? <ListingCard listing={post.listing} onMessage={native && !own && people?.message ? () => people.message!(post.author.handle.replace(/^@/, '')) : undefined} onRate={native && !own && viewer ? (stars) => rateListing(post.id, stars) : undefined} onBuy={native && !own && viewer && post.listing ? () => setPayTarget({ kind: 'listing', postId: post.id, listing: post.listing! }) : undefined} /> : null}
-    {post.event ? <EventCard event={post.event} /> : null}
     {paid ? <PaidPostBlock paid={paid} onUnlock={native && !own && viewer && !paid.unlocked ? () => setPayTarget({ kind: 'paid_post', postId: post.id, paid }) : undefined} /> : null}
     {payTarget ? <PaymentSheet target={payTarget} recipient={post.author.handle.replace(/^@/, '')} onClose={() => setPayTarget(undefined)} onPaid={payTarget.kind === 'paid_post' ? reloadPaid : undefined} /> : null}
     {long ? <Pressable accessibilityRole="button" accessibilityState={{ expanded: showAll }} onPress={() => setShowAll((value) => !value)} style={styles.showMore}><Text style={styles.whyText}>{showAll ? 'Show less' : 'Show more'}</Text></Pressable> : null}
-    {image?.kind === 'image' && image.url ? <PostImage url={image.url} altText={image.altText} /> : image?.kind === 'video' && image.url ? <FeedVideo uri={image.url} streaming={image.streaming} posterUrl={image.posterUrl} aspectRatio={image.aspectRatio} altText={image.altText} /> : image ? <View accessibilityLabel={image.altText} style={[styles.media, post.kind === 'video' && styles.video]}><Ionicons name={post.kind === 'video' ? 'play' : 'image-outline'} size={30} color="#FFFFFF" /><Text style={styles.alt}>{image.altText}</Text></View> : null}
-    <PostActions post={post} signedIn={Boolean(viewer)}>{original ? <Pressable accessibilityRole="link" accessibilityLabel={`Open this post on ${sourceName(post.provenance.connectorId)}`} onPress={() => { Linking.openURL(original).catch(() => undefined); }} style={styles.original}><Text style={styles.whyText}>Open on {sourceName(post.provenance.connectorId)}</Text><Ionicons name="open-outline" size={12} color={colors.textSecondary} /></Pressable> : null}<Pressable accessibilityRole="button" accessibilityState={{ expanded }} onPress={() => setExpanded((value) => !value)} style={[styles.why, original ? styles.whyAfterLink : null]}><Text style={styles.whyText}>Why this?</Text></Pressable></PostActions>
+    {post.event ? null : image?.kind === 'image' && image.url ? <PostImage url={image.url} altText={image.altText} /> : image?.kind === 'video' && image.url ? <FeedVideo uri={image.url} streaming={image.streaming} posterUrl={image.posterUrl} aspectRatio={image.aspectRatio} altText={image.altText} /> : image ? <View accessibilityLabel={image.altText} style={[styles.media, post.kind === 'video' && styles.video]}><Ionicons name={post.kind === 'video' ? 'play' : 'image-outline'} size={30} color="#FFFFFF" /><Text style={styles.alt}>{image.altText}</Text></View> : null}
+    <PostActions post={post} signedIn={Boolean(viewer)}>{registration && registerUrl ? <Pressable accessibilityRole="link" accessibilityHint="Opens the official page" onPress={() => { Linking.openURL(registerUrl).catch(() => undefined); }} style={styles.original}><Text style={styles.whyText}>{registration.label}</Text><Ionicons name="open-outline" size={12} color={colors.textSecondary} /></Pressable> : null}{original ? <Pressable accessibilityRole="link" accessibilityLabel={`Open this post on ${sourceName(post.provenance.connectorId)}`} onPress={() => { Linking.openURL(original).catch(() => undefined); }} style={styles.original}><Text style={styles.whyText}>Open on {sourceName(post.provenance.connectorId)}</Text><Ionicons name="open-outline" size={12} color={colors.textSecondary} /></Pressable> : null}<Pressable accessibilityRole="button" accessibilityState={{ expanded }} onPress={() => setExpanded((value) => !value)} style={[styles.why, original || registerUrl ? styles.whyAfterLink : null]}><Text style={styles.whyText}>Why this?</Text></Pressable></PostActions>
     {expanded ? <View style={styles.explanation}><Text style={styles.explanationTitle}>Why you’re seeing this</Text>{explanation.used.map((item) => <Text key={item} style={styles.explanationItem}>✓ {item}</Text>)}<Text style={styles.explanationSubtitle}>How {explanation.lens} works</Text><Text style={styles.explanationItem}>{explanation.rules.join(' · ')}</Text>{explanation.filters.length ? <><Text style={styles.explanationSubtitle}>Filters applied to {sourceName(post.provenance.connectorId)}</Text>{explanation.filters.map((item) => <Text key={item} style={styles.explanationItem}>· {item}</Text>)}<Text style={styles.notUsed}>Filtered posts stay on {sourceName(post.provenance.connectorId)}; Open Media only leaves them out of this Feed.{network ? ` ${network.about}` : ''}</Text></> : null}{explanation.checks?.map((item) => <Text key={item} style={styles.explanationItem}>✓ {item}</Text>)}<Text style={styles.notUsed}>Not used: {explanation.notUsed.join(', ')}</Text></View> : null}
   </View>;
 }

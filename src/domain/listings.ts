@@ -295,6 +295,19 @@ export function eventPriceText(event: Pick<PostEvent, 'free' | 'priceText'>): st
   return event.free ? 'Free' : event.priceText;
 }
 
+/** The event's one action: the official page, labelled by what a person can do there. */
+export function eventRegistration(event: Pick<PostEvent, 'availability' | 'registrationUrl' | 'sources'>): { url: string; label: string } {
+  const provider = providerName(event.sources[0]?.provider ?? 'events');
+  const closed = event.availability === 'closed' || event.availability === 'sold_out';
+  return { url: event.registrationUrl, label: closed ? `See on ${provider}` : event.availability === 'waitlist' ? `Join waitlist on ${provider}` : `Register on ${provider}` };
+}
+
+/** Date and time, place, and price on one line, e.g. "Sat, Oct 31 · 6:00 PM · 2838 Bartlett St, Oakland · Free". */
+export function eventMetaLine(event: PostEvent, locale?: string): string {
+  const status = event.availability === 'sold_out' ? 'Sold out' : event.availability === 'closed' ? 'Registration closed' : undefined;
+  return [eventWhen(event, locale), event.online ? 'Online' : event.place, eventPriceText(event), status].filter(Boolean).join(' · ');
+}
+
 const providerNames: Record<string, string> = { luma: 'Luma', meetup: 'Meetup', eventbrite: 'Eventbrite', feeds: 'Event feed' };
 export function providerName(provider: string): string {
   return providerNames[provider] ?? provider.replace(/^\w/, (letter) => letter.toUpperCase());
@@ -314,11 +327,15 @@ export interface PublicEvent extends PostEvent {
 export function socialPostFromEvent(event: PublicEvent): import('./posts').SocialPost {
   const provider = event.sources[0]?.provider ?? 'events';
   const organizer = event.organizer ?? providerName(provider);
+  const image = event.imageUrl?.startsWith('https://') ? event.imageUrl : undefined;
   return {
     id: `event:${event.id}`,
     author: { id: `event-organizer:${organizer}`, displayName: organizer, handle: providerName(provider), initials: organizer.slice(0, 2).toUpperCase() },
-    body: '',
-    kind: 'link',
+    // Shown like a post: the cover image, the title, then the description as the body.
+    title: event.title,
+    body: event.description?.trim() ?? '',
+    kind: image ? 'image' : 'link',
+    ...(image ? { media: [{ kind: 'image' as const, url: image, aspectRatio: 16 / 9, altText: `Cover image for ${event.title}` }] } : {}),
     createdAt: event.updatedAt,
     topics: ['events'],
     provenance: { connectorId: 'events', externalId: event.id, canonicalURL: event.sources[0]?.url ?? event.registrationUrl },

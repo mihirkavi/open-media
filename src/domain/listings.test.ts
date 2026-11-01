@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { eventWhen, interleaveEvents, formatPrice, listingLine, parsePrice, PublicEvent, socialPostFromEvent, validateListing } from './listings';
+import { eventMetaLine, eventRegistration, eventWhen, interleaveEvents, formatPrice, listingLine, parsePrice, PublicEvent, socialPostFromEvent, validateListing } from './listings';
 import { SocialPost } from './posts';
 import { parseSearchQuery, postMatchesSearch } from './searchQuery';
 
@@ -38,10 +38,24 @@ test('an event becomes a Feed post that keeps its sources and says why it is the
   const post = socialPostFromEvent(event);
   assert.equal(post.provenance.connectorId, 'events');
   assert.equal(post.event?.registrationUrl, 'https://lu.ma/abc');
+  assert.equal(post.title, 'AI founders breakfast', 'the title reads like a post title');
+  assert.equal(post.media, undefined, 'no cover, no image');
+  const covered = socialPostFromEvent({ ...event, imageUrl: 'https://images.lumacdn.com/cover.png', description: '  Coffee and demos.  ' });
+  assert.equal(covered.body, 'Coffee and demos.', 'the description is the body');
+  assert.equal(covered.media?.[0]?.url, 'https://images.lumacdn.com/cover.png');
+  assert.equal(socialPostFromEvent({ ...event, imageUrl: 'http://insecure.example/cover.png' }).media, undefined, 'only HTTPS covers load');
   assert.match(post.eligibility!.selection, /San Francisco Bay Area, from Luma, Meetup/);
   // Daylight saving time ends that morning in California, so 16:30 UTC is 8:30 AM local time.
   assert.equal(eventWhen(post.event!, 'en-US'), 'Sun, Nov 1 · 8:30 AM');
   assert.equal(eventWhen({ startsAt: '2026-11-01', dateOnly: true }, 'en-US'), 'Sun, Nov 1');
+});
+
+test('an event reads as one meta line, and its one action says what the official page offers', () => {
+  assert.equal(eventMetaLine(event, 'en-US'), 'Sun, Nov 1 · 8:30 AM · Mox, San Francisco · Free');
+  assert.equal(eventMetaLine({ ...event, online: true, free: undefined, priceText: '$20', availability: 'sold_out' }, 'en-US'), 'Sun, Nov 1 · 8:30 AM · Online · $20 · Sold out');
+  assert.deepEqual(eventRegistration(event), { url: 'https://lu.ma/abc', label: 'Register on Luma' });
+  assert.equal(eventRegistration({ ...event, availability: 'waitlist' }).label, 'Join waitlist on Luma');
+  assert.equal(eventRegistration({ ...event, availability: 'closed' }).label, 'See on Luma');
 });
 
 test('events sit among posts without pushing any out', () => {

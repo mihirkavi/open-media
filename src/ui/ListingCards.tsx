@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Switch, View } from 'react-native';
 
-import { eventPriceText, eventWhen, formatPrice, isJobTitle, listingCurrencies, ListingInput, listingLine, ListingRating, parseEventTime, PostEvent, PostListing, providerName } from '../domain/listings';
+import { eventMetaLine, eventWhen, formatPrice, isJobTitle, listingCurrencies, ListingInput, listingLine, ListingRating, parseEventTime, PostEvent, PostListing, providerName } from '../domain/listings';
 import { PostPaid } from '../domain/posts';
 import { safeHttpsUrl } from '../domain/networkPosts';
 import { ThemeColors } from '../theme';
@@ -66,26 +66,13 @@ export function ListingCard({ listing, onMessage, onRate, onBuy }: { listing: Po
 }
 
 /** A real-world event. Registration always happens on the official page; Open Media never registers anyone. */
-export function EventCard({ event }: { event: PostEvent }) {
+/** An event's date, time, place and price under its title; registering happens from the action row. */
+export function EventMeta({ event }: { event: PostEvent }) {
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const url = safeHttpsUrl(event.registrationUrl);
-  const provider = providerName(event.sources[0]?.provider ?? '');
-  const closed = event.availability === 'closed' || event.availability === 'sold_out';
-  // The organizer is already the post's author line.
-  const facts = [event.online ? 'Online' : event.place, eventPriceText(event)].filter(Boolean);
-  return <View accessibilityLabel={`Event: ${event.title}, ${eventWhen(event)}`} style={styles.card}>
-    <View style={styles.cardTop}>
-      <View style={styles.kind}><Ionicons name="calendar-outline" size={13} color={colors.textSecondary} /><Text style={styles.kindText}>Event</Text></View>
-      <Text style={styles.when}>{eventWhen(event)}</Text>
-    </View>
-    <Text style={styles.title}>{event.title}</Text>
-    {facts.length ? <Text style={styles.line}>{facts.join(' · ')}</Text> : null}
+  return <View style={styles.eventMeta}>
+    <Text style={styles.eventLine}>{eventMetaLine(event)}</Text>
     {event.sources.length > 1 ? <Text style={styles.small}>Listed on {event.sources.map((source) => providerName(source.provider)).join(', ')}</Text> : null}
-    {url ? <Pressable accessibilityRole="link" accessibilityHint="Opens the official page" onPress={() => { Linking.openURL(url).catch(() => undefined); }} style={closed ? styles.secondary : styles.primary}>
-      <Text style={closed ? styles.secondaryText : styles.primaryText}>{closed ? `See on ${provider}` : event.availability === 'waitlist' ? `Join waitlist on ${provider}` : `Register on ${provider}`}</Text>
-      <Ionicons name="open-outline" size={14} color={closed ? colors.text : colors.surface} />
-    </Pressable> : null}
   </View>;
 }
 
@@ -169,6 +156,8 @@ function createStyles(colors: ThemeColors) {
     kind: { flexDirection: 'row', alignItems: 'center', gap: 5 },
     kindText: { color: colors.textSecondary, fontSize: 12, fontWeight: '600', letterSpacing: 0.3, textTransform: 'uppercase' },
     when: { color: colors.text, fontSize: 13, fontWeight: '600' },
+    eventMeta: { marginTop: 4, gap: 2 },
+    eventLine: { color: colors.text, fontSize: 14, lineHeight: 20, fontWeight: '600' },
     soldOut: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
     title: { color: colors.text, fontSize: 17, lineHeight: 23, fontWeight: '700' },
     line: { color: colors.textSecondary, fontSize: 14, lineHeight: 20 },
