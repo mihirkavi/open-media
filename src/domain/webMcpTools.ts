@@ -59,6 +59,12 @@ export const webMcpTools: WebMcpToolDefinition[] = [
     path: '/v1/jobs', query: { q: 'query', remote: 'remote' },
   },
   {
+    name: 'preview_open_media_profile_from_url', title: 'Preview a profile from a website',
+    description: 'What a public https website says about its owner, the way Open Media’s profile import reads it: name, bio, headline, location, work, education, skills, projects and links, each with its source (JSON Resume, JSON-LD Person, h-card, Open Graph, page headings). Obeys robots.txt and saves nothing; to fill a profile, the owner signs in and imports in Edit profile.',
+    inputSchema: { type: 'object', properties: { url: { type: 'string', description: 'A public https site, e.g. https://asha.example' } }, required: ['url'] },
+    path: '/v1/profile-preview', query: { url: 'url' },
+  },
+  {
     name: 'get_open_media_profile', title: 'Get an Open Media profile',
     description: 'A public Open Media profile by handle, with its recent public posts.',
     inputSchema: { type: 'object', properties: { handle: { type: 'string', description: 'The Open Media handle, without @' } }, required: ['handle'] },

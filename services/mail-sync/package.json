@@ -36,6 +36,7 @@
     "mailparser": "^3.9.4",
     "nodemailer": "^10.2.1",
     "structured-event-feeds": "github:mihirkavi/structured-event-feeds#v0.1.1",
+    "unpdf": "1.9.0",
     "viem": "2.57.12",
     "zod": "^4.6.7"
   },

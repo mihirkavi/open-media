@@ -72,7 +72,7 @@ export async function isPublicHost(host: string, resolve: Resolve = defaultResol
 }
 
 /** Fetches a public https page, following up to three redirects that are each checked, with a size and time limit. */
-export async function fetchPublicPage(url: string, deps: MarketplaceDeps = {}, maxBytes = 1_000_000): Promise<{ url: string; status: number; text: string } | undefined> {
+export async function fetchPublicPage(url: string, deps: MarketplaceDeps = {}, maxBytes = 1_000_000, options: { userAgent?: string; accept?: string } = {}): Promise<{ url: string; status: number; text: string; contentType: string } | undefined> {
   const fetchImpl = deps.fetch ?? fetch;
   let current = url;
   for (let hop = 0; hop < 4; hop += 1) {
@@ -82,7 +82,7 @@ export async function fetchPublicPage(url: string, deps: MarketplaceDeps = {}, m
     if (!(await isPublicHost(parsed.hostname, deps.resolve))) return undefined;
     const response = await fetchImpl(parsed.toString(), {
       redirect: 'manual', signal: AbortSignal.timeout(8000),
-      headers: { 'user-agent': 'OpenMediaListingCheck/1.0 (+https://api.openmedia.site/policies/listings)', accept: 'text/html,text/plain;q=0.9,*/*;q=0.1' },
+      headers: { 'user-agent': options.userAgent ?? 'OpenMediaListingCheck/1.0 (+https://api.openmedia.site/policies/listings)', accept: options.accept ?? 'text/html,text/plain;q=0.9,*/*;q=0.1' },
     }).catch(() => undefined);
     if (!response) return undefined;
     if (response.status >= 300 && response.status < 400) {
@@ -92,7 +92,8 @@ export async function fetchPublicPage(url: string, deps: MarketplaceDeps = {}, m
       continue;
     }
     const reader = response.body?.getReader();
-    if (!reader) return { url: current, status: response.status, text: '' };
+    const contentType = response.headers.get('content-type') ?? '';
+    if (!reader) return { url: current, status: response.status, text: '', contentType };
     const chunks: Uint8Array[] = [];
     let size = 0;
     while (size < maxBytes) {
@@ -105,7 +106,7 @@ export async function fetchPublicPage(url: string, deps: MarketplaceDeps = {}, m
     const bytes = new Uint8Array(Math.min(size, maxBytes));
     let offset = 0;
     for (const chunk of chunks) { const part = chunk.subarray(0, Math.max(0, bytes.length - offset)); bytes.set(part, offset); offset += part.byteLength; }
-    return { url: current, status: response.status, text: new TextDecoder().decode(bytes) };
+    return { url: current, status: response.status, text: new TextDecoder().decode(bytes), contentType };
   }
   return undefined;
 }

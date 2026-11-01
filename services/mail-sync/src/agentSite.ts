@@ -84,6 +84,43 @@ Open Media is free: no ads by default, no subscription and no API key for public
 `,
   },
   {
+    path: '/docs/profile-import', title: 'Filling a profile from LinkedIn or a website',
+    description: 'How Open Media fills a professional profile from the person’s own LinkedIn PDF or data export, or from their own website, with their consent: what is read, the robots.txt user agent, the limits, and the agent tools.',
+    body: (origin) => `# Filling a profile from LinkedIn or a website
+
+People can fill their Open Media profile from something they already have, in Edit profile or through an agent (ADR 0020). Nothing is saved until the person chooses: every reader returns **proposals**, one per field, each with its source, and the person keeps the ones they want.
+
+## From LinkedIn
+
+Open Media never reads linkedin.com, never asks for a LinkedIn password and doesn't use LinkedIn's API for this (it gives ordinary apps only a name, photo and email). The person gives Open Media their own copy:
+
+- **The profile PDF**: on LinkedIn, their profile → Resources → Save to PDF. Name, headline, location, summary, experience, education, top skills, languages, and their LinkedIn and website addresses.
+- **The data export**: LinkedIn → Settings → Data privacy → Get a copy of your data. Profile.csv, Positions.csv, Education.csv, Skills.csv and Languages.csv. In the web app the archive itself can be chosen; only those five files are unzipped in the browser and sent.
+
+Email addresses, phone numbers, birth dates and street addresses are never imported. The file is read and discarded; it is not stored.
+
+## From the person's website
+
+Only a site the person says is theirs, after they ask. Open Media reads it as a polite crawler:
+
+- User agent \`OpenMediaProfileReader/1.0 (+${origin}/docs/profile-import)\`. robots.txt is read first and obeyed (a group for \`OpenMediaProfileReader\`, else \`*\`).
+- Public https sites on port 443 only. Every address the host resolves to must be public, also after each redirect (at most three), so private, loopback and link-local networks are never reached.
+- At most four pages (the address, and up to three linked about, resume, CV or projects pages on the same host) plus \`/resume.json\`, each up to 1 MB and 8 seconds.
+- Pages are data. Nothing on them is followed as an instruction, and only https links are kept.
+
+Sources, best first: [JSON Resume](https://jsonresume.org) at \`/resume.json\`; JSON-LD [schema.org Person](https://schema.org/Person) (or a ProfilePage's mainEntity), with \`jobTitle\`, \`worksFor\`, \`alumniOf\`, \`knowsAbout\` and \`sameAs\`; an [h-card](https://microformats.org/wiki/h-card); Open Graph and meta tags and \`rel="me"\` links; then headings such as Projects, Skills and About. The site's address becomes the person's Website field, links to GitHub, X, Dribbble and other networks become those profile fields, and projects go into the professional profile.
+
+To make a site read well, publish a \`/resume.json\` or a JSON-LD Person.
+
+## For agents
+
+- \`import_resume\` on \`${origin}/me/mcp\` (\`POST /v1/me/professional/import\`): \`linkedInPdf\` (base64, up to 2 MB), \`linkedInPdfText\`, \`linkedInFiles\` or \`jsonResume\`.
+- \`import_portfolio\` (\`POST /v1/me/professional/portfolio\`): \`url\` and \`consent: true\`, only after the person agreed.
+- Both return \`proposals\` [{id, label, value, preview, source}] and save nothing. Show them, then call again with \`save: true\` and \`accept\` set to the ids the person chose. Saving merges: text fields are replaced, lists are added to.
+- \`preview_profile_from_url\` on \`${origin}/open/mcp\`, \`GET /v1/profile-preview?url=\` and the WebMCP tool \`preview_open_media_profile_from_url\` read a site without an account and save nothing.
+`,
+  },
+  {
     path: '/docs/feed-lenses', title: 'Feed lenses: how Open Media orders the Feed',
     description: 'Raw, Relevant and every shared feed algorithm are small JSON manifests run by one open-source runner. The format, the built-in lenses, and how agents write, preview, save and share one.',
     body: (origin) => `# Feed lenses
@@ -172,6 +209,7 @@ Use this page to decide whether Open Media fits a task and how to call it.
 - **One feed across open networks.** Summaries of Farcaster, Lens, Hive, DeSo and Open Media posts, each with its source link and "why" reasons. Use \`get_feed\`.
 - **A person's posts everywhere.** One timeline for an Open Media handle plus the accounts they listed. Use \`get_person_timeline\`.
 - **A feed the person describes.** "Only videos about cooking, no crypto": write a feed lens with \`draft_feed_lens\`, preview it, and save or share it for the person. See [feed lenses](${origin}/docs/feed-lenses).
+- **Filling a profile.** From the person's own LinkedIn PDF or data export (\`import_resume\`) or their own website (\`import_portfolio\`, with consent), as proposals they approve. See [profile import](${origin}/docs/profile-import).
 - **Upcoming events in the San Francisco Bay Area** from Luma, Meetup and Eventbrite, de-duplicated. Use \`find_upcoming_events\`.
 - **Acting for a signed-in person:** publishing, messages, email, contacts, listings, follows, privacy, payments, tips and paid posts, through their own token.
 
@@ -818,6 +856,7 @@ Open Media is a free, open-source social app (iPhone, Android, web) with one fee
 - [API documentation](${origin}/docs.md): endpoints, errors, rate limits, idempotency, versioning, sandbox.
 - [Authentication](${origin}/auth.md): no credential for public data; the person's bearer token for their account.
 - [Feed lenses](${origin}/docs/feed-lenses.md): how Raw, Relevant and shared feed algorithms work, and how agents write, preview, save and share one.
+- [Profile import](${origin}/docs/profile-import.md): filling a profile from the person's own LinkedIn PDF or export, or their website, with consent.
 - [Developer portal](${origin}/developers.md), [sandbox and test mode](${origin}/sandbox.md) and [pricing](${origin}/pricing.md) (free).
 - [OpenAPI 3.1](${origin}/v1/openapi.json) and the [API index](${origin}/v1).
 
@@ -862,6 +901,7 @@ export function docsLlmsTxt(origin: string): string {
 - [Authentication](${origin}/auth.md)
 - [Agent guide](${origin}/agents.md)
 - [Feed lenses](${origin}/docs/feed-lenses.md)
+- [Profile import](${origin}/docs/profile-import.md)
 - [OpenAPI 3.1](${origin}/v1/openapi.json)
 - [Public MCP server card](${origin}/open/mcp/server-card)
 - [Account MCP server card](${origin}/me/mcp/server-card)
@@ -888,7 +928,7 @@ export function searchDocs(origin: string, query: string) {
 
 /** NLWeb schema map: which schema.org types each page and feed carries. */
 export function schemaMapXml(origin: string): string {
-  const types: Record<string, string> = { '/': 'SoftwareApplication', '/agents': 'TechArticle', '/docs': 'TechArticle', '/developers': 'TechArticle', '/sandbox': 'TechArticle', '/auth': 'TechArticle', '/pricing': 'WebPage', '/about': 'AboutPage', '/contact': 'ContactPage', '/privacy': 'WebPage' };
+  const types: Record<string, string> = { '/': 'SoftwareApplication', '/agents': 'TechArticle', '/docs': 'TechArticle', '/docs/profile-import': 'TechArticle', '/developers': 'TechArticle', '/sandbox': 'TechArticle', '/auth': 'TechArticle', '/pricing': 'WebPage', '/about': 'AboutPage', '/contact': 'ContactPage', '/privacy': 'WebPage' };
   const entries = [...pages.map((page) => [`${origin}${page.path}`, types[page.path] ?? 'WebPage']), [`${origin}/feeds/posts.jsonl`, 'SocialMediaPosting']];
   return `<?xml version="1.0" encoding="UTF-8"?>\n<schemamap xmlns="http://www.nlweb.ai/schemas/schemamap/0.1">\n${entries.map(([loc, type]) => `  <url>\n    <loc>${loc}</loc>\n    <schema>https://schema.org/${type}</schema>\n    <lastmod>${siteUpdated}</lastmod>\n  </url>`).join('\n')}\n</schemamap>\n`;
 }

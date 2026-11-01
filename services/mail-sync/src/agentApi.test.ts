@@ -232,7 +232,7 @@ test('Work tools: jobs are posted as job listings, and drafts and imports change
     globalThis.fetch = (async (url: string, init?: RequestInit) => String(url).includes('/rest/v1/profiles?') ? Response.json([{ handle: 'asha', display_name: 'Asha', professional: savedProfessional }]) : inner(url, init)) as typeof fetch;
     const tools = new Map(((await call('tools/list')).tools as { name: string; annotations: { readOnlyHint: boolean } }[]).map((item) => [item.name, item.annotations]));
     for (const name of ['get_professional_profile', 'tailor_resume', 'draft_job_application']) assert.equal(tools.get(name)?.readOnlyHint, true, name);
-    for (const name of ['set_professional_profile', 'import_resume', 'publish_job']) assert.equal(tools.get(name)?.readOnlyHint, false, name);
+    for (const name of ['set_professional_profile', 'import_resume', 'import_portfolio', 'publish_job']) assert.equal(tools.get(name)?.readOnlyHint, false, name);
 
     await call('tools/call', { name: 'publish_job', arguments: { title: 'Senior designer (contract)', pay: '80000-120000', currency: 'USD', remote: true, applyUrl: 'https://jobs.example.com/1' } });
     const created = requests.find((request) => request.url.includes('open_media_create_listing_post'))!;
@@ -251,10 +251,26 @@ test('Work tools: jobs are posted as job listings, and drafts and imports change
 
     const preview = JSON.parse((await call('tools/call', { name: 'import_resume', arguments: { linkedInFiles: { 'Positions.csv': 'Company Name,Title,Description,Location,Started On,Finished On\nAcme,Designer,,,Jan 2020,\n' } } })).content[0].text);
     assert.equal(preview.saved, false);
-    assert.equal(preview.professional.work[0].startDate, '2020-01');
+    assert.equal(preview.proposals.find((item: { id: string }) => item.id === 'work').value[0].startDate, '2020-01');
     assert.ok(!requests.some((request) => request.url.includes('open_media_set_professional_profile')), 'an import is not saved until the person agrees');
     await call('tools/call', { name: 'import_resume', arguments: { linkedInFiles: { 'Positions.csv': 'Company Name,Title,Description,Location,Started On,Finished On\nAcme,Designer,,,Jan 2020,\n' }, save: true } });
-    assert.ok(requests.some((request) => request.url.includes('open_media_set_professional_profile')));
+    const saved = requests.find((request) => request.url.includes('open_media_set_professional_profile'))!;
+    assert.deepEqual(saved.body.p_professional.work.map((item: { position: string }) => item.position), ['Senior designer', 'Designer'], 'an import adds to what is there');
+    assert.deepEqual(saved.body.p_professional.skills, ['Figma', 'User research'], 'and keeps the rest');
+
+    const unknown = await call('tools/call', { name: 'import_resume', arguments: { linkedInFiles: { 'Positions.csv': 'Company Name,Title\nAcme,Designer\n' }, save: true, accept: ['birthDate'] } });
+    assert.equal(unknown.isError, true, 'only shown proposals can be saved');
+
+    const pdfText = ['Contact', 'www.linkedin.com/in/asha-example (LinkedIn)', 'Top Skills', 'Figma', 'Asha Rao', 'Product designer', 'Pune, India', 'Experience', 'Example Labs', 'Designer', 'March 2021 - Present (3 years)', 'Education', 'Example Institute', 'BDes, Design · (2013 - 2017)'].join('\n');
+    const fromPdf = JSON.parse((await call('tools/call', { name: 'import_resume', arguments: { linkedInPdfText: pdfText } })).content[0].text);
+    assert.deepEqual(fromPdf.proposals.map((item: { id: string }) => item.id), ['displayName', 'headline', 'location', 'work', 'education', 'skills', 'field:linkedin']);
+    assert.equal(fromPdf.saved, false);
+
+    const noConsent = await call('tools/call', { name: 'import_portfolio', arguments: { url: 'https://asha.example', consent: false } });
+    assert.equal(noConsent.isError, true, 'a site is read only after the person agreed');
+    assert.match(noConsent.content[0].text, /Ask the person first/);
+    const linkedIn = await call('tools/call', { name: 'import_portfolio', arguments: { url: 'https://www.linkedin.com/in/asha', consent: true } });
+    assert.match(linkedIn.content[0].text, /doesn’t read linkedin\.com/);
     globalThis.fetch = inner;
   });
   globalThis.fetch = realFetch;

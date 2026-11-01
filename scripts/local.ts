@@ -9,6 +9,7 @@
  */
 import { ChildProcess, execFileSync, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { createServer } from 'node:http';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir, platform } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -20,6 +21,8 @@ const localDir = join(root, '.local');
 const appURL = 'http://localhost:8081';
 const apiURL = 'http://127.0.0.1:8787';
 const inboxURL = 'http://127.0.0.1:54324';
+// A made-up person's portfolio site (services/mail-sync/fixtures/portfolio), for trying profile import.
+const samplePortfolioURL = 'http://127.0.0.1:8095';
 const bridgesEnv = join(root, '.local', 'bridges', 'worker.env');
 
 const nodeBin = findNode22();
@@ -64,6 +67,8 @@ async function main() {
     `CONVO_APP_ORIGIN=${appURL}`,
     `EVENTS_PUBLIC_ORIGIN=${apiURL}`,
     'MAIL_ALLOW_LOCAL_SERVERS=true',
+    // Lets profile import read the sample portfolio on localhost. Production never sets it.
+    'PROFILE_IMPORT_ALLOW_LOCAL=true',
     // The local stack's own service key, for server-only steps such as payment checks (USDC on
     // Base Sepolia). Card payments stay off locally until Stripe test keys are added here.
     status.SECRET_KEY ? `SUPABASE_SECRET_KEY=${status.SECRET_KEY}` : '',
@@ -95,6 +100,8 @@ async function main() {
   start('api', 'npm', ['run', 'dev'], mailService);
   await waitFor(`${apiURL}/health`, 'mail service');
 
+  serveSamplePortfolio();
+
   step('Starting the web app');
   start('web', 'npx', ['expo', 'start', '--web', '--port', '8081'], root);
   await waitFor(appURL, 'web app', 180);
@@ -107,10 +114,22 @@ async function main() {
   Mail + API       ${apiURL}   (public API: ${apiURL}/v1/posts)
   Sign-in emails   ${smtp.enabled ? `sent to your real inbox via ${smtp.host}` : `local test inbox → ${inboxURL}  (run \`npm run local:email\` to use your own email provider)`}
   Test SMTP        localhost:54325 (no TLS; works only for this local setup)
+  Sample portfolio ${samplePortfolioURL}   (type it as your Website in Edit profile to try profile import)
 
   Ctrl+C stops the app and mail service. \`npm run local:stop\` also stops the database.
 `);
   if (platform() === 'darwin' && !process.env.OPEN_MEDIA_NO_BROWSER) spawn('open', [appURL], { stdio: 'ignore', detached: true }).unref();
+}
+
+/** Serves the sample portfolio's files; anything else is a 404. Local only. */
+function serveSamplePortfolio() {
+  const folder = join(mailService, 'fixtures', 'portfolio');
+  const files: Record<string, [string, string]> = { '/': ['index.html', 'text/html; charset=utf-8'], '/resume.json': ['resume.json', 'application/json'], '/robots.txt': ['robots.txt', 'text/plain'] };
+  createServer((request, response) => {
+    const file = files[new URL(request.url ?? '/', samplePortfolioURL).pathname];
+    if (!file || !existsSync(join(folder, file[0]))) { response.writeHead(404, { 'content-type': 'text/html' }).end('<h1>Not found</h1>'); return; }
+    response.writeHead(200, { 'content-type': file[1] }).end(readFileSync(join(folder, file[0])));
+  }).listen(8095, '127.0.0.1').on('error', () => console.log('  (port 8095 is busy, so the sample portfolio is not served)')).unref();
 }
 
 function findNode22(): string {

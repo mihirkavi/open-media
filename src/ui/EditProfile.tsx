@@ -1,12 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
 import { loadMyProfileFields, loadProfessionalProfile, OpenMediaProfile, saveMyProfileFields, saveProfessionalProfile, saveProfileBasics } from '../data/openMediaService';
 import { loadPublicPerson, saveLinkedAccounts } from '../data/peopleService';
+import { importFromLinkedInFiles, importFromWebsite, ImportResult } from '../data/profileImportService';
+import { applyProposals, ProfileProposal } from '../domain/profileImport';
 import { NetworkId } from '../domain/networkPosts';
 import { editableFields, FieldGroup, fieldDefinition, FieldVisibility, fieldVisibilities, ProfileFieldValue, publicProfileUrl, visibilityLabels } from '../domain/profileFields';
-import { EducationEntry, emptyProfessional, OpenTo, parseProfessional, ProfessionalProfile, WorkEntry } from '../domain/professionalProfile';
+import { EducationEntry, emptyProfessional, OpenTo, parseProfessional, ProfessionalProfile, ProjectEntry, WorkEntry } from '../domain/professionalProfile';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { Text, TextInput } from './Text';
@@ -42,6 +44,11 @@ export function EditProfile({ profile, onClose, onSaved }: { profile: OpenMediaP
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
+  // Proposals from LinkedIn or the person's site (ADR 0020), waiting for them to choose.
+  const [review, setReview] = useState<{ from: string; result: ImportResult; chosen: Set<string> }>();
+  const [importing, setImporting] = useState<'linkedin' | 'website'>();
+  const [importNote, setImportNote] = useState('');
+  const scroll = useRef<ScrollView>(null);
 
   useEffect(() => {
     let active = true;
@@ -58,7 +65,49 @@ export function EditProfile({ profile, onClose, onSaved }: { profile: OpenMediaP
   const setField = (id: string, change: Partial<ProfileFieldValue>) => setFields((current) => current.map((item) => item.field === id ? { ...item, ...change } : item));
   const setWork = (index: number, change: Partial<WorkEntry>) => setProfessional((current) => ({ ...current, work: current.work.map((item, at) => at === index ? { ...item, ...change } : item) }));
   const setSchool = (index: number, change: Partial<EducationEntry>) => setProfessional((current) => ({ ...current, education: current.education.map((item, at) => at === index ? { ...item, ...change } : item) }));
+  const setProject = (index: number, change: Partial<ProjectEntry>) => setProfessional((current) => ({ ...current, projects: (current.projects ?? []).map((item, at) => at === index ? { ...item, ...change } : item) }));
   const list = (text: string) => text.split(',').map((item) => item.trim()).filter(Boolean);
+  const website = fields.find((item) => item.field === 'website')?.value.trim() ?? '';
+
+  /** The form as a profile: blank rows dropped, so it can be checked and merged. */
+  const formProfessional = (): ProfessionalProfile => parseProfessional({
+    ...professional,
+    work: professional.work.filter((item) => item.name.trim() && item.position.trim()).map((item) => ({ ...item, startDate: item.startDate || undefined, endDate: item.endDate || undefined, summary: item.summary || undefined, location: item.location || undefined })),
+    education: professional.education.filter((item) => item.institution.trim()).map((item) => ({ ...item, area: item.area || undefined, studyType: item.studyType || undefined, startDate: item.startDate || undefined, endDate: item.endDate || undefined })),
+    projects: (professional.projects ?? []).filter((item) => item.name.trim()).map((item) => ({ name: item.name, url: item.url?.trim() || undefined, description: item.description || undefined })),
+    skills: list(skills), languages: list(languages),
+  });
+
+  const startImport = async (kind: 'linkedin' | 'website') => {
+    setImportNote(''); setMessage('');
+    if (kind === 'website' && !website) { setImportNote('Add your website under About first, then choose “Fill my profile from this site”.'); return; }
+    // The LinkedIn spinner starts once a file is chosen, not while the picker is open.
+    if (kind === 'website') setImporting(kind);
+    try {
+      const result = kind === 'linkedin' ? await importFromLinkedInFiles(() => setImporting('linkedin')) : await importFromWebsite(website);
+      if (!result) return;
+      const from = kind === 'linkedin' ? 'your LinkedIn file' : website.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
+      setReview({ from, result, chosen: new Set(result.proposals.map((item) => item.id)) });
+      scroll.current?.scrollTo({ y: 0, animated: true });
+    } catch (reason) {
+      setImportNote(reason instanceof Error ? reason.message : 'That couldn’t be read. Try again.');
+    } finally { setImporting(undefined); }
+  };
+
+  const useChosen = () => {
+    if (!review) return;
+    const chosen = review.result.proposals.filter((item) => review.chosen.has(item.id));
+    try {
+      const next = applyProposals({ displayName: name, bio, professional: formProfessional(), fields: fields.filter((item) => item.value.trim()) }, chosen);
+      setName(next.displayName); setBio(next.bio);
+      setProfessional(next.professional); setSkills(next.professional.skills.join(', ')); setLanguages(next.professional.languages.join(', '));
+      setFields(editableFields(next.fields));
+      setReview(undefined);
+      setImportNote(`Filled in ${chosen.length} ${chosen.length === 1 ? 'field' : 'fields'} from ${review.from}. Check them below, then Save profile.`);
+    } catch (reason) {
+      setImportNote(reason instanceof Error ? reason.message : 'Those values don’t fit the profile.');
+    }
+  };
 
   const save = async () => {
     setSaving(true); setMessage('');
@@ -70,6 +119,7 @@ export function EditProfile({ profile, onClose, onSaved }: { profile: OpenMediaP
         location: location?.value && location.visibility === 'everyone' ? location.value : undefined,
         work: professional.work.filter((item) => item.name.trim() || item.position.trim()).map((item) => ({ ...item, startDate: item.startDate || undefined, endDate: item.endDate || undefined, summary: item.summary || undefined, location: item.location || undefined })),
         education: professional.education.filter((item) => item.institution.trim()).map((item) => ({ ...item, area: item.area || undefined, studyType: item.studyType || undefined, startDate: item.startDate || undefined, endDate: item.endDate || undefined })),
+        projects: (professional.projects ?? []).filter((item) => item.name.trim() || item.url?.trim()).map((item) => ({ name: item.name, url: item.url?.trim() || undefined, description: item.description || undefined })),
         skills: list(skills), languages: list(languages),
       });
       const linked = openNetworks.flatMap((network) => networks[network.id]?.trim() ? [{ network: network.id, handle: networks[network.id].trim().replace(/^@/, '') }] : []);
@@ -90,12 +140,16 @@ export function EditProfile({ profile, onClose, onSaved }: { profile: OpenMediaP
   const open = (url: string) => { Linking.openURL(url).catch(() => undefined); };
   const groups: FieldGroup[] = ['about', 'contact', 'social'];
 
-  return <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+  return <ScrollView ref={scroll} style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
     <View style={styles.bar}>
       <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={onClose} style={styles.back}><Ionicons name="chevron-back" size={22} color={colors.text} /></Pressable>
       <Text accessibilityRole="header" style={styles.title}>Edit profile</Text>
     </View>
     <Text style={styles.note}>Your public address: <Text accessibilityRole="link" onPress={() => open(address)} style={styles.link}>{address.replace('https://', '')}</Text> · Resume: <Text accessibilityRole="link" onPress={() => open(`${address}/resume`)} style={styles.link}>{`${address.replace('https://', '')}/resume`}</Text></Text>
+    <Text style={styles.note}>Fill this in from <Text accessibilityRole="link" onPress={() => startImport('linkedin')} style={styles.link}>your LinkedIn PDF or data export</Text> or <Text accessibilityRole="link" onPress={() => startImport('website')} style={styles.link}>your website</Text>. You choose what to keep.</Text>
+    {importing ? <View style={styles.importing}><ActivityIndicator color={colors.text} /><Text style={styles.note}>{importing === 'linkedin' ? 'Reading your LinkedIn file…' : `Reading ${website.replace(/^https?:\/\//, '')}…`}</Text></View> : null}
+    {importNote ? <Text accessibilityLiveRegion="polite" style={styles.message}>{importNote}</Text> : null}
+    {review ? <Review review={review} current={{ name, bio, professional, fields }} onToggle={(id) => setReview((current) => { if (!current) return current; const chosen = new Set(current.chosen); if (chosen.has(id)) chosen.delete(id); else chosen.add(id); return { ...current, chosen }; })} onUse={useChosen} onCancel={() => setReview(undefined)} styles={styles} colors={colors} /> : null}
     {loading ? <ActivityIndicator style={styles.loading} color={colors.text} /> : null}
 
     <Section title="Basics" styles={styles}>
@@ -129,6 +183,16 @@ export function EditProfile({ profile, onClose, onSaved }: { profile: OpenMediaP
       {professional.work.length < 20 ? <Text accessibilityRole="button" onPress={() => setProfessional((current) => ({ ...current, work: [...current.work, { name: '', position: '', highlights: [] }] }))} style={styles.add}>+ Add a role</Text> : null}
     </Section>
 
+    <Section title="Projects" note="Things you made, with a link to each. Public." styles={styles}>
+      {(professional.projects ?? []).map((item, index) => <View key={index} style={styles.entry}>
+        <Field label="Project" value={item.name} onChange={(projectName) => setProject(index, { name: projectName })} max={120} styles={styles} colors={colors} />
+        <Field label="Link" value={item.url ?? ''} onChange={(url) => setProject(index, { url })} max={300} placeholder="https://…" keyboard="url" styles={styles} colors={colors} />
+        <Field label="About it" value={item.description ?? ''} onChange={(description) => setProject(index, { description })} max={600} multiline styles={styles} colors={colors} />
+        <Text accessibilityRole="button" onPress={() => setProfessional((current) => ({ ...current, projects: (current.projects ?? []).filter((_, at) => at !== index) }))} style={styles.remove}>Remove this project</Text>
+      </View>)}
+      {(professional.projects ?? []).length < 10 ? <Text accessibilityRole="button" onPress={() => setProfessional((current) => ({ ...current, projects: [...(current.projects ?? []), { name: '' }] }))} style={styles.add}>+ Add a project</Text> : null}
+    </Section>
+
     <Section title="Education" styles={styles}>
       {professional.education.map((item, index) => <View key={index} style={styles.entry}>
         <Field label="School" value={item.institution} onChange={(institution) => setSchool(index, { institution })} max={120} styles={styles} colors={colors} />
@@ -151,6 +215,8 @@ export function EditProfile({ profile, onClose, onSaved }: { profile: OpenMediaP
         return <View key={item.field} style={styles.fieldBlock}>
           <Field label={definition.label} value={item.value} onChange={(value) => setField(item.field, { value })} max={definition.max} placeholder={definition.placeholder} keyboard={definition.kind === 'email' ? 'email-address' : definition.kind === 'phone' ? 'phone-pad' : definition.kind === 'url' ? 'url' : 'default'} styles={styles} colors={colors} />
           <Visibility value={item.visibility} onChange={(visibility) => setField(item.field, { visibility })} label={definition.label} styles={styles} />
+          {item.field === 'website' && /\./.test(item.value) ? <Text accessibilityRole="link" onPress={() => startImport('website')} style={styles.add}>Fill my profile from this site</Text> : null}
+          {item.field === 'linkedin' ? <Text accessibilityRole="link" onPress={() => startImport('linkedin')} style={styles.hintLink}>Fill my profile from my LinkedIn PDF or data export</Text> : null}
         </View>;
       })}
     </Section>)}
@@ -166,6 +232,42 @@ export function EditProfile({ profile, onClose, onSaved }: { profile: OpenMediaP
 }
 
 type Styles = ReturnType<typeof createStyles>;
+
+/** What a proposal would replace in the form, if anything; lists are added to, so they replace nothing. */
+function replaces(proposal: ProfileProposal, current: { name: string; bio: string; professional: ProfessionalProfile; fields: ProfileFieldValue[] }): string | undefined {
+  const old = proposal.id === 'displayName' ? current.name : proposal.id === 'bio' ? current.bio
+    : proposal.id === 'headline' || proposal.id === 'summary' || proposal.id === 'location' ? current.professional[proposal.id] ?? ''
+    : proposal.id.startsWith('field:') ? current.fields.find((item) => item.field === proposal.id.slice(6))?.value ?? '' : '';
+  return old.trim() && old.trim() !== String(proposal.value).trim() ? old.trim() : undefined;
+}
+
+/** The review step: each proposed value with where it came from; nothing is saved until Save profile. */
+function Review({ review, current, onToggle, onUse, onCancel, styles, colors }: { review: { from: string; result: ImportResult; chosen: Set<string> }; current: Parameters<typeof replaces>[1]; onToggle: (id: string) => void; onUse: () => void; onCancel: () => void; styles: Styles; colors: ThemeColors }) {
+  const { proposals, skipped } = review.result;
+  return <View style={styles.section}>
+    <Text accessibilityRole="header" style={styles.sectionTitle}>From {review.from}</Text>
+    <Text style={styles.note}>Choose what to use. It fills the fields below; nothing is saved until you tap Save profile.{skipped?.length ? ` Skipped because the site asked: ${skipped.length} ${skipped.length === 1 ? 'page' : 'pages'}.` : ''}</Text>
+    <View style={styles.card}>
+      {proposals.map((proposal) => {
+        const on = review.chosen.has(proposal.id);
+        const old = replaces(proposal, current);
+        return <Pressable key={proposal.id} accessibilityRole="checkbox" aria-checked={on} accessibilityLabel={`${proposal.label}: ${proposal.preview}`} onPress={() => onToggle(proposal.id)} style={styles.proposal}>
+          <Ionicons name={on ? 'checkbox' : 'square-outline'} size={20} color={on ? colors.text : colors.textTertiary} />
+          <View style={styles.grow}>
+            <Text style={styles.label}>{proposal.label}</Text>
+            <Text style={styles.proposalValue} numberOfLines={6}>{proposal.preview}</Text>
+            {old ? <Text style={styles.hint} numberOfLines={2}>Replaces: {old}</Text> : null}
+            <Text style={styles.hint}>From {proposal.source}</Text>
+          </View>
+        </Pressable>;
+      })}
+      <View style={styles.reviewActions}>
+        <Text accessibilityRole="button" onPress={onUse} style={styles.add}>{`Use ${review.chosen.size} of ${proposals.length}`}</Text>
+        <Text accessibilityRole="button" onPress={onCancel} style={styles.cancel}>Not now</Text>
+      </View>
+    </View>
+  </View>;
+}
 
 function Section({ title, note, styles, children }: React.PropsWithChildren<{ title: string; note?: string; styles: Styles }>) {
   return <View style={styles.section}><Text accessibilityRole="header" style={styles.sectionTitle}>{title}</Text>{note ? <Text style={styles.note}>{note}</Text> : null}<View style={styles.card}>{children}</View></View>;
@@ -216,6 +318,12 @@ function createStyles(colors: ThemeColors) {
     visibilityChoice: { minHeight: 28, paddingHorizontal: 10, justifyContent: 'center', borderRadius: 999, borderWidth: 1, borderColor: colors.border },
     visibilityText: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
     add: { color: colors.text, fontSize: 14, fontWeight: '600', paddingVertical: 4 },
+    hintLink: { color: colors.textSecondary, fontSize: 12, fontWeight: '600', textDecorationLine: 'underline' },
+    cancel: { color: colors.textSecondary, fontSize: 14, fontWeight: '600', paddingVertical: 4 },
+    importing: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
+    proposal: { flexDirection: 'row', gap: 10, alignItems: 'flex-start', paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: colors.border },
+    proposalValue: { color: colors.text, fontSize: 14, lineHeight: 20, marginTop: 2 },
+    reviewActions: { flexDirection: 'row', gap: 20, alignItems: 'center' },
     remove: { color: colors.danger, fontSize: 13, fontWeight: '600', paddingVertical: 2 },
     message: { marginTop: 18, color: colors.text, fontSize: 13, lineHeight: 19 },
     save: { minHeight: 50, marginTop: 14, alignItems: 'center', justifyContent: 'center', borderRadius: 25, backgroundColor: colors.text },

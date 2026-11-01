@@ -30,6 +30,13 @@ export interface EducationEntry {
   endDate?: string;
 }
 
+export interface ProjectEntry {
+  name: string;
+  /** https only. */
+  url?: string;
+  description?: string;
+}
+
 export interface ProfessionalProfile {
   headline?: string;
   summary?: string;
@@ -40,11 +47,13 @@ export interface ProfessionalProfile {
   skills: string[];
   languages: string[];
   links: { label: string; url: string }[];
+  /** Things the person made, e.g. from their portfolio site. Optional so older profiles still read. */
+  projects?: ProjectEntry[];
 }
 
 export const emptyProfessional: ProfessionalProfile = { work: [], education: [], skills: [], languages: [], links: [] };
 
-const limits = { headline: 120, summary: 1200, line: 120, entrySummary: 600, highlight: 240, highlights: 6, work: 20, education: 10, skills: 50, skill: 40, languages: 10, links: 8, url: 300 };
+const limits = { projects: 10, headline: 120, summary: 1200, line: 120, entrySummary: 600, highlight: 240, highlights: 6, work: 20, education: 10, skills: 50, skill: 40, languages: 10, links: 8, url: 300 };
 
 export class ProfessionalError extends Error {}
 
@@ -52,7 +61,7 @@ export class ProfessionalError extends Error {}
 export function parseProfessional(value: unknown): ProfessionalProfile {
   if (value === null || value === undefined) return { ...emptyProfessional };
   const input = object(value, 'The professional profile must be an object.');
-  allowOnly(input, ['headline', 'summary', 'openTo', 'location', 'work', 'education', 'skills', 'languages', 'links'], 'profile');
+  allowOnly(input, ['headline', 'summary', 'openTo', 'location', 'work', 'education', 'skills', 'languages', 'links', 'projects'], 'profile');
   const profile: ProfessionalProfile = {
     work: entries(input.work, limits.work, 'work').map((item, index) => {
       allowOnly(item, ['name', 'position', 'location', 'startDate', 'endDate', 'summary', 'highlights'], `work[${index}]`);
@@ -89,6 +98,15 @@ export function parseProfessional(value: unknown): ProfessionalProfile {
       return { label: line(item.label, 40, `links[${index}].label`) || hostOf(url), url };
     }),
   };
+  const projects = entries(input.projects, limits.projects, 'projects').map((item, index) => {
+    allowOnly(item, ['name', 'url', 'description'], `projects[${index}]`);
+    const name = line(item.name, limits.line, `projects[${index}].name`);
+    if (!name) throw new ProfessionalError('Each project needs a name.');
+    const url = item.url === undefined || item.url === null || item.url === '' ? undefined : httpsUrl(item.url);
+    if (url === '') throw new ProfessionalError(`projects[${index}].url must be an https:// address.`);
+    return dropEmpty({ name, url, description: line(item.description, limits.entrySummary, `projects[${index}].description`) }) as ProjectEntry;
+  });
+  if (projects.length) profile.projects = projects;
   const headline = line(input.headline, limits.headline, 'headline'); if (headline) profile.headline = headline;
   const summary = line(input.summary, limits.summary, 'summary', true); if (summary) profile.summary = summary;
   const location = line(input.location, limits.line, 'location'); if (location) profile.location = location;
@@ -100,7 +118,7 @@ export function parseProfessional(value: unknown): ProfessionalProfile {
 }
 
 export function isEmptyProfessional(profile: ProfessionalProfile): boolean {
-  return !profile.headline && !profile.summary && !profile.openTo && !profile.location && !profile.work.length && !profile.education.length && !profile.skills.length && !profile.languages.length && !profile.links.length;
+  return !profile.headline && !profile.summary && !profile.openTo && !profile.location && !profile.work.length && !profile.education.length && !profile.skills.length && !profile.languages.length && !profile.links.length && !profile.projects?.length;
 }
 
 /** The short lines a profile shows under the bio: headline, what they're open to, current role, skills. */
@@ -113,6 +131,7 @@ export function professionalLines(profile: ProfessionalProfile): { headline?: st
     profile.work.length > 1 ? `Before: ${profile.work.filter((item) => item !== current).slice(0, 2).map((item) => `${item.position}, ${item.name}`).join(' · ')}` : undefined,
     school ? [school.studyType, school.area].filter(Boolean).join(', ') ? `${[school.studyType, school.area].filter(Boolean).join(', ')} · ${school.institution}` : school.institution : undefined,
     profile.skills.length ? `Skills: ${profile.skills.slice(0, 8).join(', ')}${profile.skills.length > 8 ? ` and ${profile.skills.length - 8} more` : ''}` : undefined,
+    profile.projects?.length ? `Projects: ${profile.projects.slice(0, 3).map((item) => item.name).join(', ')}${profile.projects.length > 3 ? ` and ${profile.projects.length - 3} more` : ''}` : undefined,
   ].filter(Boolean) as string[];
   return { headline: profile.headline, lines };
 }
@@ -135,6 +154,7 @@ export function toJsonResume(profile: ProfessionalProfile, person: { name: strin
     education: profile.education.map((item) => dropEmpty({ institution: item.institution, area: item.area, studyType: item.studyType, startDate: item.startDate, endDate: item.endDate })),
     skills: profile.skills.map((name) => ({ name })),
     languages: profile.languages.map((language) => ({ language })),
+    ...(profile.projects?.length ? { projects: profile.projects.map((item) => dropEmpty({ name: item.name, url: item.url, description: item.description })) } : {}),
     meta: { canonical: person.url, version: 'open-media.professional/1' },
   };
 }
@@ -160,6 +180,7 @@ export function fromJsonResume(value: unknown): ProfessionalProfile {
     skills: list('skills').map((item) => clip(item.name, limits.skill)).filter(Boolean).slice(0, limits.skills),
     languages: list('languages').map((item) => clip(item.language, limits.skill)).filter(Boolean).slice(0, limits.languages),
     links: (Array.isArray(basics.profiles) ? basics.profiles as Record<string, unknown>[] : []).filter((item) => item && httpsUrl(item.url) && item.network !== 'Open Media').slice(0, limits.links).map((item) => ({ label: clip(item.network, 40) || hostOf(String(item.url)), url: httpsUrl(item.url) })),
+    projects: list('projects').filter((item) => clip(item.name, limits.line)).slice(0, limits.projects).map((item) => dropEmpty({ name: clip(item.name, limits.line), url: httpsUrl(item.url) || undefined, description: clip(item.description ?? item.summary, limits.entrySummary) })),
   });
 }
 
@@ -307,7 +328,7 @@ function date(value: unknown, where: string): string | undefined {
 const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
 /** "Jan 2020", "2020-01-15", "2020" → "2020-01" or "2020"; anything else is dropped. */
-function monthOf(value: unknown): string | undefined {
+export function monthOf(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const text = value.trim().toLocaleLowerCase();
   const iso = text.match(/^(\d{4})(?:-(\d{2}))?/);
@@ -317,11 +338,11 @@ function monthOf(value: unknown): string | undefined {
   return undefined;
 }
 
-function clip(value: unknown, max: number): string {
+export function clip(value: unknown, max: number): string {
   return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, max) : '';
 }
 
-function httpsUrl(value: unknown): string {
+export function httpsUrl(value: unknown): string {
   if (typeof value !== 'string' || value.length > limits.url) return '';
   try {
     const url = new URL(value.trim());
@@ -329,7 +350,7 @@ function httpsUrl(value: unknown): string {
   } catch { return ''; }
 }
 
-function hostOf(url: string): string {
+export function hostOf(url: string): string {
   try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return 'Link'; }
 }
 
@@ -337,7 +358,7 @@ function safeJson(text: string): unknown {
   try { return JSON.parse(text); } catch { throw new ProfessionalError('That isn’t valid JSON.'); }
 }
 
-function unique(values: string[]): string[] {
+export function unique(values: string[]): string[] {
   const seen = new Set<string>();
   return values.filter((value) => { const key = value.toLocaleLowerCase(); if (seen.has(key)) return false; seen.add(key); return true; });
 }

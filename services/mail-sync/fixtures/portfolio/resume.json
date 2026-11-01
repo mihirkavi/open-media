@@ -1,0 +1,5 @@
+{"basics":{"name":"Asha Rao","label":"Senior Product Designer","summary":"Product designer with ten years in fintech and health.","email":"asha.rao@example.com","phone":"+91 90000 00000","location":{"city":"Pune","countryCode":"IN"},"profiles":[{"network":"GitHub","url":"https://github.com/asha-rao-example"}]},
+"work":[{"name":"Example Labs","position":"Senior Product Designer","startDate":"2021-03-01"},{"name":"Sample Fintech Pvt Ltd","position":"Product Designer","startDate":"2017-06-01","endDate":"2021-02-28"}],
+"education":[{"institution":"Example Institute of Design","studyType":"BDes","area":"Interaction Design","startDate":"2013","endDate":"2017"}],
+"skills":[{"name":"Design systems"},{"name":"User research"}],
+"projects":[{"name":"Ledger design system","url":"https://asharao.example/work/ledger","description":"Tokens, components and docs."}]}

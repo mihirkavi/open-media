@@ -33,12 +33,13 @@ function limiter(limit: number, periodSeconds = 60): Limiter {
   };
 }
 
-const env: MailEnv & PaymentsEnv & VerificationEnv = {
+const env: MailEnv & PaymentsEnv & VerificationEnv & { PROFILE_IMPORT_ALLOW_LOCAL?: string } = {
   SUPABASE_URL: required('SUPABASE_URL'),
   SUPABASE_PUBLISHABLE_KEY: required('SUPABASE_PUBLISHABLE_KEY'),
   MAIL_CREDENTIALS_KEY: required('MAIL_CREDENTIALS_KEY'),
   CONVO_APP_ORIGIN: process.env.CONVO_APP_ORIGIN ?? 'http://localhost:8081',
   MAIL_ALLOW_LOCAL_SERVERS: process.env.MAIL_ALLOW_LOCAL_SERVERS,
+  PROFILE_IMPORT_ALLOW_LOCAL: process.env.PROFILE_IMPORT_ALLOW_LOCAL,
   FARCASTER_APP_FID: process.env.FARCASTER_APP_FID,
   FARCASTER_APP_MNEMONIC: process.env.FARCASTER_APP_MNEMONIC,
   BRIDGES_HOMESERVER_URL: process.env.BRIDGES_HOMESERVER_URL,
