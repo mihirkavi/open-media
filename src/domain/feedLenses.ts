@@ -10,6 +10,9 @@ import type { SocialPost } from './posts';
  */
 
 export const lensFormat = 'open-media.feed-lens/1';
+/** Format 2 (ADR 0021) adds boosts and the discovery objective. A lens is written as /1 unless it uses them, so older app builds keep reading it. */
+export const lensFormatV2 = 'open-media.feed-lens/2';
+export type LensFormat = typeof lensFormat | typeof lensFormatV2;
 
 export type LensSource = 'open-media' | 'farcaster' | 'lens' | 'hive' | 'deso' | 'events';
 export type LensKind = 'text' | 'image' | 'video' | 'product' | 'service' | 'event' | 'job';
@@ -43,10 +46,25 @@ export interface LensObjectives {
   engagement: number;
   /** Spreads authors and networks out so one voice cannot fill the Feed. */
   diversity: number;
+  /** Lifts authors the viewer does not follow yet (format 2). Needs the follows permission. */
+  discovery?: number;
+}
+
+/**
+ * Leans a ranked lens toward (weight > 0) or away from (weight < 0) one network, kind, topic or
+ * person without hiding anything (format 2). A match multiplies the score by 1 + weight / 2.
+ */
+export interface LensBoost {
+  source?: LensSource;
+  kind?: LensKind;
+  topic?: string;
+  author?: string;
+  /** −1 to 1. */
+  weight: number;
 }
 
 export interface FeedLens {
-  format: typeof lensFormat;
+  format: LensFormat;
   id: string;
   name: string;
   version: number;
@@ -60,7 +78,9 @@ export interface FeedLens {
   objectives: LensObjectives;
   /** Topics this lens favours (the interests objective), in addition to the viewer's own. */
   interests: string[];
-  /** The lens this one was copied from, when it was installed or forked from a shared lens. */
+  /** Leanings toward or away from networks, kinds, topics and people (format 2). */
+  boosts?: LensBoost[];
+  /** The lens this one was copied from: a shared lens, or the built-in one it tunes (“relevant”). */
   forkedFrom?: string;
 }
 
@@ -81,6 +101,44 @@ export const lensKinds: LensKind[] = ['text', 'image', 'video', 'product', 'serv
 export const lensPermissions: LensPermission[] = ['follows', 'interests', 'public_engagement'];
 
 const noObjectives: LensObjectives = { recency: 0, follows: 0, interests: 0, engagement: 0, diversity: 0 };
+const objectiveKeys: (keyof LensObjectives)[] = ['recency', 'follows', 'interests', 'engagement', 'diversity', 'discovery'];
+
+/** The weights that make up a ranked score (diversity re-orders afterwards instead). */
+function rankingWeight(objectives: LensObjectives) {
+  return objectives.recency + objectives.follows + objectives.interests + objectives.engagement + (objectives.discovery ?? 0);
+}
+
+function parseBoosts(value: unknown): LensBoost[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > limits.boosts) throw new LensError(`boosts must be a list of up to ${limits.boosts}.`);
+  const boosts: LensBoost[] = [];
+  for (const item of value) {
+    const input = object(item, 'Each boost must be an object.');
+    allowOnly(input, ['source', 'kind', 'topic', 'author', 'weight'], 'boost');
+    const targets = (['source', 'kind', 'topic', 'author'] as const).filter((key) => input[key] !== undefined);
+    if (targets.length !== 1) throw new LensError('Each boost names exactly one of source, kind, topic or author.');
+    const weight = Number(input.weight);
+    if (!Number.isFinite(weight) || weight < -1 || weight > 1 || weight === 0) throw new LensError('A boost weight must be between -1 and 1, and not 0.');
+    const boost: LensBoost = { weight: Math.round(weight * 100) / 100 };
+    const target = targets[0];
+    if (target === 'source') { if (!lensSources.includes(input.source as LensSource)) throw new LensError(`boost source can only be ${lensSources.join(', ')}.`); boost.source = input.source as LensSource; }
+    else if (target === 'kind') { if (!lensKinds.includes(input.kind as LensKind)) throw new LensError(`boost kind can only be ${lensKinds.join(', ')}.`); boost.kind = input.kind as LensKind; }
+    else {
+      const word = text(input[target], limits.word, `boost ${target}`).toLocaleLowerCase().replace(target === 'author' ? /^@/ : /^#/, '');
+      if (!word) throw new LensError(`boost ${target} must not be empty.`);
+      boost[target] = word;
+    }
+    // One boost per thing: a later one for the same target replaces the earlier.
+    const existing = boosts.findIndex((other) => boostKey(other) === boostKey(boost));
+    if (existing >= 0) boosts.splice(existing, 1);
+    boosts.push(boost);
+  }
+  return boosts;
+}
+
+function boostKey(boost: LensBoost) {
+  return boost.source ? `source:${boost.source}` : boost.kind ? `kind:${boost.kind}` : boost.topic ? `topic:${boost.topic}` : `author:${boost.author}`;
+}
 
 export const rawLens: FeedLens = {
   format: lensFormat, id: 'raw', name: 'Raw', version: 1, builtIn: true, author: 'Open Media',
@@ -124,7 +182,9 @@ const builtInIds = builtInLenses.map((lens) => lens.id);
 /** Half-life of the recency objective: a post 12 hours old counts half as much as a new one. */
 export const recencyHalfLifeHours = 12;
 
-const limits = { name: 40, description: 280, word: 40, words: 20, id: 64, maxAgeHours: 24 * 90 };
+const limits = { name: 40, description: 280, word: 40, words: 20, id: 64, maxAgeHours: 24 * 90, boosts: 24 };
+/** All of a post's boosts together stay within these multipliers, so no rule can bury a post or let it take over. */
+export const boostLimits = { min: 0.25, max: 2 } as const;
 
 export class LensError extends Error {}
 
@@ -134,8 +194,8 @@ export class LensError extends Error {}
  */
 export function parseLens(value: unknown): FeedLens {
   const input = object(value, 'A lens must be a JSON object.');
-  allowOnly(input, ['format', 'id', 'name', 'version', 'description', 'author', 'builtIn', 'permissions', 'filters', 'order', 'objectives', 'interests', 'forkedFrom', 'forbidden'], 'lens');
-  if (input.format !== undefined && input.format !== lensFormat) throw new LensError(`Unknown lens format. Use "${lensFormat}".`);
+  allowOnly(input, ['format', 'id', 'name', 'version', 'description', 'author', 'builtIn', 'permissions', 'filters', 'order', 'objectives', 'interests', 'boosts', 'forkedFrom', 'forbidden'], 'lens');
+  if (input.format !== undefined && input.format !== lensFormat && input.format !== lensFormatV2) throw new LensError(`Unknown lens format. Use "${lensFormatV2}".`);
   const name = text(input.name, limits.name, 'name');
   if (!name) throw new LensError('A lens needs a name.');
   const derived = slug(name);
@@ -168,17 +228,20 @@ export function parseLens(value: unknown): FeedLens {
   const order = input.order === undefined ? 'ranked' : input.order;
   if (order !== 'newest' && order !== 'ranked') throw new LensError('order must be "newest" or "ranked".');
   const objectivesInput = input.objectives === undefined ? {} : object(input.objectives, 'objectives must be an object.');
-  allowOnly(objectivesInput, Object.keys(noObjectives), 'objectives');
+  allowOnly(objectivesInput, objectiveKeys, 'objectives');
   const objectives = { ...noObjectives };
-  for (const key of Object.keys(noObjectives) as (keyof LensObjectives)[]) {
+  for (const key of objectiveKeys) {
     if (objectivesInput[key] === undefined) continue;
     const weight = Number(objectivesInput[key]);
     if (!Number.isFinite(weight) || weight < 0 || weight > 1) throw new LensError(`objectives.${key} must be between 0 and 1.`);
     objectives[key] = Math.round(weight * 100) / 100;
   }
-  if (order === 'ranked' && objectives.recency + objectives.follows + objectives.interests + objectives.engagement === 0) objectives.recency = 1;
+  // Discovery is written only when used, so a lens without it stays format 1.
+  if (!objectives.discovery) delete objectives.discovery;
+  if (order === 'ranked' && rankingWeight(objectives) === 0) objectives.recency = 1;
+  const boosts = parseBoosts(input.boosts);
   const needs: [boolean, LensPermission, string][] = [
-    [Boolean(filters.followedOnly) || objectives.follows > 0, 'follows', 'who you follow'],
+    [Boolean(filters.followedOnly) || objectives.follows > 0 || Boolean(objectives.discovery), 'follows', 'who you follow'],
     [objectives.interests > 0, 'interests', 'your interests'],
     [objectives.engagement > 0, 'public_engagement', 'public like and repost counts'],
   ];
@@ -186,12 +249,13 @@ export function parseLens(value: unknown): FeedLens {
     if (needed && !permissions.includes(permission)) throw new LensError(`This lens uses ${label}, so permissions must include "${permission}".`);
   }
   const lens: FeedLens = {
-    format: lensFormat, id, name,
+    format: boosts.length || objectives.discovery ? lensFormatV2 : lensFormat, id, name,
     version: input.version === undefined ? 1 : Math.max(1, Math.min(10_000, Math.floor(Number(input.version)) || 1)),
     description: text(input.description ?? '', limits.description, 'description'),
     permissions, filters, order, objectives,
     interests: words(input.interests, 'interests'),
   };
+  if (boosts.length) lens.boosts = boosts;
   if (typeof input.author === 'string' && input.author.trim()) lens.author = text(input.author, limits.name, 'author');
   if (typeof input.forkedFrom === 'string' && input.forkedFrom.trim()) lens.forkedFrom = text(input.forkedFrom, limits.id, 'forkedFrom');
   return lens;
@@ -282,16 +346,54 @@ function objectiveValues(post: SocialPost, signals: Signals) {
     follows: isFollowed(post, signals) ? 1 : 0,
     interests: signals.interestsAllowed && (matchingTopics(post, signals.interests).length || post.relevance.selectedInterestMatches.length) ? 1 : 0,
     engagement: Math.min(1, Math.log1p(engagement) / Math.log1p(1000)),
+    // Only meaningful when the lens may read follows; otherwise every author would count as new.
+    discovery: signals.followsAllowed && !isFollowed(post, signals) ? 1 : 0,
   };
 }
 
-export function lensScore(post: SocialPost, lens: FeedLens, context: LensContext = {}): number {
+/** Whether a boost's network, kind, topic or person matches a post. */
+function boostMatches(post: SocialPost, boost: LensBoost): boolean {
+  if (boost.source) return post.provenance.connectorId === boost.source;
+  if (boost.kind) return postKinds(post).includes(boost.kind);
+  if (boost.topic) return matchingTopics(post, [boost.topic]).length > 0;
+  return post.author.handle.replace(/^@/, '').toLocaleLowerCase() === boost.author;
+}
+
+export interface LensScoreParts {
+  /** 0–100 before boosts. */
+  base: number;
+  /** 0–200 after boosts. */
+  score: number;
+  /** Each objective's points out of its share of 100. */
+  objectives: { key: keyof LensObjectives; label: string; points: number; max: number }[];
+  /** Boosts that matched, with what they multiplied the score by. */
+  boosts: { boost: LensBoost; rule: string; factor: number }[];
+  /** All boosts together, after the cap. */
+  factor: number;
+}
+
+const objectiveLabels: Record<Exclude<keyof LensObjectives, 'diversity'>, string> = { recency: 'Newness', follows: 'Who you follow', interests: 'Your topics', engagement: 'Public likes and reposts', discovery: 'New voices' };
+
+/** How a ranked lens scores one post: each objective's points and each boost's multiplier. */
+export function lensScoreParts(post: SocialPost, lens: FeedLens, context: LensContext = {}): LensScoreParts {
   const signals = permittedSignals(lens, context);
   const values = objectiveValues(post, signals);
   const { objectives } = lens;
-  const engagement = lens.permissions.includes('public_engagement') ? objectives.engagement : 0;
-  const total = objectives.recency + objectives.follows + objectives.interests + engagement || 1;
-  return (values.recency * objectives.recency + values.follows * objectives.follows + values.interests * objectives.interests + values.engagement * engagement) / total;
+  const weights: Record<keyof typeof objectiveLabels, number> = {
+    recency: objectives.recency, follows: objectives.follows, interests: objectives.interests,
+    engagement: lens.permissions.includes('public_engagement') ? objectives.engagement : 0,
+    discovery: objectives.discovery ?? 0,
+  };
+  const total = Object.values(weights).reduce((sum, weight) => sum + weight, 0) || 1;
+  const parts = (Object.keys(weights) as (keyof typeof weights)[]).filter((key) => weights[key] > 0).map((key) => ({ key, label: objectiveLabels[key], points: (values[key] * weights[key] / total) * 100, max: (weights[key] / total) * 100 }));
+  const base = parts.reduce((sum, part) => sum + part.points, 0);
+  const matched = lens.order === 'ranked' ? (lens.boosts ?? []).filter((boost) => boostMatches(post, boost)).map((boost) => ({ boost, rule: describeBoost(boost), factor: 1 + boost.weight / 2 })) : [];
+  const factor = Math.min(boostLimits.max, Math.max(boostLimits.min, matched.reduce((product, item) => product * item.factor, 1)));
+  return { base, score: base * factor, objectives: parts, boosts: matched, factor };
+}
+
+export function lensScore(post: SocialPost, lens: FeedLens, context: LensContext = {}): number {
+  return lensScoreParts(post, lens, context).score / 100;
 }
 
 /** Orders posts through a lens: filters first, then newest first or by score with authors spread out. */
@@ -329,8 +431,34 @@ export interface LensExplanation {
   used: string[];
   /** The lens's own rules that this post passed. */
   rules: string[];
+  /** How the lens weighed this post under its own weights: the score, each objective's points, each boost (ADR 0021). */
+  scoring: string[];
+  /** Words that would tune the lens for posts like this one, as a hint (there is no button). */
+  tuneHint: string;
   /** What the lens is allowed to read but did not, and what no lens can read. */
   notUsed: string[];
+}
+
+/** The score as short lines: “Score 68 of 100”, “Newness 31 of 33 · Who you follow 33 of 33”, “More videos ×1.5”. */
+export function describeScore(post: SocialPost, lens: FeedLens, context: LensContext = {}): string[] {
+  if (lens.order === 'newest') return [`${lens.name} is newest first: posts have no score`];
+  const parts = lensScoreParts(post, lens, context);
+  const lines = [`Score ${Math.round(parts.score)} of 100`, parts.objectives.map((part) => `${part.label} ${Math.round(part.points)} of ${Math.round(part.max)}`).join(' · ')];
+  if (parts.boosts.length) lines.push(`${parts.boosts.map((item) => `${item.rule} ×${formatFactor(item.factor)}`).join(' · ')}${parts.factor !== parts.boosts.reduce((product, item) => product * item.factor, 1) ? ` (capped at ×${formatFactor(parts.factor)})` : ''}`);
+  if (lens.objectives.diversity) lines.push('Then spread out so one author or network can’t fill the Feed');
+  return lines;
+}
+
+function formatFactor(value: number) {
+  return String(Math.round(value * 100) / 100);
+}
+
+/** The words that would lean the lens away from this post's network and toward its kind. */
+function tuneHintFor(post: SocialPost, lens: FeedLens): string {
+  const kind = postKinds(post)[0];
+  const source = sourceName(post.provenance.connectorId).toLocaleLowerCase();
+  const name = lens.builtIn ? `your own ${lens.name}` : lens.name;
+  return `To change ${name}, search “less ${source}” or “more ${kindLabels[kind]}”.`;
 }
 
 export function explainLensPost(post: SocialPost, lens: FeedLens, context: LensContext = {}): LensExplanation {
@@ -351,7 +479,7 @@ export function explainLensPost(post: SocialPost, lens: FeedLens, context: LensC
   if (!lens.permissions.includes('interests')) notUsed.push('Your interests');
   if (!lens.permissions.includes('public_engagement') || !lens.objectives.engagement) notUsed.push('Like and repost counts');
   notUsed.push(...forbiddenSignals);
-  return { used, rules: describeLensRules(lens), notUsed };
+  return { used, rules: describeLensRules(lens), scoring: describeScore(post, lens, context), tuneHint: tuneHintFor(post, lens), notUsed };
 }
 
 /** The lens's filters and ordering as short plain sentences, for “Why this?”, Search and agents. */
@@ -370,12 +498,23 @@ export function describeLensRules(lens: FeedLens): string[] {
   if (lens.order === 'newest') rules.push('Newest first');
   else {
     const { objectives } = lens;
-    const parts: [number, string][] = [[objectives.recency, 'newness'], [objectives.follows, 'who you follow'], [objectives.interests, lens.interests.length ? `topics (${lens.interests.join(', ')})` : 'your topics'], [objectives.engagement, 'public likes and reposts']];
+    const parts: [number, string][] = [[objectives.recency, 'newness'], [objectives.follows, 'who you follow'], [objectives.interests, lens.interests.length ? `topics (${lens.interests.join(', ')})` : 'your topics'], [objectives.engagement, 'public likes and reposts'], [objectives.discovery ?? 0, 'new voices']];
     const total = parts.reduce((sum, [weight]) => sum + weight, 0) || 1;
     rules.push(`Ranked by ${parts.filter(([weight]) => weight > 0).map(([weight, label]) => `${label} ${Math.round((weight / total) * 100)}%`).join(', ')}`);
     if (objectives.diversity) rules.push('Spreads authors and networks out');
+    rules.push(...(lens.boosts ?? []).map(describeBoost));
   }
   return rules;
+}
+
+/** One boost in words: “More videos”, “Much less Hive”, “A bit more about design”, “Less from @bot”. */
+export function describeBoost(boost: LensBoost): string {
+  const size = Math.abs(boost.weight);
+  // Kinds are counted (“fewer videos”); networks, topics and people are not (“less Hive”).
+  const direction = boost.weight > 0 ? 'more' : boost.kind ? 'fewer' : 'less';
+  const amount = size >= 0.75 ? `${direction === 'fewer' ? 'Far' : 'Much'} ${direction}` : size <= 0.3 ? `${direction === 'more' ? 'A bit' : 'Slightly'} ${direction}` : direction[0].toLocaleUpperCase() + direction.slice(1);
+  const what = boost.source ? sourceName(boost.source) : boost.kind ? kindLabels[boost.kind] : boost.topic ? `about ${boost.topic}` : `from @${boost.author}`;
+  return `${amount} ${what}`;
 }
 
 /** One line for a lens: its rules joined, used as its summary in Search and in agent replies. */
@@ -514,6 +653,168 @@ function defaultName(filters: LensFilters, interests: string[]): string {
   if (!parts.length && (filters.mute || filters.hideKinds || filters.hideSources)) parts.push('Quiet');
   return (parts.join(' ') || 'My feed').slice(0, limits.name);
 }
+
+// ---------- Tuning a lens in plain words (ADR 0021) ----------
+
+export interface LensTuning extends LensDraft {
+  /** Rules that are new or gone compared with the lens before: “Now: More videos”, “No longer: Mutes crypto”. */
+  changes: string[];
+}
+
+const tuneStart = /^\s*(?:please\s+)?(?:(?:show|give)(?:\s+me)?\s+|i\s+want\s+)?(?:a\s+(?:lot|bit|little)\s+|much\s+|way\s+|slightly\s+|somewhat\s+)?(?:more|less|fewer|no\s+more|unmute|bring\s+back|stop\s+hiding|tune|adjust)\s+\S/i;
+
+/** Whether a search reads like a change to the lens in use (“less hive”, “more videos”, “show hive again”). */
+export function looksLikeTuneRequest(input: string): boolean {
+  const value = input.trim();
+  if (value.length < 4) return false;
+  return value.split(/[,;]|\band\b/i).some((clause) => tuneStart.test(clause)) || /\b(?:again|tune|adjust)\b/i.test(value) && /\b(show|bring|see|tune|adjust)\b/i.test(value);
+}
+
+/** The id and name a person's own copy of a built-in lens gets: Relevant → “My Relevant”. */
+export function ownCopyId(lens: FeedLens): string {
+  return lens.builtIn ? `my-${lens.id}` : lens.id;
+}
+
+const objectiveWords: [RegExp, keyof LensObjectives, LensPermission | undefined][] = [
+  [/\b(?:new\s+voices|new\s+people|people\s+i\s+don'?t\s+follow|strangers|discover(?:y|ies)?|surprises?|serendipity)\b/i, 'discovery', 'follows'],
+  [/\b(?:(?:the\s+)?(?:people|accounts|folks|friends)\s+i\s+follow|my\s+follows|my\s+friends|following)\b/i, 'follows', 'follows'],
+  [/\b(?:recent|newer|fresh(?:er)?|latest|new\s+posts|new\s+stuff)\b/i, 'recency', undefined],
+  [/\b(?:variety|diverse|diversity|different\s+voices|mix(?:ed)?)\b/i, 'diversity', undefined],
+  [/\b(?:popular|trending|most\s+liked|liked)\b/i, 'engagement', 'public_engagement'],
+  [/\b(?:my\s+topics|my\s+interests)\b/i, 'interests', 'interests'],
+];
+const objectiveNames: Record<keyof LensObjectives, string> = { recency: 'newness', follows: 'who you follow', interests: 'your topics', engagement: 'public likes and reposts', diversity: 'variety', discovery: 'new voices' };
+
+/**
+ * Changes a lens with the same fixed rules as lensFromRequest: “less hive, a lot more videos, unmute
+ * crypto”. A built-in lens is never changed: the first change makes the person's own copy (“My
+ * Relevant”), which later changes tune. Everything understood, skipped and changed is reported.
+ */
+export function tuneLens(base: FeedLens, input: string): LensTuning {
+  const request = input.trim().slice(0, 400);
+  const understood: string[] = [];
+  const unused: string[] = [];
+  const before = describeLensRules(base);
+  const filters: LensFilters = JSON.parse(JSON.stringify(base.filters));
+  const objectives: LensObjectives = { ...base.objectives };
+  const permissions = new Set(base.permissions);
+  let boosts: LensBoost[] = (base.boosts ?? []).map((boost) => ({ ...boost }));
+  let order = base.order;
+  let ranks = false;
+
+  const addBoost = (boost: Omit<LensBoost, 'weight'>, weight: number) => {
+    const key = boostKey({ ...boost, weight });
+    const existing = boosts.find((item) => boostKey(item) === key);
+    const next = Math.max(-1, Math.min(1, Math.round(((existing?.weight ?? 0) + weight) * 100) / 100));
+    boosts = boosts.filter((item) => boostKey(item) !== key);
+    if (next !== 0) boosts.push({ ...boost, weight: next });
+    understood.push(next === 0 ? `No longer leans on ${describeBoost({ ...boost, weight: 1 }).replace(/^Much more /, '')}` : describeBoost({ ...boost, weight: next }));
+    ranks = true;
+  };
+  // Showing something again removes every rule that hid or lowered it.
+  const restore = (match: { source?: LensSource; kind?: LensKind; word?: string }) => {
+    if (match.source) { filters.hideSources = filters.hideSources?.filter((item) => item !== match.source); boosts = boosts.filter((item) => !(item.source === match.source && item.weight < 0)); understood.push(`Show ${sourceName(match.source)} again`); }
+    if (match.kind) { filters.hideKinds = filters.hideKinds?.filter((item) => item !== match.kind); boosts = boosts.filter((item) => !(item.kind === match.kind && item.weight < 0)); understood.push(`Show ${kindLabels[match.kind]} again`); }
+    if (match.word) {
+      const word = match.word.replace(/^[@#]/, '');
+      filters.mute = filters.mute?.filter((item) => item !== word);
+      filters.muteAuthors = filters.muteAuthors?.filter((item) => item.toLocaleLowerCase() !== word);
+      boosts = boosts.filter((item) => !((item.topic === word || item.author === word) && item.weight < 0));
+      understood.push(`Unmute ${match.word}`);
+    }
+  };
+
+  let rest = ` ${request} `;
+  if (/\b(newest first|latest first|chronological|in order|by time|no ranking)\b/i.test(rest)) { order = 'newest'; understood.push('Newest first'); rest = rest.replace(/\b(newest first|latest first|chronological|in order|by time|no ranking)\b/gi, ' '); }
+  else if (/\b(ranked|rank it|rank them)\b/i.test(rest)) { order = 'ranked'; understood.push('Ranked'); rest = rest.replace(/\b(ranked|rank it|rank them)\b/gi, ' '); }
+
+  const clauses = rest.split(/[,;.]|\bbut\b|\b(?:and|also|plus)\b(?=\s+(?:a\s+(?:lot|bit|little)\s+|much\s+|way\s+|slightly\s+)?(?:more|less|fewer|no|hide|without|mute|unmute|only|show|bring)\b)/i).map((clause) => clause.trim()).filter(Boolean);
+  for (const original of clauses) {
+    const leaning = original.match(/^(?:please\s+)?(?:(?:show|give)(?:\s+me)?\s+|i\s+want\s+)?(a\s+lot\s+|much\s+|way\s+|a\s+(?:bit|little)\s+|slightly\s+|somewhat\s+)?(more|less|fewer)\b(?!\s+than)/i);
+    const again = /\b(?:again|unmute|bring\s+back|stop\s+hiding)\b/i.test(original);
+    if (leaning && !/^no\s+more\b/i.test(original)) {
+      const sizeWord = (leaning[1] ?? '').trim().toLocaleLowerCase();
+      const size = /^(a lot|much|way)$/.test(sizeWord) ? 2 : /^(a bit|a little|slightly|somewhat)$/.test(sizeWord) ? 0.5 : 1;
+      const sign = /more/i.test(leaning[2]) ? 1 : -1;
+      let clause = ` ${original.slice(leaning[0].length)} `;
+      const objective = objectiveWords.find(([pattern]) => pattern.test(clause));
+      if (objective) {
+        const [pattern, key, permission] = objective;
+        const value = Math.max(0, Math.min(1, Math.round(((objectives[key] ?? 0) + sign * size * 0.2) * 100) / 100));
+        objectives[key] = value;
+        if (permission && value > 0) permissions.add(permission);
+        understood.push(`${sign > 0 ? 'More' : 'Less'} weight on ${objectiveNames[key]}`);
+        clause = clause.replace(pattern, ' ');
+        if (key !== 'diversity') ranks = true;
+        if (!clause.replace(/[^\p{L}\p{N}@#]+/gu, '').length) continue;
+      }
+      const weight = sign * size * 0.5 > 1 ? 1 : sign * size * 0.5 < -1 ? -1 : sign * size * 0.5;
+      for (const [pattern, kinds] of kindWords) {
+        if (!new RegExp(pattern.source, 'i').test(clause)) continue;
+        kinds.forEach((kind) => { if (sign > 0 && filters.hideKinds?.includes(kind)) restore({ kind }); addBoost({ kind }, weight); });
+        clause = clause.replace(pattern, ' ');
+      }
+      for (const [pattern, source] of sourceWords) {
+        if (!new RegExp(pattern.source, 'i').test(clause)) continue;
+        if (sign > 0 && filters.hideSources?.includes(source)) restore({ source });
+        addBoost({ source }, weight);
+        clause = clause.replace(pattern, ' ');
+      }
+      for (const match of [...clause.matchAll(/@([a-z0-9_.-]{2,40})/gi)]) addBoost({ author: match[1].toLocaleLowerCase() }, weight);
+      clause = clause.replace(/@[a-z0-9_.-]{2,40}/gi, ' ');
+      const topics = clause.toLocaleLowerCase().replace(/[^\p{L}\p{N}#\s'-]/gu, ' ').split(/\s+/).map((word) => word.replace(/^['#-]+|['-]+$/g, '')).filter((word) => word.length > 1 && !filler.has(word) && !tuneFiller.has(word));
+      for (const topic of unique(topics).slice(0, 5)) {
+        if (sign > 0 && filters.mute?.includes(topic)) restore({ word: topic });
+        addBoost({ topic }, weight);
+      }
+      continue;
+    }
+    if (again) {
+      let clause = ` ${original.replace(/\b(?:again|unmute|bring\s+back|stop\s+hiding|show(?:\s+me)?|see)\b/gi, ' ')} `;
+      let found = false;
+      for (const [pattern, kinds] of kindWords) { if (new RegExp(pattern.source, 'i').test(clause)) { kinds.forEach((kind) => restore({ kind })); clause = clause.replace(pattern, ' '); found = true; } }
+      for (const [pattern, source] of sourceWords) { if (new RegExp(pattern.source, 'i').test(clause)) { restore({ source }); clause = clause.replace(pattern, ' '); found = true; } }
+      const tokens = clause.toLocaleLowerCase().replace(/[^\p{L}\p{N}@#\s_.-]/gu, ' ').split(/\s+/).filter((word) => word.length > 1 && !filler.has(word) && !tuneFiller.has(word));
+      tokens.forEach((word) => restore({ word }));
+      if (!found && !tokens.length) unused.push(original);
+      continue;
+    }
+    // Anything else is a filter, written exactly as a new lens would write it, and added to this one.
+    const draft = lensFromRequest(original);
+    const added = draft.understood.filter((item) => item !== 'Newest first');
+    if (!added.length) { unused.push(...(draft.unused.length ? draft.unused : [original])); continue; }
+    const draftFilters = draft.lens.filters;
+    for (const key of ['sources', 'kinds', 'about', 'hideSources', 'hideKinds', 'mute', 'muteAuthors'] as const) {
+      if (draftFilters[key]) (filters as Record<string, string[]>)[key] = unique([...((filters[key] as string[] | undefined) ?? []), ...(draftFilters[key] as string[])]);
+    }
+    if (draftFilters.followedOnly) { filters.followedOnly = true; permissions.add('follows'); }
+    if (draftFilters.maxAgeHours) filters.maxAgeHours = draftFilters.maxAgeHours;
+    if (draft.lens.objectives.engagement && /popular|trending|liked|top posts/i.test(original)) { objectives.engagement = Math.max(objectives.engagement, draft.lens.objectives.engagement); permissions.add('public_engagement'); ranks = true; }
+    understood.push(...added);
+    unused.push(...draft.unused);
+  }
+  for (const key of Object.keys(filters) as (keyof LensFilters)[]) {
+    const value = filters[key];
+    if (Array.isArray(value) && !value.length) delete filters[key];
+  }
+  // Chronological order has no scores to lean, so leaning a newest-first lens ranks it by newness alone.
+  if (ranks && order === 'newest' && !/Newest first/.test(understood.join(' '))) { order = 'ranked'; if (!rankingWeight(objectives)) objectives.recency = 1; understood.push('Ranked by newness so your changes apply'); }
+  const copy = base.builtIn;
+  const lens = parseLens({
+    format: lensFormatV2,
+    id: ownCopyId(base),
+    name: copy ? `My ${base.name}`.slice(0, limits.name) : base.name,
+    version: copy ? 1 : base.version + 1,
+    description: copy ? `Your own copy of ${base.name}, tuned in your own words.` : base.description,
+    permissions: [...permissions], filters, order, objectives, interests: base.interests, boosts,
+    ...(copy ? { forkedFrom: base.id } : base.forkedFrom ? { forkedFrom: base.forkedFrom } : {}),
+  });
+  const after = describeLensRules(lens);
+  const changes = [...after.filter((rule) => !before.includes(rule)).map((rule) => `Now: ${rule}`), ...before.filter((rule) => !after.includes(rule)).map((rule) => `No longer: ${rule}`)];
+  return { lens, understood: unique(understood), unused: unique(unused), changes };
+}
+
+const tuneFiller = new Set(['lot', 'bit', 'little', 'much', 'way', 'slightly', 'somewhat', 'than', 'stuff', 'please', 'again', 'tune', 'adjust', 'weight', 'there', 'here', 'feed']);
 
 // ---------- helpers ----------
 

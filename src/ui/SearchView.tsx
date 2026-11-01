@@ -3,9 +3,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Keyboard, Platform, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from './Text';
 
-import { searchSharedLenses, StoredLens } from '../data/lensService';
+import { LensVersion, searchSharedLenses, StoredLens } from '../data/lensService';
 import { loadProfessionalProfile, saveProfessionalProfile } from '../data/openMediaService';
-import { builtInLensFor, lensFromRequest, lensSummary, looksLikeLensRequest } from '../domain/feedLenses';
+import { builtInLensFor, lensFromRequest, lensSummary, looksLikeLensRequest, looksLikeTuneRequest, tuneLens } from '../domain/feedLenses';
 import { Conversation } from '../domain/models';
 import { networks, sourceName } from '../domain/networkPosts';
 import { SocialPost } from '../domain/posts';
@@ -116,18 +116,32 @@ function useProfileRows(query: string, signedIn: boolean): LensRow[] {
 }
 
 const managePattern = /^(remove|delete|uninstall|forget|drop|share|publish|use|switch to|show me|open)\b/i;
+const historyPattern = /^(undo|go back|revert|history|versions?|earlier versions?|previous versions?)\b/i;
 
 /**
  * Search is where people talk to the Feed (ADR 0017): a request like “only videos from people I
  * follow, no crypto” becomes one result row showing the lens it understood, and choosing the row
  * switches the Feed to it. Saved lenses can be switched to, shared or removed by name, and lenses
- * other people shared are offered for the same words. No other control exists for lenses.
+ * other people shared are offered for the same words. Words like “less hive” or “more videos” tune
+ * the lens in use, and “undo” goes back a version (ADR 0021). No other control exists for lenses.
  */
 function useLensRows(query: string, lenses: FeedLenses | undefined, signedIn: boolean): LensRow[] {
   const [shared, setShared] = useState<StoredLens[]>([]);
   const [status, setStatus] = useState<Record<string, string>>({});
+  const [versions, setVersions] = useState<{ id: string; items: LensVersion[]; error?: string }>();
   const value = query.trim();
   const lower = value.toLocaleLowerCase();
+  const wantsHistory = historyPattern.test(value);
+  const historyId = lenses && !lenses.tuneBase.builtIn ? lenses.tuneBase.id : undefined;
+  // Keyed on the history loader (stable) and the lens version, so the Feed re-rendering doesn't reload it.
+  const loadHistory = lenses?.history;
+  const historyVersion = lenses?.tuneBase.version;
+  useEffect(() => {
+    if (!loadHistory || !wantsHistory || !historyId) { setVersions(undefined); return; }
+    let active = true;
+    loadHistory(historyId).then((items) => { if (active) setVersions({ id: historyId, items }); }).catch((reason) => { if (active) setVersions({ id: historyId, items: [], error: reason instanceof Error ? reason.message : 'Couldn’t load the history.' }); });
+    return () => { active = false; };
+  }, [loadHistory, wantsHistory, historyId, historyVersion]);
   const wantsLens = value.length > 3 && (looksLikeLensRequest(value) || /\b(lenses|feeds|algorithms?)\b/i.test(value));
   useEffect(() => {
     setShared([]);
@@ -171,6 +185,23 @@ function useLensRows(query: string, lenses: FeedLenses | undefined, signedIn: bo
         rows.push({ key: `use-${lens.id}`, title: `Show the Feed through ${lens.name}`, subtitle: lensSummary(lens), run: async () => { lenses.choose(lens.id); return true; } });
       }
     }
+    if (wantsHistory && lenses) {
+      const base = lenses.tuneBase;
+      if (base.builtIn) rows.push({ key: 'history', title: `${base.name} has no changes to undo`, subtitle: `${base.name} is built in and never changes. Tune it in words, like “less hive”, to make your own copy.`, run: async () => false });
+      else if (versions?.error) rows.push({ key: 'history', title: `Earlier versions of ${base.name}`, subtitle: versions.error, run: async () => false });
+      else for (const item of (versions?.id === base.id ? versions.items : []).filter((entry) => entry.version !== base.version).slice(0, 3)) {
+        rows.push({ key: `version-${item.version}`, title: `Go back to version ${item.version} of ${base.name}`, subtitle: `${lensSummary(item.lens)} · ${item.changedBy === 'agent' ? 'Made by an agent' : 'Made by you'} ${timeAgo(item.createdAt)}`, run: async () => { await lenses.revert(base.id, item.version); return true; } });
+      }
+      return rows;
+    }
+    // A change to the lens in use (“less hive, more videos”): built-in lenses become the person's own copy.
+    const tuning = !rows.length && (looksLikeTuneRequest(value) || looksLikeLensRequest(value)) ? tuneLens(lenses.tuneBase, value) : undefined;
+    const tuneRow: LensRow | undefined = tuning?.changes.length ? {
+      key: 'tune', title: `${looksLikeTuneRequest(value) ? 'Tune' : 'Add to'} “${tuning.lens.name}”: ${tuning.understood.join(' · ')}`,
+      subtitle: `${tuning.changes.join(' · ')}${tuning.unused.length ? ` · Not used: ${tuning.unused.join(', ')}` : ''}`,
+      run: async () => { lenses.apply(tuning.lens); return true; },
+    } : undefined;
+    if (tuneRow && looksLikeTuneRequest(value)) rows.push(tuneRow);
     if (!action || /^(show me|use)$/.test(action)) {
       if (!rows.length && looksLikeLensRequest(value)) {
         const draft = lensFromRequest(value);
@@ -182,13 +213,23 @@ function useLensRows(query: string, lenses: FeedLenses | undefined, signedIn: bo
         } else if (draft.understood.length) {
           rows.push({ key: 'draft', title: `Show the Feed as “${draft.lens.name}”`, subtitle: `${understood}${unused}`, run: async () => { lenses.apply(draft.lens); return true; } });
         }
+        if (tuneRow) rows.push(tuneRow);
       }
       for (const item of shared.filter((entry) => !lenses.lenses.some((lens) => lens.id === entry.lens.id)).slice(0, 3)) {
         rows.push({ key: `shared-${item.rowId}`, title: `Use “${item.lens.name}”${item.lens.author ? ` by ${item.lens.author}` : ''}`, subtitle: `${lensSummary(item.lens)}${item.installs ? ` · ${item.installs} ${item.installs === 1 ? 'person uses' : 'people use'} it` : ''}`, run: async () => { lenses.apply({ ...item.lens, author: undefined }, item.rowId); return true; } });
       }
     }
     return rows;
-  }, [value, lower, lenses, shared, status, signedIn]);
+  }, [value, lower, lenses, shared, status, signedIn, wantsHistory, versions]);
+}
+
+function timeAgo(iso: string) {
+  const minutes = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 60_000));
+  if (!Number.isFinite(minutes)) return '';
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.round(minutes / 60);
+  return hours < 24 ? `${hours} h ago` : `${Math.round(hours / 24)} d ago`;
 }
 
 function Section({ title, children, styles }: React.PropsWithChildren<{ title: string; styles: ReturnType<typeof createStyles> }>) {

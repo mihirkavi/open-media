@@ -7,6 +7,7 @@ interface LensRow {
   key: string;
   name: string;
   manifest: unknown;
+  version?: number;
   visibility: 'private' | 'public';
   forkedFrom: string | null;
   installs?: number;
@@ -25,7 +26,7 @@ async function rpc<T>(name: string, args: Record<string, unknown>): Promise<T> {
 
 function fromRow(row: LensRow): StoredLens | undefined {
   try {
-    const lens = parseLens({ ...(row.manifest as Record<string, unknown>), id: row.key, builtIn: false });
+    const lens = parseLens({ ...(row.manifest as Record<string, unknown>), id: row.key, builtIn: false, ...(row.version ? { version: row.version } : {}) });
     return { lens: row.author?.handle ? { ...lens, author: `@${row.author.handle}` } : lens, rowId: row.id, visibility: row.visibility, installs: row.installs ?? 0 };
   } catch { return undefined; }
 }
@@ -56,4 +57,24 @@ export async function loadSharedLens(id: string): Promise<StoredLens | undefined
 export async function searchSharedLenses(query: string): Promise<StoredLens[]> {
   const rows = await rpc<LensRow[]>('open_media_public_feed_lenses', { p_query: query.slice(0, 80), p_limit: 5 });
   return (rows ?? []).flatMap((row) => fromRow(row) ?? []);
+}
+
+/** One saved version of a lens (ADR 0021): who made it and when. */
+export interface LensVersion { version: number; lens: FeedLens; changedBy: 'app' | 'agent'; createdAt: string }
+
+interface VersionRow { version: number; name: string; manifest: unknown; changedBy: 'app' | 'agent'; createdAt: string }
+
+/** The signed-in person's versions of one lens, newest first; versions that no longer validate are left out. */
+export async function loadLensHistory(key: string): Promise<LensVersion[]> {
+  const rows = await rpc<VersionRow[]>('open_media_feed_lens_history', { p_key: key });
+  return (rows ?? []).flatMap((row) => {
+    try { return [{ version: row.version, lens: parseLens({ ...(row.manifest as Record<string, unknown>), id: key, version: row.version }), changedBy: row.changedBy, createdAt: row.createdAt }]; }
+    catch { return []; }
+  });
+}
+
+/** Saves an earlier version as the newest one, so going back can itself be undone. */
+export async function revertMyLens(key: string, version: number): Promise<StoredLens | undefined> {
+  const row = await rpc<LensRow>('open_media_revert_feed_lens', { p_key: key, p_version: version });
+  return fromRow(row);
 }

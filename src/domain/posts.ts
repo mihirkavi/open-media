@@ -82,6 +82,10 @@ export interface FeedExplanation {
   rules: string[];
   /** Published filters applied to the post's source before ranking. */
   filters: string[];
+  /** The post's score under the lens's own weights: points per signal and each boost (ADR 0021). */
+  scoring: string[];
+  /** Words that would tune the lens for posts like this one. */
+  tuneHint: string;
   notUsed: string[];
   /** What verified people checked on a listing, when they did. */
   checks?: string[];
@@ -101,7 +105,7 @@ export function explainFeedPost(post: SocialPost, lens: FeedMode | FeedLens, con
   const explanation = explainLensPost(post, chosen, context);
   // What verified people checked on a listing (ADR 0016). Not a ranking signal: shown so people can judge it.
   const checks = post.listing?.checkedBy ? [`Checked by ${post.listing.checkedBy} verified ${post.listing.checkedBy === 1 ? 'person' : 'people'} against public pages they cited`] : [];
-  return { postId: post.id, mode: chosen.id, lens: chosen.name, used: explanation.used, rules: explanation.rules, filters: post.eligibility?.filters ?? [], notUsed: explanation.notUsed, ...(checks.length ? { checks } : {}) };
+  return { postId: post.id, mode: chosen.id, lens: chosen.name, used: explanation.used, rules: explanation.rules, filters: post.eligibility?.filters ?? [], scoring: explanation.scoring, tuneHint: explanation.tuneHint, notUsed: explanation.notUsed, ...(checks.length ? { checks } : {}) };
 }
 
 /** Clips are short videos: at most this long when the source reports a duration. */

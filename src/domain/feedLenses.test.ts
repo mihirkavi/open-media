@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { builtInLenses, describeLensRules, explainLensPost, forbiddenSignals, lensFromRequest, lensKeeps, LensError, looksLikeLensRequest, parseLens, rawLens, relevantLens, runLens } from './feedLenses';
+import { boostLimits, builtInLenses, describeLensRules, describeScore, explainLensPost, forbiddenSignals, lensFormat, lensFormatV2, lensFromRequest, lensKeeps, LensError, lensScoreParts, looksLikeLensRequest, looksLikeTuneRequest, parseLens, rawLens, relevantLens, runLens, tuneLens } from './feedLenses';
 import { SocialPost } from './posts';
 
 const now = Date.parse('2026-10-27T12:00:00Z');
@@ -135,4 +135,133 @@ test('Rules read as plain sentences', () => {
 test('Search tells feed requests from ordinary searches', () => {
   for (const value of ['only videos', 'hide crypto', 'make me a feed about cooking', 'posts from people I follow', 'newest first please']) assert.equal(looksLikeLensRequest(value), true, value);
   for (const value of ['videos about cooking today', 'ethereum on lens', 'dark mode', 'connect farcaster']) assert.equal(looksLikeLensRequest(value), false, value);
+});
+
+// ---------- Your own algorithm (ADR 0021) ----------
+
+test('Boosts lean a ranked lens toward or away from a network, kind, topic or person without hiding anything', () => {
+  const posts = [post('hive-new', { hours: 1, source: 'hive' }), post('farcaster-older', { hours: 4, source: 'farcaster' }), post('video-oldest', { hours: 8, kind: 'video' })];
+  const flat = parseLens({ name: 'Flat', order: 'ranked', objectives: { recency: 1 } });
+  assert.deepEqual(ids(runLens(posts, flat, { now })), ['hive-new', 'farcaster-older', 'video-oldest']);
+  const leaning = parseLens({ name: 'Leaning', order: 'ranked', objectives: { recency: 1 }, boosts: [{ source: 'hive', weight: -1 }, { kind: 'video', weight: 1 }] });
+  const ordered = ids(runLens(posts, leaning, { now }));
+  assert.equal(ordered.length, 3, 'boosts never hide a post');
+  // The 8-hour-old video (×1.5) passes the 4-hour-old post; the newest falls behind both (×0.5).
+  assert.deepEqual(ordered, ['video-oldest', 'farcaster-older', 'hive-new']);
+  // Topic and author boosts read only the post.
+  const topical = parseLens({ name: 'Topical', boosts: [{ topic: '#Design', weight: 0.5 }, { author: '@Bot', weight: -0.5 }] });
+  assert.deepEqual(topical.boosts, [{ weight: 0.5, topic: 'design' }, { weight: -0.5, author: 'bot' }]);
+  assert.deepEqual(topical.permissions, []);
+});
+
+test('All of a post’s boosts together are capped, so no rule can bury a post or let it take over', () => {
+  const item = post('everything', { hours: 0, source: 'hive', kind: 'video', body: 'design and art', author: 'maker' });
+  const up = parseLens({ name: 'Up', boosts: [{ source: 'hive', weight: 1 }, { kind: 'video', weight: 1 }, { topic: 'design', weight: 1 }, { author: 'maker', weight: 1 }] });
+  const down = parseLens({ name: 'Down', boosts: [{ source: 'hive', weight: -1 }, { kind: 'video', weight: -1 }, { topic: 'design', weight: -1 }] });
+  assert.equal(lensScoreParts(item, up, { now }).factor, boostLimits.max);
+  assert.equal(lensScoreParts(item, down, { now }).factor, boostLimits.min);
+  assert.match(describeScore(item, up, { now }).join('\n'), /capped at ×2/);
+});
+
+test('Boosts are validated: one target each, weights from -1 to 1, known networks and kinds, no extra fields', () => {
+  assert.throws(() => parseLens({ name: 'X', boosts: [{ weight: 0.5 }] }), LensError);
+  assert.throws(() => parseLens({ name: 'X', boosts: [{ source: 'hive', kind: 'video', weight: 0.5 }] }), LensError);
+  assert.throws(() => parseLens({ name: 'X', boosts: [{ source: 'hive', weight: 2 }] }), LensError);
+  assert.throws(() => parseLens({ name: 'X', boosts: [{ source: 'hive', weight: 0 }] }), LensError);
+  assert.throws(() => parseLens({ name: 'X', boosts: [{ source: 'myspace', weight: 0.5 }] }), LensError);
+  assert.throws(() => parseLens({ name: 'X', boosts: [{ topic: 'ai', weight: 0.5, privateMessages: true }] }), /Unknown boost field/);
+  assert.throws(() => parseLens({ name: 'X', boosts: Array.from({ length: 25 }, (_, index) => ({ topic: `t${index}`, weight: 0.5 })) }), LensError);
+  // A later boost for the same thing replaces the earlier one.
+  assert.deepEqual(parseLens({ name: 'X', boosts: [{ source: 'hive', weight: 0.5 }, { source: 'hive', weight: -0.5 }] }).boosts, [{ weight: -0.5, source: 'hive' }]);
+});
+
+test('Format 2 is written only when a lens uses boosts or discovery, so older app builds keep reading the rest', () => {
+  assert.equal(parseLens({ name: 'Plain', objectives: { recency: 1 } }).format, lensFormat);
+  assert.equal('discovery' in parseLens({ name: 'Plain', objectives: { recency: 1, discovery: 0 } }).objectives, false);
+  assert.equal(parseLens({ name: 'Leaning', boosts: [{ kind: 'video', weight: 0.5 }] }).format, lensFormatV2);
+  assert.equal(parseLens({ format: lensFormatV2, name: 'New', permissions: ['follows'], objectives: { recency: 0.5, discovery: 0.5 } }).format, lensFormatV2);
+  assert.throws(() => parseLens({ format: 'open-media.feed-lens/3', name: 'Future' }), LensError);
+});
+
+test('Discovery lifts people you don’t follow yet, and needs the follows permission', () => {
+  assert.throws(() => parseLens({ name: 'New voices', objectives: { discovery: 0.5 } }), /permissions must include "follows"/);
+  const lens = parseLens({ name: 'New voices', permissions: ['follows'], objectives: { recency: 0.5, discovery: 0.5 } });
+  const posts = [post('friend', { hours: 1, author: 'friend' }), post('stranger', { hours: 2, author: 'stranger' })];
+  assert.equal(ids(runLens(posts, lens, { now, followedAuthorIds: new Set(['friend']) }))[0], 'stranger');
+  assert.deepEqual(describeLensRules(lens).slice(0, 1), ['Ranked by newness 50%, new voices 50%']);
+});
+
+test('Tuning a built-in lens makes the person’s own copy and never changes the built-in', () => {
+  const before = JSON.stringify(relevantLens);
+  const tuned = tuneLens(relevantLens, 'less hive, a lot more videos');
+  assert.equal(JSON.stringify(relevantLens), before);
+  assert.equal(tuned.lens.id, 'my-relevant');
+  assert.equal(tuned.lens.name, 'My Relevant');
+  assert.equal(tuned.lens.forkedFrom, 'relevant');
+  assert.equal(tuned.lens.builtIn, undefined);
+  assert.deepEqual(tuned.lens.permissions, relevantLens.permissions);
+  assert.deepEqual(tuned.lens.objectives, relevantLens.objectives);
+  assert.deepEqual(tuned.lens.boosts, [{ weight: -0.5, source: 'hive' }, { weight: 1, kind: 'video' }]);
+  assert.deepEqual(tuned.understood, ['Less Hive', 'Much more videos']);
+  assert.deepEqual(tuned.changes, ['Now: Less Hive', 'Now: Much more videos']);
+  // Tuning the copy again changes the copy and adds up on the same thing.
+  const again = tuneLens(tuned.lens, 'a bit more hive');
+  assert.equal(again.lens.id, 'my-relevant');
+  assert.equal(again.lens.version, tuned.lens.version + 1);
+  assert.deepEqual(again.lens.boosts, [{ weight: 1, kind: 'video' }, { weight: -0.25, source: 'hive' }]);
+  assert.deepEqual(again.changes, ['Now: Slightly less Hive', 'No longer: Less Hive']);
+});
+
+test('Tuning words change objectives, filters and order, and say what they skipped', () => {
+  const follows = tuneLens(relevantLens, 'more from people I follow');
+  assert.equal(follows.lens.objectives.follows, 0.5);
+  const voices = tuneLens(relevantLens, 'a lot more new voices');
+  assert.equal(voices.lens.objectives.discovery, 0.4);
+  const popular = tuneLens(relevantLens, 'more popular');
+  assert.ok(popular.lens.permissions.includes('public_engagement'));
+  assert.equal(popular.lens.objectives.engagement, 0.2);
+  const quiet = tuneLens(relevantLens, 'no crypto, only videos');
+  assert.deepEqual(quiet.lens.filters, { mute: ['crypto'], kinds: ['video'] });
+  assert.equal(tuneLens(relevantLens, 'chronological').lens.order, 'newest');
+  assert.deepEqual(tuneLens(relevantLens, 'more zxq').lens.boosts, [{ weight: 0.5, topic: 'zxq' }]);
+  assert.deepEqual(tuneLens(relevantLens, 'tune it').understood, []);
+});
+
+test('Showing something again removes whatever hid or lowered it', () => {
+  let lens = tuneLens(relevantLens, 'no hive, mute crypto, less events').lens;
+  assert.deepEqual(lens.filters, { hideSources: ['hive'], mute: ['crypto'] });
+  lens = tuneLens(lens, 'show hive again, unmute crypto, bring back events').lens;
+  assert.deepEqual(lens.filters, {});
+  assert.equal(lens.boosts, undefined);
+  // Asking for more of something hidden shows it again and lifts it.
+  const hidden = tuneLens(relevantLens, 'no videos').lens;
+  const more = tuneLens(hidden, 'more videos').lens;
+  assert.deepEqual(more.filters, {});
+  assert.deepEqual(more.boosts, [{ weight: 0.5, kind: 'video' }]);
+});
+
+test('Leaning a newest-first lens ranks it by newness so the change can apply', () => {
+  const tuned = tuneLens(rawLens, 'more videos');
+  assert.equal(tuned.lens.id, 'my-raw');
+  assert.equal(tuned.lens.order, 'ranked');
+  assert.deepEqual(tuned.lens.objectives, { recency: 1, follows: 0, interests: 0, engagement: 0, diversity: 0 });
+  assert.ok(tuned.understood.includes('Ranked by newness so your changes apply'));
+  // Raw itself stays newest first.
+  assert.equal(rawLens.order, 'newest');
+});
+
+test('“Why this?” shows the post’s score under the person’s own weights, and changes when they tune', () => {
+  const item = post('clip', { hours: 0, source: 'hive', kind: 'video', media: [{ kind: 'video', aspectRatio: 1, altText: '' }] });
+  const plain = explainLensPost(item, relevantLens, { now });
+  assert.deepEqual(plain.scoring.slice(0, 2), ['Score 50 of 100', 'Newness 50 of 50 · Who you follow 0 of 30 · Your topics 0 of 20']);
+  const tuned = tuneLens(tuneLens(relevantLens, 'less hive').lens, 'more videos').lens;
+  const explained = explainLensPost(item, tuned, { now });
+  assert.deepEqual(explained.scoring.slice(0, 3), ['Score 47 of 100', 'Newness 50 of 50 · Who you follow 0 of 30 · Your topics 0 of 20', 'Less Hive ×0.75 · More videos ×1.25']);
+  assert.equal(explained.tuneHint, 'To change My Relevant, search “less hive” or “more videos”.');
+  assert.deepEqual(explainLensPost(item, rawLens, { now }).scoring, ['Raw is newest first: posts have no score']);
+});
+
+test('Search tells changes to the lens in use from new lenses and ordinary searches', () => {
+  for (const value of ['less hive', 'more videos', 'a lot more about design', 'fewer events', 'show hive again', 'unmute crypto', 'mute crypto and more farcaster']) assert.equal(looksLikeTuneRequest(value), true, value);
+  for (const value of ['ethereum on lens', 'only videos from people I follow', 'more', 'cooking videos']) assert.equal(looksLikeTuneRequest(value), false, value);
 });

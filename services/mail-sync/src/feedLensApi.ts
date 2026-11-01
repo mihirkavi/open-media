@@ -5,7 +5,7 @@
  * the person's own token, and every manifest is validated here before it is stored.
  */
 import {
-  builtInLenses, describeLensRules, FeedLens, forbiddenSignals, lensFormat, lensFromRequest, LensError, lensKinds, lensPermissions, lensShareUrl, lensSources, lensSummary, parseLens,
+  boostLimits, builtInLenses, describeLensRules, FeedLens, forbiddenSignals, lensFormat, lensFormatV2, lensFromRequest, LensError, lensKinds, lensPermissions, lensShareUrl, lensSources, lensSummary, ownCopyId, parseLens, tuneLens,
 } from '../../../src/domain/feedLenses';
 import { callRpc, PublicApiEnv } from './publicApi.js';
 
@@ -22,6 +22,7 @@ export interface LensRow {
   key: string;
   name: string;
   manifest: unknown;
+  version?: number;
   visibility: 'private' | 'public';
   forkedFrom: string | null;
   installs: number;
@@ -37,6 +38,7 @@ export function lensView(lens: FeedLens, origin: string, row?: LensRow) {
     id,
     key: lens.id,
     name: lens.name,
+    version: lens.version,
     builtIn: Boolean(lens.builtIn),
     summary: lensSummary(lens),
     rules: describeLensRules(lens),
@@ -51,7 +53,7 @@ export function lensView(lens: FeedLens, origin: string, row?: LensRow) {
 /** A stored row as a lens; rows that no longer validate are skipped rather than run. */
 export function lensFromRow(row: LensRow): FeedLens | undefined {
   try {
-    const lens = parseLens({ ...(row.manifest as Record<string, unknown>), id: row.key, builtIn: false });
+    const lens = parseLens({ ...(row.manifest as Record<string, unknown>), id: row.key, builtIn: false, ...(row.version ? { version: row.version } : {}) });
     return row.author?.handle ? { ...lens, author: `@${row.author.handle}` } : lens;
   } catch { return undefined; }
 }
@@ -126,9 +128,96 @@ export async function saveLens(rpc: PersonRpc, origin: string, input: { lens?: u
   if (!lens) throw new LensApiError(400, 'Send lens (a manifest) or request (plain words).');
   if (lens.builtIn) throw new LensApiError(400, 'Raw, Relevant and Work are built in. Save a copy with another id instead.');
   const forkedFrom = typeof input.forkedFrom === 'string' && uuid.test(input.forkedFrom) ? input.forkedFrom : null;
+  const row = await storeLens(rpc, lens, visibility, forkedFrom);
+  return { ...lensView(lensFromRow(row) ?? lens, origin, row), saved: true, note: visibility === 'public' ? 'Shared publicly: anyone can read, install and fork it at shareUrl.' : 'Saved to the person’s account. It shows up in their Feed’s lens picker on every device.' };
+}
+
+/** Saves through the person's own token. Every change made here is recorded as made by an agent (ADR 0021). */
+async function storeLens(rpc: PersonRpc, lens: FeedLens, visibility: 'private' | 'public', forkedFrom: string | null) {
   const { builtIn: _builtIn, author: _author, ...manifest } = lens;
-  const row = await rpc<LensRow>('open_media_save_feed_lens', { p_key: lens.id, p_name: lens.name, p_manifest: manifest, p_visibility: visibility, p_forked_from: forkedFrom });
-  return { ...lensView(lens, origin, row), saved: true, note: visibility === 'public' ? 'Shared publicly: anyone can read, install and fork it at shareUrl.' : 'Saved to the person’s account. It shows up in their Feed’s lens picker on every device.' };
+  return rpc<LensRow>('open_media_save_feed_lens', { p_key: lens.id, p_name: lens.name, p_manifest: manifest, p_visibility: visibility, p_forked_from: forkedFrom, p_changed_by: 'agent' });
+}
+
+/**
+ * Plain words that change a lens (ADR 0021), without saving: “less hive, more videos”. The base is a
+ * lens id or manifest; a built-in base becomes “My …”, the person's own copy.
+ */
+export async function tuneDraft(env: PublicApiEnv, origin: string, base: unknown, request: unknown) {
+  const text = typeof request === 'string' ? request.trim() : '';
+  if (!text) throw new LensError('Say how to change the lens, e.g. “less hive, more videos”.');
+  const lens = typeof base === 'string' ? (await findLens(env, base.trim())).lens : checkManifest(base);
+  return tuningView(lens, text, origin);
+}
+
+function tuningView(base: FeedLens, request: string, origin: string) {
+  const tuning = tuneLens(base, request);
+  return {
+    ...lensView(tuning.lens, origin),
+    understood: tuning.understood,
+    notUnderstood: tuning.unused,
+    changes: tuning.changes,
+    tunedFrom: { id: base.id, name: base.name, version: base.version },
+    next: tuning.changes.length ? 'Show the person the changes. Save them with tune_feed_lens (their account), or preview the result with preview_feed_lens.' : 'Nothing would change. Try words like “less hive”, “more videos”, “a bit more from people I follow”, “mute crypto” or “show hive again”.',
+  };
+}
+
+/** The person's lens a change starts from: their own copy of a built-in (“my-relevant”) when they have one. */
+async function myBase(rpc: PersonRpc, key: string): Promise<{ lens: FeedLens; row?: LensRow }> {
+  const rows = await rpc<LensRow[]>('open_media_my_feed_lenses', {});
+  const builtIn = builtInLenses.find((lens) => lens.id === key);
+  const wanted = builtIn ? ownCopyId(builtIn) : key;
+  const row = (rows ?? []).find((item) => item.key === wanted);
+  const lens = row ? lensFromRow(row) : builtIn;
+  if (!lens) throw new LensApiError(404, 'No saved lens with that key. See list_my_feed_lenses, or use relevant, raw or work.');
+  return { lens, row };
+}
+
+export async function tuneMyLens(rpc: PersonRpc, origin: string, input: { key?: unknown; request?: unknown; save?: unknown }) {
+  if (typeof input.key !== 'string' || !lensKey.test(input.key)) throw new LensApiError(400, 'Send the lens key (relevant, raw, work, or one of the person’s lenses).');
+  const request = typeof input.request === 'string' ? input.request.trim().slice(0, 400) : '';
+  if (!request) throw new LensApiError(400, 'Say how to change the lens, e.g. “less hive, more videos”.');
+  const { lens: base, row: baseRow } = await myBase(rpc, input.key);
+  const view = tuningView(base, request, origin);
+  if (!view.changes.length) throw new LensApiError(400, `Nothing to change. ${view.notUnderstood.length ? `Not understood: ${view.notUnderstood.join(', ')}. ` : ''}${view.next}`);
+  if (input.save === false) return { ...view, saved: false };
+  // A shared lens stays shared, so its change is public: the tool asks agents to confirm that first.
+  const tuned = tuneLens(base, request).lens;
+  const row = await storeLens(rpc, tuned, baseRow?.visibility ?? 'private', null);
+  const saved = lensFromRow(row) ?? tuned;
+  return { ...lensView(saved, origin, row), understood: view.understood, notUnderstood: view.notUnderstood, changes: view.changes, tunedFrom: view.tunedFrom, saved: true, note: `Saved as version ${row.version ?? saved.version}. It shows in the person’s Feed picker; revert_feed_lens goes back.` };
+}
+
+interface VersionRow { version: number; name: string; manifest: unknown; changedBy: 'app' | 'agent'; createdAt: string }
+
+function versionView(key: string, row: VersionRow) {
+  try {
+    const lens = parseLens({ ...(row.manifest as Record<string, unknown>), id: key, version: row.version });
+    return [{ version: row.version, name: row.name, summary: lensSummary(lens), rules: describeLensRules(lens), changedBy: row.changedBy, createdAt: row.createdAt, manifest: lens }];
+  } catch { return []; }
+}
+
+export async function myLensHistory(rpc: PersonRpc, key: unknown) {
+  if (typeof key !== 'string' || !lensKey.test(key)) throw new LensApiError(400, 'Send the lens key (its manifest id).');
+  const rows = await rpc<VersionRow[]>('open_media_feed_lens_history', { p_key: key });
+  return { key, data: (rows ?? []).flatMap((row) => versionView(key, row)), note: 'Newest first. changedBy is app (the person in Open Media) or agent. At most 50 versions are kept.' };
+}
+
+export async function revertMyLens(rpc: PersonRpc, origin: string, key: unknown, version: unknown) {
+  if (typeof key !== 'string' || !lensKey.test(key)) throw new LensApiError(400, 'Send the lens key (its manifest id).');
+  const number = Number(version);
+  if (!Number.isInteger(number) || number < 1) throw new LensApiError(400, 'Send the version number from get_my_feed_lens_history.');
+  const row = await rpc<LensRow>('open_media_revert_feed_lens', { p_key: key, p_version: number, p_changed_by: 'agent' });
+  const lens = lensFromRow(row);
+  if (!lens) throw new LensApiError(400, 'That version no longer validates, so it can’t be used.');
+  return { ...lensView(lens, origin, row), restored: number, note: `Version ${number} is now version ${row.version}. Going back is itself in the history.` };
+}
+
+/** How a shared lens changed while it was shared, for anyone auditing it. */
+export async function publicLensHistory(env: PublicApiEnv, id: string) {
+  if (builtInLenses.some((lens) => lens.id === id)) return { id, data: [], note: 'Built-in lenses change only with an Open Media release; see /docs/feed-lenses.' };
+  const { row } = await findLens(env, id);
+  const rows = await callRpc<VersionRow[]>(env, fetch, 'open_media_public_feed_lens_history', { p_id: id });
+  return { id, name: row?.name, data: (Array.isArray(rows) ? rows : []).flatMap((item) => versionView(row?.key ?? id, item)), note: 'Versions made while the lens was shared, newest first. Copies people installed don’t change when the author changes the original.' };
 }
 
 export async function installLens(env: PublicApiEnv, rpc: PersonRpc, origin: string, id: unknown) {
@@ -145,7 +234,7 @@ export async function deleteLens(rpc: PersonRpc, key: unknown) {
 /** The manifest format, for agents writing a lens by hand. */
 export function lensFormatDescription(origin: string) {
   return {
-    format: lensFormat,
+    format: lensFormatV2,
     docs: `${origin}/docs/feed-lenses`,
     fields: {
       name: 'Up to 40 characters.',
@@ -158,9 +247,13 @@ export function lensFormatDescription(origin: string) {
       'filters.followedOnly': 'true keeps only people the viewer follows on Open Media (needs follows).',
       'filters.maxAgeHours': '1 to 2160.',
       order: 'newest (chronological) or ranked.',
-      objectives: 'recency, follows, interests, engagement (each 0–1, normalized) and diversity (0–1, spreads authors out). follows needs the follows permission, interests needs interests, engagement needs public_engagement.',
+      objectives: 'recency, follows, interests, engagement, discovery (each 0–1, normalized) and diversity (0–1, spreads authors out). follows and discovery (lifts authors the viewer does not follow yet) need the follows permission, interests needs interests, engagement needs public_engagement.',
       interests: 'Up to 20 topics the lens lifts.',
+      boosts: `Format 2. Up to 24 of { source | kind | topic | author, weight }: weight −1 to 1 leans a ranked lens away from or toward it, multiplying a matching post's score by 1 + weight/2. All of a post's boosts together stay between ×${boostLimits.min} and ×${boostLimits.max}. Boosts read only the post.`,
+      version: 'Assigned by the person’s account on each change; history and revert are on /me/mcp.',
     },
+    formats: [lensFormat, lensFormatV2],
+    tuning: 'Change a lens in plain words with draft_feed_lens (base + request, nothing saved) or tune_feed_lens (the person’s account): “less hive”, “a lot more videos”, “more about design”, “a bit less from @bot”, “more new voices”, “mute crypto”, “show hive again”, “chronological”. Tuning relevant, raw or work makes the person’s own copy (“My Relevant”).',
     neverReadable: [...forbiddenSignals],
   };
 }

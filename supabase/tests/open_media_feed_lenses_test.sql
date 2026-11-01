@@ -30,7 +30,8 @@ select public.open_media_save_feed_lens('calm-copy', 'Calm clips', '{"name":"Cal
 select throws_ok($$ select public.open_media_save_feed_lens('sneak', 'Sneak', '{}'::jsonb, 'private', current_setting('test.private')::uuid) $$, '22023', null, 'only shared lenses can be forked');
 
 set local role anon;
-select is(jsonb_array_length(public.open_media_public_feed_lenses(null, 30)), 1, 'only public lenses are listed');
+-- Counts only this test's lenses, so public lenses already in a local database don't change the result.
+select is((select count(*) from jsonb_array_elements(public.open_media_public_feed_lenses(null, 100)) item where item ->> 'key' in ('calm-videos', 'notes'))::integer, 1, 'only public lenses are listed');
 select is((public.open_media_public_feed_lens(current_setting('test.lens')::uuid) ->> 'installs')::integer, 1, 'a copy by someone else counts as an install');
 select is((public.open_media_public_feed_lens(current_setting('test.lens')::uuid) -> 'author' ->> 'handle'), 'maker', 'a public account is named as the author');
 

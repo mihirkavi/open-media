@@ -14,7 +14,7 @@ import { agentInterfaces, honestStatus, mission, philosophy, promise, promises, 
 import { agentSkills, skillMarkdown } from '../../../src/domain/agentSkills';
 import { webMcpTools } from '../../../src/domain/webMcpTools';
 import { listingPolicyMarkdown } from '../../../src/domain/listingSafety';
-import { builtInLenses, describeLensRules, forbiddenSignals, lensFormat, lensShareUrl, recencyHalfLifeHours } from '../../../src/domain/feedLenses';
+import { boostLimits, builtInLenses, describeLensRules, forbiddenSignals, lensFormat, lensFormatV2, lensShareUrl, recencyHalfLifeHours, tuneLens } from '../../../src/domain/feedLenses';
 
 export const siteVersion = '1.2.0';
 /** When the site's pages last changed (sitemap lastmod and Markdown frontmatter). */
@@ -90,7 +90,7 @@ Open Media is free: no ads by default, no subscription and no API key for public
 
 Every way of ordering the Open Media Feed is a **lens**: a small JSON manifest, never code. Raw, Relevant and Work are built in; Work is the professional feed of jobs, hiring and networking (ADR 0018). People can describe a new lens in plain words in Search, or ask an AI agent to write one, then keep it, share it publicly, or install someone else's.
 
-One open-source runner orders the posts: [src/domain/feedLenses.ts](${sourceRepository}/blob/main/src/domain/feedLenses.ts). The app, the REST API and the MCP servers all use it, so an agent's preview matches the person's Feed. The design is [ADR 0017](${sourceRepository}/blob/main/docs/adrs/0017-feed-lenses.md).
+One open-source runner orders the posts: [src/domain/feedLenses.ts](${sourceRepository}/blob/main/src/domain/feedLenses.ts). The app, the REST API and the MCP servers all use it, so an agent's preview matches the person's Feed. The design is [ADR 0017](${sourceRepository}/blob/main/docs/adrs/0017-feed-lenses.md); tuning, boosts and versions are [ADR 0021](${sourceRepository}/blob/main/docs/adrs/0021-your-own-feed-algorithm.md).
 
 ## The built-in lenses
 
@@ -118,7 +118,22 @@ Relevant's recency counts half as much every ${recencyHalfLifeHours} hours, so o
 }
 \`\`\`
 
-Fields: \`filters\` keep posts (\`sources\`, \`kinds\`, \`about\`, \`followedOnly\`, \`maxAgeHours\`) and leave them out (\`hideSources\`, \`hideKinds\`, \`mute\`, \`muteAuthors\`). \`order\` is \`newest\` or \`ranked\`. \`objectives\` weigh recency, follows, interests and engagement (normalized), and \`diversity\` spreads authors out. The full field list is in \`GET ${origin}/v1/lenses\`.
+Fields: \`filters\` keep posts (\`sources\`, \`kinds\`, \`about\`, \`followedOnly\`, \`maxAgeHours\`) and leave them out (\`hideSources\`, \`hideKinds\`, \`mute\`, \`muteAuthors\`). \`order\` is \`newest\` or \`ranked\`. \`objectives\` weigh recency, follows, interests, engagement and discovery (normalized), and \`diversity\` spreads authors out. The full field list is in \`GET ${origin}/v1/lenses\`.
+
+## Your own algorithm: boosts, tuning and versions
+
+Format \`${lensFormatV2}\` adds two things. A lens that uses neither is still written as \`${lensFormat}\`.
+
+- \`boosts\`: up to 24 leanings toward or away from one network, kind, topic or person, without hiding anything. Each is \`{ "source" | "kind" | "topic" | "author": …, "weight": -1 to 1 }\`, and a matching post's score is multiplied by 1 + weight/2. All of a post's boosts together stay between ×${boostLimits.min} and ×${boostLimits.max}.
+- \`objectives.discovery\`: lifts authors the person does not follow yet. Needs \`follows\`.
+
+\`\`\`json
+${JSON.stringify(tuneLens(tuneLens(builtInLenses[0], 'less hive').lens, 'more videos, a lot more about design').lens, null, 2)}
+\`\`\`
+
+People tune the lens they use in plain words: "less hive", "a lot more videos", "more about design", "a bit less from @bot", "more from people I follow", "more new voices", "mute crypto", "show hive again", "chronological". Tuning Raw, Relevant or Work makes the person's own copy ("My Relevant"); the built-ins never change. The person's account numbers every change, keeps the last 50 versions with whether the person or an agent made them, and can go back. Anyone can audit how a shared lens changed while it was shared. Installed copies never change when the author changes the original.
+
+"Why this?" shows each post's score under the lens's own weights: points per objective, and each boost that matched with its multiplier.
 
 ## For agents
 
@@ -129,16 +144,19 @@ Public, no key (\`${origin}/open/mcp\` or REST):
 - \`draft_feed_lens\` / \`POST ${origin}/v1/lenses/draft\` \`{"request": "only videos about cooking, no crypto"}\`: plain words to a manifest, with what was and was not understood.
 - \`preview_feed_lens\` / \`POST ${origin}/v1/lenses/preview\` \`{"lens": {…}}\` or \`{"request": "…"}\`: the public Feed through that lens, each post with its "why".
 - \`get_feed\` with \`lens\` / \`GET ${origin}/v1/feed?lens=relevant\`.
+- \`draft_feed_lens\` with \`base\` / \`POST ${origin}/v1/lenses/draft\` \`{"base": "relevant", "request": "less hive, more videos"}\`: the change, the rules that changed, nothing saved.
+- \`get_feed_lens_history\` / \`GET ${origin}/v1/lenses/{id}/history\`: how a shared lens changed.
 
 The person's account (\`${origin}/me/mcp\`, bearer token):
 
-- \`list_my_feed_lenses\`, \`save_feed_lens\` (\`visibility\`: private or public), \`install_feed_lens\` (copy a shared lens), \`delete_feed_lens\`, and \`get_my_feed\` (the Feed through a lens with the person's follows).
+- \`list_my_feed_lenses\`, \`save_feed_lens\` (\`visibility\`: private or public), \`install_feed_lens\` (copy a shared lens), \`delete_feed_lens\`, and \`get_my_feed\` (the Feed through a lens with the person's follows; each post's \`why.scoring\` shows its score).
+- \`tune_feed_lens\` / \`POST ${origin}/v1/me/lenses/{key}/tune\` \`{"request": "less hive"}\` (\`save: false\` previews), \`get_my_feed_lens_history\` / \`GET ${origin}/v1/me/lenses/{key}/history\`, and \`revert_feed_lens\` / \`POST ${origin}/v1/me/lenses/{key}/revert\` \`{"version": 2}\`. Changes made here are recorded as made by an agent.
 
 Show the person a lens's summary and rules before saving it, and ask before sharing it publicly. A saved lens appears in the person's Feed picker on every device; a shared one opens for anyone at \`${lensShareUrl('<id>')}\`.
 
 ## In the app
 
-There is no lens editor. People write what they want in Search ("only videos from people I follow, no crypto"); Search shows the lens it understood, and choosing it switches the Feed. The Feed's picker shows Relevant, Raw and the lens in use. "Why this?" on every post lists the signals used, the lens's rules and what was never used.
+There is no lens editor. People write what they want in Search ("only videos from people I follow, no crypto"); Search shows the lens it understood, and choosing it switches the Feed. Words like "less hive" or "more videos" show "Tune 'My Relevant': …" for the lens in use, and "undo" lists earlier versions. The Feed's picker shows Relevant, Raw and the lens in use. "Why this?" on every post lists the signals used, the lens's rules, the post's score under those rules, and what was never used.
 `,
   },
   {
