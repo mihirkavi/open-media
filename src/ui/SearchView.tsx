@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Keyboard, Platform, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
@@ -10,10 +11,14 @@ import { Conversation } from '../domain/models';
 import { networks, sourceName } from '../domain/networkPosts';
 import { SocialPost } from '../domain/posts';
 import { applyProfessionalIntent, emptyProfessional, professionalIntent } from '../domain/professionalProfile';
+import { recentSearchesKey, rememberSearch } from '../domain/recentSearches';
+import { formatEmailBody } from '../domain/emailBody';
+import { highlightTerms, snippetAround } from '../domain/searchHighlight';
 import { conversationTitle } from '../domain/selectors';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { FeedViewer, PostCard } from './OpenMediaFeed';
+import { Highlighted, SearchHighlight } from './RichText';
 import type { FeedLenses } from './useFeedLenses';
 import { useUniversalSearch } from './useUniversalSearch';
 
@@ -29,7 +34,7 @@ interface ResultItem { key: string; section: string; icon: keyof typeof Ionicons
  * basic AI summary. Messages and email are matched on this device only. Laid out like Spotlight:
  * one large field, then grouped results with the first one ready to open with Return.
  */
-export function SearchView({ posts, conversations, viewer, lenses, onNavigate, onOpenConversation, onClose, initialQuery = '' }: { posts: SocialPost[]; conversations: Conversation[]; viewer?: FeedViewer; lenses?: FeedLenses; onNavigate?: (target: SearchTarget) => void; onOpenConversation?: (id: string) => void; onClose?: () => void; initialQuery?: string }) {
+export function SearchView({ posts, conversations, viewer, lenses, onNavigate, onOpenConversation, onClose, onDismiss, initialQuery = '' }: { posts: SocialPost[]; conversations: Conversation[]; viewer?: FeedViewer; lenses?: FeedLenses; onNavigate?: (target: SearchTarget) => void; onOpenConversation?: (id: string) => void; onClose?: () => void; /** Esc on an empty field: back to where the person was. */ onDismiss?: () => void; initialQuery?: string }) {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
   const [query, setQuery] = useState(initialQuery);
   // A hashtag tapped in a post opens Search with it filled in.
@@ -43,23 +48,42 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
   // Choosing a lens shows the Feed through it.
   const showFeed = () => { if (onNavigate) onNavigate('feed'); else onClose?.(); };
 
-  const items: ResultItem[] = hasQuery ? [
+  const recent = useRecentSearches(viewer?.id);
+  const terms = useMemo(() => highlightTerms(search.parsed.keywords), [search.parsed.keywords]);
+  // A message result shows the words that matched, not just the conversation's last line.
+  const matchingLine = (conversation: Conversation) => {
+    const has = (text: string | undefined) => Boolean(text) && terms.some((term) => text!.toLocaleLowerCase().includes(term));
+    const newest = [...conversation.messages].reverse();
+    // Email replies quote what came before; the excerpt comes from what each person wrote.
+    const own = (text: string) => conversation.email ? formatEmailBody(text).plain : text;
+    const body = newest.map((item) => own(item.body)).find(has);
+    return body ? snippetAround(body, terms) : newest.find((item) => has(item.emailContext?.subject))?.emailContext?.subject ?? conversation.preview;
+  };
+  const [focused, setFocused] = useState(false);
+  // Opening a result remembers the search, so it is offered again next time.
+  const remember = (run: () => void) => () => { recent.add(query); run(); };
+  const items: ResultItem[] = (hasQuery ? [
     ...lensRows.map((row) => ({ key: row.key, section: 'Feed', icon: 'options-outline' as const, title: row.title, subtitle: row.subtitle, run: () => { row.run().then((leave) => { if (leave) showFeed(); }).catch(() => undefined); } })),
     ...profileRows.map((row) => ({ key: row.key, section: 'Your profile', icon: 'briefcase-outline' as const, title: row.title, subtitle: row.subtitle, run: () => { row.run().catch(() => undefined); } })),
     ...search.settings.map((setting) => ({ key: setting.id, section: 'Settings', icon: 'settings-outline' as const, title: setting.title, subtitle: setting.description, run: () => onNavigate?.('settings') })),
-    ...search.messages.map((conversation) => ({ key: conversation.id, section: 'Messages and email', icon: (conversation.email ? 'mail-outline' : 'chatbubble-outline') as keyof typeof Ionicons.glyphMap, title: conversationTitle(conversation), subtitle: conversation.preview, run: () => onOpenConversation ? onOpenConversation(conversation.id) : onNavigate?.('messages') })),
-  ] : suggestions.map((item) => ({ key: item, section: 'Try', icon: 'search' as const, title: item, run: () => setQuery(item) }));
+    ...search.messages.map((conversation) => ({ key: conversation.id, section: 'Messages and email', icon: (conversation.email ? 'mail-outline' : 'chatbubble-outline') as keyof typeof Ionicons.glyphMap, title: conversationTitle(conversation), subtitle: matchingLine(conversation), run: () => onOpenConversation ? onOpenConversation(conversation.id) : onNavigate?.('messages') })),
+  ].map((item) => ({ ...item, run: remember(item.run) })) : [
+    ...recent.list.map((item) => ({ key: `recent-${item}`, section: 'Recent', icon: 'time-outline' as const, title: item, run: () => setQuery(item) })),
+    ...suggestions.filter((item) => !recent.list.includes(item)).map((item) => ({ key: item, section: 'Try', icon: 'sparkles-outline' as const, title: item, run: () => setQuery(item) })),
+  ]);
 
-  // The first result is the top hit; ↑ and ↓ move, Return opens, Esc clears.
-  const [active, setActive] = useState(0);
-  useEffect(() => { setActive(0); }, [query]);
-  const selected = Math.min(active, items.length - 1);
+  // With a keyboard the first result is the top hit: ↑ and ↓ move, Return opens it. Esc clears the
+  // field, and on an empty field goes back. Touch screens have no Return key, so nothing is preselected.
+  const keyboard = useHasKeyboard();
+  const [active, setActive] = useState(-1);
+  useEffect(() => { setActive(hasQuery ? 0 : -1); }, [query, hasQuery]);
+  const selected = keyboard ? Math.min(active, items.length - 1) : -1;
   const onKey = (event: { nativeEvent: { key: string }; preventDefault?: () => void }) => {
     const key = event.nativeEvent.key;
     if (key === 'ArrowDown' || key === 'ArrowUp') {
       event.preventDefault?.();
-      if (items.length) setActive((selected + (key === 'ArrowDown' ? 1 : items.length - 1)) % items.length);
-    } else if (key === 'Escape') setQuery('');
+      if (items.length) setActive(selected < 0 ? (key === 'ArrowDown' ? 0 : items.length - 1) : (selected + (key === 'ArrowDown' ? 1 : items.length - 1)) % items.length);
+    } else if (key === 'Escape') { if (query) setQuery(''); else onDismiss?.(); }
   };
   const sections = items.reduce<{ title: string; rows: { item: ResultItem; index: number }[] }[]>((all, item, index) => {
     const last = all[all.length - 1];
@@ -68,19 +92,18 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
   }, []);
   const sources = search.sources.filter((source) => source.status !== 'skipped');
 
-  return <ScrollView style={styles.screen} contentContainerStyle={styles.content} stickyHeaderIndices={[0]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+  return <SearchHighlight.Provider value={hasQuery ? terms : []}><ScrollView style={styles.screen} contentContainerStyle={styles.content} stickyHeaderIndices={[0]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
     <View style={styles.header}>
       <View style={styles.fieldRow}>
         {onClose ? <Pressable accessibilityRole="button" accessibilityLabel="Close search" onPress={onClose} style={styles.close}><Ionicons name="chevron-back" size={22} color={colors.text} /></Pressable> : null}
-        <View style={styles.field}>
-          <Ionicons name="search" size={21} color={colors.textSecondary} />
-          <TextInput accessibilityLabel="Search everything" autoFocus value={query} onChangeText={setQuery} onKeyPress={onKey} placeholder="Search everything" placeholderTextColor={colors.textTertiary} returnKeyType="search" onSubmitEditing={() => { const item = items[selected]; if (item && hasQuery) item.run(); else Keyboard.dismiss(); }} style={styles.input} />
+        <View style={[styles.field, focused && styles.fieldFocused]}>
+          <Ionicons name="search" size={21} color={focused ? colors.text : colors.textSecondary} />
+          <TextInput accessibilityLabel="Search" autoFocus value={query} onChangeText={setQuery} onKeyPress={onKey} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} placeholder="Search people, posts, messages and settings" placeholderTextColor={colors.textTertiary} returnKeyType="search" autoCorrect={false} onSubmitEditing={() => { const item = items[selected]; if (item) item.run(); else { if (hasQuery) recent.add(query); Keyboard.dismiss(); } }} style={styles.input} />
           {query ? <Pressable accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => setQuery('')} style={styles.clear}><Ionicons name="close-circle" size={20} color={colors.textTertiary} /></Pressable> : null}
         </View>
       </View>
     </View>
 
-    {!hasQuery ? <Text style={styles.hint}>People, posts on every network, Clips, messages, email and settings. Write naturally: “videos”, “on Lens” or “today” narrow it. Messages and email are searched on this device only.</Text> : null}
     {hasQuery && search.parsed.understood.length ? <Text style={styles.hint}>Understood: {search.parsed.understood.join(' · ')}{search.parsed.text ? ` · “${search.parsed.text}”` : ''}</Text> : null}
 
     {search.ai.status === 'loading' || search.ai.status === 'done' || search.ai.status === 'failed' ? <View accessibilityLiveRegion="polite" style={styles.ai}>
@@ -97,9 +120,10 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
     {sections.length ? <View style={styles.panel}>
       {sections.map((section) => <View key={section.title} style={styles.group}>
         <Text style={styles.groupLabel}>{section.title === 'Messages and email' ? 'Messages and email · on this device' : section.title}</Text>
-        {section.rows.map(({ item, index }) => <ResultRow key={item.key} item={item} selected={hasQuery && index === selected} onHover={() => setActive(index)} styles={styles} colors={colors} />)}
+        {section.rows.map(({ item, index }) => <ResultRow key={item.key} item={item} selected={index === selected} onHover={() => keyboard && setActive(index)} styles={styles} colors={colors} />)}
       </View>)}
     </View> : null}
+    {!hasQuery ? <Text style={styles.footnote}>Write naturally: “videos”, “on Lens” or “today” narrow a search. Messages and email are searched on this device only.</Text> : null}
 
     {hasQuery && sources.length ? <View style={styles.postsHeader}>
       <Text style={[styles.groupLabel, styles.flushLabel]}>Posts from everywhere</Text>
@@ -109,7 +133,7 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
     {search.posts.map((post) => <PostCard key={post.id} post={post} mode="raw" viewer={viewer} />)}
     {hasQuery && search.searching && !search.posts.length ? <View style={styles.status}><ActivityIndicator color={colors.text} /></View> : null}
     {nothing ? <View style={styles.status}><Ionicons name="search-outline" size={26} color={colors.textTertiary} /><Text style={styles.empty}>No results for “{search.parsed.raw}”. Try fewer or different words.</Text></View> : null}
-  </ScrollView>;
+  </ScrollView></SearchHighlight.Provider>;
 }
 
 interface LensRow { key: string; title: string; subtitle: string; run: () => Promise<boolean> }
@@ -263,26 +287,53 @@ function timeAgo(iso: string) {
   return hours < 24 ? `${hours} h ago` : `${Math.round(hours / 24)} d ago`;
 }
 
+/** Recent searches for this person on this device; signed out, nothing is kept. */
+function useRecentSearches(viewerId: string | undefined) {
+  const [list, setList] = useState<string[]>([]);
+  useEffect(() => {
+    setList([]);
+    if (!viewerId) return;
+    let active = true;
+    AsyncStorage.getItem(recentSearchesKey(viewerId)).then((value) => { if (active && value) setList(JSON.parse(value) as string[]); }).catch(() => undefined);
+    return () => { active = false; };
+  }, [viewerId]);
+  const add = (query: string) => {
+    if (!viewerId) return;
+    // Written at once: opening a result usually leaves Search before another render.
+    const next = rememberSearch(list, query);
+    AsyncStorage.setItem(recentSearchesKey(viewerId), JSON.stringify(next)).catch(() => undefined);
+    setList(next);
+  };
+  return { list, add };
+}
+
+/** True where a hardware keyboard is the usual way in: the web with a fine pointer (not a phone). */
+function useHasKeyboard(): boolean {
+  return useMemo(() => Platform.OS === 'web' && typeof window !== 'undefined' && !window.matchMedia?.('(pointer: coarse)').matches, []);
+}
+
 function ResultRow({ item, selected, onHover, styles, colors }: { item: ResultItem; selected: boolean; onHover: () => void; styles: ReturnType<typeof createStyles>; colors: ThemeColors }) {
   return <Pressable accessibilityRole="button" accessibilityState={{ selected }} onPress={item.run} onHoverIn={onHover} style={({ pressed }) => [styles.row, selected && styles.rowSelected, pressed && styles.rowPressed]}>
     <View style={[styles.rowIcon, selected && styles.rowIconSelected]}><Ionicons name={item.icon} size={17} color={selected ? colors.surface : colors.text} /></View>
     <View style={styles.rowCopy}>
-      <Text numberOfLines={1} style={[styles.rowTitle, selected && styles.rowTextSelected]}>{item.title}</Text>
-      {item.subtitle ? <Text numberOfLines={2} style={[styles.rowSubtitle, selected && styles.rowSubtitleSelected]}>{item.subtitle}</Text> : null}
+      <Text numberOfLines={1} style={[styles.rowTitle, selected && styles.rowTextSelected]}><Highlighted text={item.title} /></Text>
+      {item.subtitle ? <Text numberOfLines={2} style={[styles.rowSubtitle, selected && styles.rowSubtitleSelected]}><Highlighted text={item.subtitle} /></Text> : null}
     </View>
-    {selected && Platform.OS === 'web' ? <Ionicons name="return-down-back" size={16} color={colors.surface} /> : null}
+    {selected ? <Ionicons name="return-down-back" size={16} color={colors.surface} /> : null}
   </Pressable>;
 }
 
 function createStyles(colors: ThemeColors) { return StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.surface },
   content: { width: '100%', maxWidth: 680, alignSelf: 'center', paddingHorizontal: 18, paddingBottom: 80 },
-  header: { paddingTop: 20, paddingBottom: 10, backgroundColor: colors.surface },
+  header: { paddingTop: Platform.OS === 'web' ? 28 : 12, paddingBottom: 10, backgroundColor: colors.surface },
   fieldRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   close: { width: 36, height: 36, marginLeft: -8, alignItems: 'center', justifyContent: 'center' },
   field: { flex: 1, minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 10, paddingLeft: 18, paddingRight: 10, borderRadius: 28, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, backgroundColor: colors.surfaceAlt, boxShadow: '0 1px 2px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.06)' } as object,
+  fieldFocused: { borderColor: colors.textTertiary },
   input: { flex: 1, minHeight: 54, color: colors.text, fontSize: 20, letterSpacing: -0.2, paddingVertical: 0, outlineStyle: 'none' } as object,
   clear: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+  footnote: { marginTop: 10, marginHorizontal: 10, color: colors.textTertiary, fontSize: 12, lineHeight: 17 },
   hint: { marginTop: 4, marginHorizontal: 6, color: colors.textTertiary, fontSize: 12, lineHeight: 17 },
   note: { color: colors.textTertiary, fontSize: 12, lineHeight: 17 },
   ai: { marginTop: 14, gap: 8, padding: 16, borderRadius: 20, backgroundColor: colors.chrome },

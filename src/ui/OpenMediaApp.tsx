@@ -383,8 +383,8 @@ export function OpenMediaApp({
       event.preventDefault();
       setPerson(undefined);
       navigate("search");
-      // Already on Search: put the cursor back in its field.
-      setTimeout(() => (document.querySelector('input[aria-label="Search everything"]') as HTMLInputElement | null)?.focus(), 50);
+      // Already on Search: put the cursor back in its field with the last search selected, as Spotlight does.
+      setTimeout(() => { const field = document.querySelector('input[aria-label="Search"]') as HTMLInputElement | null; field?.focus(); field?.select(); }, 50);
     };
     // Capture: text fields stop key events from reaching the window, and ⌘K must work while typing.
     window.addEventListener("keydown", onKey, true);
@@ -484,6 +484,7 @@ export function OpenMediaApp({
             lenses={lenses}
             onNavigate={navigate}
             onOpenConversation={(id) => { setOpenConversationId(id); navigate("messages"); }}
+            onDismiss={() => navigate(lastPrimary)}
           />
         ) : null}
         {!person && destination === "profile" ? (
@@ -539,17 +540,16 @@ function DesktopRail({
         <BrandIcon />
         <Text style={styles.wordmarkText}>Open Media</Text>
       </Pressable>
-      <Pressable
-        accessibilityRole="search"
-        accessibilityLabel="Search everything"
-        onPress={() => onNavigate("search")}
-        style={[styles.railSearch, destination === "search" && styles.railSearchActive]}
-      >
-        <Ionicons name="search" size={16} color={colors.textSecondary} />
-        <Text style={styles.railSearchText}>Search everything</Text>
-        {Platform.OS === "web" ? <Text style={styles.railShortcut}>{shortcutLabel}</Text> : null}
-      </Pressable>
       <View style={styles.primary}>
+        {/* One way into Search, with its shortcut; the only search field is on the Search page itself. */}
+        <NavButton
+          id="search"
+          label="Search"
+          icon="search-outline"
+          hint={Platform.OS === "web" ? shortcutLabel : undefined}
+          active={destination === "search"}
+          onPress={() => onNavigate("search")}
+        />
         {primary.map((item) => (
           <NavButton
             key={item.id}
@@ -568,13 +568,6 @@ function DesktopRail({
         <Text style={styles.createText}>Create</Text>
       </Pressable>
       <View style={styles.utilities}>
-        <NavButton
-          id="search"
-          label="Search"
-          icon="search-outline"
-          active={destination === "search"}
-          onPress={() => onNavigate("search")}
-        />
         <NavButton
           id="profile"
           label="Profile"
@@ -597,12 +590,15 @@ function DesktopRail({
 function NavButton({
   label,
   icon,
+  hint,
   active,
   onPress,
 }: {
   id: string;
   label: string;
   icon: keyof typeof Ionicons.glyphMap;
+  /** A keyboard shortcut, shown as a key on the right. */
+  hint?: string;
   active: boolean;
   onPress: () => void;
 }) {
@@ -623,6 +619,7 @@ function NavButton({
       <Text style={[styles.navText, active && styles.navTextActive]}>
         {label}
       </Text>
+      {hint ? <Text style={styles.navHint}>{hint}</Text> : null}
     </Pressable>
   );
 }
@@ -763,21 +760,6 @@ function createStyles(colors: ThemeColors) {
     app: { flex: 1, flexDirection: "row", backgroundColor: colors.surface },
     appCompact: { flexDirection: "column" },
     content: { flex: 1, minWidth: 0 },
-    railSearch: {
-      minHeight: 40,
-      marginBottom: 14,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8,
-      paddingHorizontal: 12,
-      borderRadius: 20,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.surfaceAlt,
-    },
-    railSearchActive: { borderColor: colors.text },
-    railSearchText: { flex: 1, color: colors.textTertiary, fontSize: 13 },
-    railShortcut: { color: colors.textTertiary, fontSize: 11, fontWeight: "600" },
     rail: {
       width: 218,
       padding: 16,
@@ -811,6 +793,7 @@ function createStyles(colors: ThemeColors) {
     navActive: { backgroundColor: colors.chrome },
     navText: { color: colors.textSecondary, fontSize: 15, fontWeight: "500" },
     navTextActive: { color: colors.text, fontWeight: "700" },
+    navHint: { marginLeft: "auto", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, color: colors.textTertiary, fontSize: 11, fontWeight: "600" },
     create: {
       minHeight: 46,
       marginTop: 22,
