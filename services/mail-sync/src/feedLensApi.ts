@@ -7,6 +7,7 @@
 import {
   builtInLenses, describeLensRules, FeedLens, forbiddenSignals, lensFormat, lensFromRequest, LensError, lensKinds, lensPermissions, lensShareUrl, lensSources, lensSummary, parseLens,
 } from '../../../src/domain/feedLenses';
+import { assistLens, LensAi } from './lensAssist.js';
 import { callRpc, PublicApiEnv } from './publicApi.js';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -86,16 +87,21 @@ export function checkManifest(value: unknown): FeedLens {
   catch (error) { throw new LensApiError(400, error instanceof LensError ? error.message : 'The lens must be a JSON manifest. See GET /v1/lenses for the format.'); }
 }
 
-/** Plain words → a lens, with what was understood and what was not. */
-export function draftLens(request: unknown, origin: string) {
-  const text = typeof request === 'string' ? request.trim() : '';
-  if (!text) throw new LensError('Describe the feed you want, e.g. “only videos about cooking, no crypto”.');
-  const draft = lensFromRequest(text);
+/**
+ * Plain words → a lens, with what was understood and what was not (ADR 0020). Send the lens in use as
+ * `base` to change it ("also hide hive") rather than start over: that is how a conversation with the
+ * Feed works, in Search and through agents. Fixed rules answer first; the AI model only writes the
+ * lens when the rules could not read some words, and its manifest is validated like any other.
+ */
+export async function draftLens(input: { request: unknown; base?: unknown }, origin: string, env: { AI?: LensAi } = {}) {
+  const draft = await assistLens(input, env);
   return {
     ...lensView(draft.lens, origin),
     understood: draft.understood,
-    notUnderstood: draft.unused,
-    next: 'Show the person the summary and rules. Preview it with preview_feed_lens, then save it with save_feed_lens (their account) once they agree. You may also edit the manifest yourself; it is validated again when saved.',
+    notUnderstood: draft.notUnderstood,
+    reply: draft.reply,
+    writtenBy: draft.source === 'model' ? `AI (${draft.model}), checked by Open Media’s lens validator` : 'Open Media’s fixed rules',
+    next: 'Show the person the reply and rules. To keep talking, send their next words with this manifest as base. Preview it with preview_feed_lens, then save it with save_feed_lens (their account) once they agree; ask before sharing publicly.',
   };
 }
 

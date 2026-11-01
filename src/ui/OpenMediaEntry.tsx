@@ -157,12 +157,12 @@ function PublicSite({ onSignIn }: { onSignIn: () => void }) {
 function PublicHome({ onSignIn, onNavigate }: { onSignIn: () => void; onNavigate: (page: PublicPage) => void }) {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
   const feed = useMixedFeed();
-  const lenses = useFeedLenses(undefined, 'raw');
+  const lenses = useFeedLenses();
   const [searching, setSearching] = useState(false);
   if (searching) return <View style={styles.screen}><SearchView posts={feed.posts} conversations={[]} lenses={lenses} onClose={() => setSearching(false)} /></View>;
   return <View style={styles.screen}>
     <View style={styles.publicBar}><Pressable accessibilityRole="link" accessibilityLabel={Platform.OS === 'web' ? 'Open Media home' : 'About Open Media'} onPress={() => onNavigate(Platform.OS === 'web' ? 'landing' : 'mission')}><BrandMark compact /></Pressable><View style={styles.publicActions}>{Platform.OS !== 'web' ? <Pressable accessibilityRole="button" accessibilityLabel="Our mission" onPress={() => onNavigate('mission')} style={styles.publicSearch}><Ionicons name="information-circle-outline" size={22} color={colors.text} /></Pressable> : null}<Pressable accessibilityRole="search" accessibilityLabel="Search everything" onPress={() => setSearching(true)} style={styles.publicSearch}><Ionicons name="search" size={20} color={colors.text} /></Pressable><Pressable accessibilityRole="button" onPress={onSignIn} style={styles.signInButton}><Text style={styles.signInText}>Sign in</Text></Pressable></View></View>
-    <FeedView lens={lenses.lens} lenses={lenses.lenses} onLensChange={lenses.choose} lensContext={lenses.context} posts={feed.posts} loading={feed.loading} error={feed.error} hasMore={feed.hasMore} onRetry={feed.refresh} onLoadMore={feed.loadMore} sources={feed.sources} loadingMore={feed.loadingMore} pendingCount={feed.pendingCount} onShowPending={feed.showPending} />
+    <FeedView lens={lenses.lens} lenses={lenses.lenses} onLensChange={lenses.choose} lensContext={lenses.context} horizon={feed.horizon} posts={feed.posts} loading={feed.loading} error={feed.error} hasMore={feed.hasMore} onRetry={feed.refresh} onLoadMore={feed.loadMore} sources={feed.sources} loadingMore={feed.loadingMore} pendingCount={feed.pendingCount} onShowPending={feed.showPending} />
     <Pressable accessibilityRole="link" onPress={() => onNavigate('developers')} style={styles.apiLink}><Ionicons name="code-slash-outline" size={14} color={colors.textSecondary} /><Text style={styles.apiLinkText}>Open data · APIs and MCP for developers and agents</Text></Pressable>
   </View>;
 }

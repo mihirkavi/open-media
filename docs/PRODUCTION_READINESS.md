@@ -35,6 +35,17 @@ This checklist defines “production ready” for the current onboarding private
 - [ ] Owner: a LinkedIn developer app (Sign In with LinkedIn using OpenID Connect, Share on LinkedIn) before the LinkedIn connector can move from planned.
 - [ ] Owner decision: whether to host Resume Matcher (its own server behind an authenticating proxy, plus a model key).
 
+## Working default feeds and the lens assistant (ADR 0020; built 2026-10-31, not deployed)
+
+- [x] App (193) and Worker (186) tests pass, including the new `feedMerge.test.ts`, `feedPaging.test.ts` and `lensAssist.test.ts`; typecheck and web export pass. No database change.
+- [x] Web, production build with placeholder backend and every outside request blocked, 375 px and 1280 px, signed out: the Feed opens on Relevant; "only videos from people I follow, no crypto" drafts "Following Videos" and switches the Feed; "also hide hive" offers "Update “Following Videos”" and applies it; the lens survives a reload; no horizontal scroll; no console errors.
+- [ ] Web on the local stack with live networks: Raw stays in time order after several "load more"s; Relevant differs from Raw with no follows or topics; "Why this?" shows language and like counts and the "Manifest and source code" link.
+- [ ] Signed in: a refined lens saves to the account (same key, new version).
+- [ ] Lens assistant with Workers AI: a request the rules can't read ("something soothing, gardening vibes") returns a model-written lens marked as such. Needs the deployed Worker (the AI binding is production-only).
+- [ ] iOS Simulator and Android emulator: the same Search conversation, the picker, and the "Why this?" link.
+- [ ] Owner: deploy the Worker and web app (`npm run deploy`), then a TestFlight build.
+- [ ] After deploy: `GET /v1/feed?lens=raw` paged three times returns no repeated posts and stays in time order; `POST /v1/lenses/draft` with `base` answers; rescan Ora.
+
 ## Feed lenses (ADR 0017; deployed 2026-10-28)
 
 - [x] App, Worker and database tests pass; `open_media_feed_lenses_test.sql` (12 checks) passes against the local database.

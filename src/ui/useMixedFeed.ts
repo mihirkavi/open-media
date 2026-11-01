@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, Platform } from 'react-native';
 
 import { FeedKind, networkConnectors } from '../connectors/networkFeeds';
+import { feedHorizon, SourceProgress, sourcesToLoad } from '../domain/feedMerge';
 import { NetworkId } from '../domain/networkPosts';
 import { SocialPost } from '../domain/posts';
 import { usePublicFeed } from './usePublicFeed';
@@ -58,13 +59,23 @@ export function useMixedFeed(sessionKey?: string, kind: FeedKind = 'feed') {
 
   const refresh = useCallback(async () => { await Promise.all([openMedia.refresh(), refreshNetworks()]); }, [openMedia.refresh, refreshNetworks]);
 
+  // How far back each source has been read, for the Feed's horizon (ADR 0020).
+  const progress: SourceProgress[] = useMemo(() => [
+    { id: 'open-media', oldest: oldestTime(openMedia.posts), hasMore: openMedia.hasMore, failed: Boolean(openMedia.error) },
+    ...networkConnectors.map((connector) => ({ id: connector.id, oldest: oldestTime(state[connector.id].posts), hasMore: Boolean(state[connector.id].cursor), failed: Boolean(state[connector.id].error) })),
+  ], [openMedia.posts, openMedia.hasMore, openMedia.error, state]);
+  /** Every source still paging has been read down to this time; newest-first lenses show nothing older. */
+  const horizon = kind === 'feed' ? feedHorizon(progress) : 0;
+
+  // The Feed asks only the sources holding the horizon up, so it moves down evenly; Clips ask all.
   const loadMore = useCallback(() => {
-    if (openMedia.hasMore && !openMedia.loading) openMedia.loadMore();
+    const wanted = new Set(kind === 'feed' ? sourcesToLoad(progress) : progress.map((source) => source.id));
+    if (openMedia.hasMore && !openMedia.loading && wanted.has('open-media')) openMedia.loadMore();
     networkConnectors.forEach((connector) => {
       const network = state[connector.id];
-      if (network.cursor && !network.loading) load(connector.id, network.cursor, true, generation.current);
+      if (network.cursor && !network.loading && wanted.has(connector.id)) load(connector.id, network.cursor, true, generation.current);
     });
-  }, [openMedia.hasMore, openMedia.loading, openMedia.loadMore, state, load]);
+  }, [kind, progress, openMedia.hasMore, openMedia.loading, openMedia.loadMore, state, load]);
 
   const shown = useMemo(() => [...openMedia.posts, ...networkConnectors.flatMap((connector) => state[connector.id].posts)], [openMedia.posts, state]);
 
@@ -135,5 +146,14 @@ export function useMixedFeed(sessionKey?: string, kind: FeedKind = 'feed') {
   const hasMore = openMedia.hasMore || networkConnectors.some((connector) => Boolean(state[connector.id].cursor));
   const loadingMore = sources.some((source) => source.loading) && shown.length > 0;
 
-  return { posts: shown, sources, loading, loadingMore, error, hasMore, refresh, loadMore, pendingCount: pending.length, showPending, addPost: openMedia.addPost, removePost: openMedia.removePost };
+  return { posts: shown, horizon, sources, loading, loadingMore, error, hasMore, refresh, loadMore, pendingCount: pending.length, showPending, addPost: openMedia.addPost, removePost: openMedia.removePost };
+}
+
+function oldestTime(posts: SocialPost[]): number | undefined {
+  let oldest: number | undefined;
+  for (const post of posts) {
+    const time = Date.parse(post.createdAt);
+    if (Number.isFinite(time) && (oldest === undefined || time < oldest)) oldest = time;
+  }
+  return oldest;
 }

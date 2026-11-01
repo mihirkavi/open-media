@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 
 import { deleteMyLens, loadMyLenses, loadSharedLens, saveMyLens } from '../data/lensService';
 import { loadMyFollows } from '../data/peopleService';
-import { builtInLenses, FeedLens, LensContext, lensById, lensIdFromUrl, lensShareUrl, parseLens } from '../domain/feedLenses';
+import { builtInLenses, FeedLens, LensContext, languageCode, lensById, lensIdFromUrl, lensShareUrl, parseLens } from '../domain/feedLenses';
 
 const storageKey = 'open-media.feed-lenses.v1';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -116,7 +116,8 @@ export function useFeedLenses(viewerId?: string, fallback: 'relevant' | 'raw' = 
 
   const lens = useMemo(() => lensById(activeId, saved), [activeId, saved]);
   const lenses = useMemo(() => [...builtInLenses, ...saved], [saved]);
-  const context = useMemo<LensContext>(() => ({ followedAuthorIds: followed, interests }), [followed, interests]);
+  const languages = useMemo(deviceLanguages, []);
+  const context = useMemo<LensContext>(() => ({ followedAuthorIds: followed, interests, languages }), [followed, interests, languages]);
   return { lens, lenses, context, interests, choose: setActiveId, apply, remove, share, addInterests };
 }
 
@@ -128,4 +129,18 @@ function validLenses(values: unknown): FeedLens[] {
 function mergeLenses(existing: FeedLens[], incoming: FeedLens[]): FeedLens[] {
   const ids = new Set(incoming.map((lens) => lens.id));
   return [...incoming, ...existing.filter((lens) => !ids.has(lens.id))].slice(0, 50);
+}
+
+/**
+ * The languages this device is set to, for lenses with the language permission (Relevant has it).
+ * Read from the browser or the system locale and used only on this device; never sent anywhere.
+ */
+export function deviceLanguages(): string[] {
+  const tags: string[] = [];
+  try {
+    if (typeof navigator !== 'undefined' && Array.isArray(navigator.languages)) tags.push(...navigator.languages);
+    if (typeof navigator !== 'undefined' && typeof navigator.language === 'string') tags.push(navigator.language);
+  } catch { /* not available on this platform */ }
+  try { tags.push(Intl.DateTimeFormat().resolvedOptions().locale); } catch { /* Intl without locale data */ }
+  return [...new Set(tags.map(languageCode).filter(Boolean))].slice(0, 5);
 }

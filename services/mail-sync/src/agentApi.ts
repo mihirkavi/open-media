@@ -22,7 +22,8 @@ import { networkConnectors } from '../../../src/connectors/networkFeeds';
 import { networkSearches } from '../../../src/connectors/networkSearch';
 import { collapseRepeatedPosts, NetworkId, networks } from '../../../src/domain/networkPosts';
 import { explainFeedPost, FeedMode, selectFeed, SocialPost } from '../../../src/domain/posts';
-import { builtInLenses, FeedLens, LensContext, LensError, lensSummary, relevantLens, workLens } from '../../../src/domain/feedLenses';
+import { builtInLenses, FeedLens, LensContext, LensError, lensSummary, rawLens, relevantLens, workLens } from '../../../src/domain/feedLenses';
+import { aboveHorizon, feedHorizon } from '../../../src/domain/feedMerge';
 import { fieldDefinition, fieldHref, ProfileFieldError, ProfileFieldValue, profileFieldDefinitions, readVisibleFields, validateProfileFields } from '../../../src/domain/profileFields';
 import { fromJsonResume, fromLinkedInExport, isEmptyProfessional, parseProfessional, ProfessionalError, toJsonResume } from '../../../src/domain/professionalProfile';
 import { applicationMessage, tailorProfile } from './careerAssist.js';
@@ -144,7 +145,11 @@ export function agentPost(post: SocialPost, mode: FeedMode | FeedLens, origin: s
   };
 }
 
-type FeedCursor = Partial<Record<Source, string | { createdAt: string; id: string }>>;
+/** Marks a source that must be asked for its first page again. */
+const firstPage = 'first';
+
+/** Each source's next page, plus (for newest-first lenses) the horizon already returned, ADR 0020. */
+type FeedCursor = Partial<Record<Source, string | { createdAt: string; id: string }>> & { before?: number };
 
 export async function feed(env: AgentEnv, origin: string, options: { sources?: Source[]; kind?: 'feed' | 'clips'; mode?: FeedMode; lens?: FeedLens; context?: LensContext; cursor?: string }) {
   const chosen = options.sources?.length ? options.sources : [...sources];
@@ -154,30 +159,45 @@ export async function feed(env: AgentEnv, origin: string, options: { sources?: S
   const mode = lens?.id ?? 'raw';
   const context = options.context ?? {};
   const cursor = options.cursor ? decodeFeedCursor(options.cursor) : {};
-  const results = await Promise.allSettled(chosen.map(async (source) => {
+  // After the first page, a source missing from the cursor has no older posts; asking it again would
+  // repeat its first page. "first" keeps a source on its first page (see the horizon below).
+  const asked = options.cursor ? chosen.filter((source) => cursor[source] !== undefined) : chosen;
+  const results = await Promise.allSettled(asked.map(async (source) => {
     if (source === 'open-media') {
-      const before = cursor['open-media'] as { createdAt: string; id: string } | undefined;
+      const stored = cursor['open-media'];
+      const before = stored && typeof stored === 'object' ? stored : undefined;
       const records = await callRpc<PublicPostRecord[]>(env, fetch, 'open_media_public_posts', {
         p_limit: 20, p_before_created_at: before?.createdAt ?? null, p_before_id: before?.id ?? null, p_author_handle: null, p_media: kind === 'clips' ? 'video' : null,
       });
       const items = Array.isArray(records) ? records : [];
       const last = items[items.length - 1];
-      return { source, posts: items.map((record) => socialPostFromPublic(record, env.SUPABASE_URL)), next: items.length === 20 && last ? { createdAt: last.createdAt, id: last.id } : undefined };
+      return { source, posts: items.map((record) => socialPostFromPublic(record, env.SUPABASE_URL)), previous: before ?? firstPage, next: items.length === 20 && last ? { createdAt: last.createdAt, id: last.id } : undefined };
     }
     const connector = networkConnectors.find((item) => item.id === source)!;
-    const previous = typeof cursor[source] === 'string' ? cursor[source] as string : undefined;
+    const stored = cursor[source];
+    const previous = typeof stored === 'string' && stored !== firstPage ? stored : undefined;
     const page = kind === 'clips' ? await connector.fetchClips(previous) : await connector.fetchFeed!(previous);
-    return { source, posts: page.posts, next: page.cursor };
+    return { source, posts: page.posts, previous: previous ?? firstPage, next: page.cursor };
   }));
+  // Newest-first lenses merge the networks like the app does (ADR 0020): return only posts down to
+  // the horizon, and keep a network on the same page while it still has posts below it, so the next
+  // page continues exactly where this one stopped instead of jumping hours back for one network.
+  const newestFirst = (lens ?? rawLens).order === 'newest' && kind === 'feed';
+  const before = typeof cursor.before === 'number' ? cursor.before : undefined;
+  const pages = results.flatMap((result) => result.status === 'fulfilled' ? [{ ...result.value, posts: before ? result.value.posts.filter((post) => (Date.parse(post.createdAt) || 0) < before) : result.value.posts }] : []);
+  const horizon = newestFirst ? feedHorizon(pages.map((page) => ({ id: page.source, oldest: oldestPostTime(page.posts), hasMore: Boolean(page.next) }))) : 0;
   const posts: SocialPost[] = [];
   const next: FeedCursor = {};
-  const unavailable: string[] = [];
-  results.forEach((result, index) => {
-    if (result.status === 'fulfilled') {
-      posts.push(...result.value.posts);
-      if (result.value.next) next[result.value.source] = result.value.next;
-    } else unavailable.push(chosen[index]);
-  });
+  const unavailable = asked.filter((_, index) => results[index].status === 'rejected');
+  for (const page of pages) {
+    posts.push(...aboveHorizon(page.posts, horizon));
+    const finished = !horizon || (oldestPostTime(page.posts) ?? Infinity) >= horizon;
+    const resume = finished ? page.next : page.previous;
+    if (resume) next[page.source] = resume;
+  }
+  // A network that failed this time is asked for the same page next time instead of being dropped.
+  for (const source of unavailable) next[source as Source] = cursor[source as Source] ?? firstPage;
+  if (horizon && Object.keys(next).length) next.before = horizon;
   const chosenLens = lens ?? 'raw';
   // Each page is ordered through the lens on its own; a lens that filters can return a short page.
   const ordered = selectFeed(collapseRepeatedPosts(posts), chosenLens, context);
@@ -1127,7 +1147,7 @@ function registerPublicTools(server: McpServer, env: AgentEnv, origin: string) {
   // Feed lenses (ADR 0017): how the Feed is ordered, as inspectable manifests anyone can write and share.
   tool(server, 'list_feed_lenses', { title: 'List feed lenses', description: 'The feed algorithms people can use: the built-in Raw, Relevant and Work, and lenses people shared publicly, each with its rules in plain words, what it reads, how many installed it, and the manifest format for writing one.', input: { query: z.string().max(80).optional() }, readOnly: true }, (args) => listLenses(env, origin, args.query as string | undefined));
   tool(server, 'get_feed_lens', { title: 'Get a feed lens', description: 'One lens by id (raw, relevant, work or a shared lens id): its manifest, rules in words, what it may read and what it can never read.', input: { id: z.string() }, readOnly: true }, async (args) => { const found = await lensCall(() => findLens(env, String(args.id))); return lensView(found.lens, origin, found.row); });
-  tool(server, 'draft_feed_lens', { title: 'Write a feed lens from plain words', description: 'Turns what the person wants (“only videos about cooking from people I follow, no crypto”) into a lens manifest, saying what was understood and what was not. Nothing is saved. You may refine the manifest yourself before previewing or saving it.', input: { request: z.string().min(1).max(400) }, readOnly: true }, (args) => lensCall(() => draftLens(args.request, origin)));
+  tool(server, 'draft_feed_lens', { title: 'Write a feed lens from plain words', description: 'Turns what the person wants (“only videos about cooking from people I follow, no crypto”) into a lens manifest, saying what was understood and what was not, with a one-line reply to show them. To continue the conversation, pass the previous manifest as base with their next words (“also hide hive”, “show hive again”, “call it Calm”). Fixed rules answer first; an AI model writes the lens only for words the rules cannot read, and every manifest is validated. Nothing is saved. You may refine the manifest yourself before previewing or saving it.', input: { request: z.string().min(1).max(400), base: z.union([z.string(), z.record(z.string(), z.unknown())]).optional().describe('The lens being changed (raw, relevant, work, or a manifest from an earlier draft). Send it to keep the conversation going: “also hide hive” then changes that lens.') }, readOnly: true }, (args) => lensCall(() => draftLens({ request: args.request, base: args.base }, origin, env)));
   tool(server, 'preview_feed_lens', { title: 'Preview a feed lens', description: 'The public feed as a lens would show it, without saving anything. Give lens (an id), manifest (a lens object) or request (plain words). Each post carries its “why”.', input: { lens: z.string().optional(), manifest: z.record(z.string(), z.unknown()).optional(), request: z.string().max(400).optional(), sources: z.array(sourceEnum).optional(), kind: z.enum(['feed', 'clips']).optional() }, readOnly: true, view: postsViewUri }, (args) => previewLens(env, origin, args));
   tool(server, 'search', { title: 'Search everything public', description: 'Plain-language search across public posts on Open Media, Farcaster, Lens, Hive and DeSo, plus matching app settings. Understands phrases like “videos about ethereum on lens today” and says what it understood and how each network was searched.', input: { query: z.string().min(1).max(200) }, readOnly: true, view: postsViewUri },
     (args) => search(env, origin, String(args.query)));
@@ -1351,7 +1371,7 @@ function baseOpenApi(origin: string) {
       '/v1/networks': { get: { summary: 'Every network and connector, with what works today', responses: { 200: ok('Networks and capabilities') } } },
       '/v1/lenses': { get: { summary: 'Feed lenses: the built-in Raw, Relevant and Work and publicly shared lenses, with rules in plain words and the manifest format', parameters: [{ name: 'q', in: 'query', schema: { type: 'string', maxLength: 80 } }], responses: { 200: ok('Lenses') } } },
       '/v1/lenses/{id}': { get: { summary: 'One feed lens: manifest, rules, what it reads and never reads', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: ok('The lens'), 404: error } } },
-      '/v1/lenses/draft': { post: { summary: 'Write a lens from plain words; nothing is saved', requestBody: textBody('request', 400), responses: { 200: ok('The drafted lens with what was and was not understood'), 400: error } } },
+      '/v1/lenses/draft': { post: { summary: 'Write or change a lens from plain words; nothing is saved. Send base (the lens in use) to keep a conversation going', requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['request'], properties: { request: { type: 'string', maxLength: 400 }, base: { oneOf: [{ type: 'string', enum: ['raw', 'relevant', 'work'] }, { type: 'object' }] } } } } } }, responses: { 200: ok('The drafted lens with what was and was not understood'), 400: error } } },
       '/v1/lenses/preview': { post: { summary: 'The public feed through a lens (id, manifest or plain words); nothing is saved', requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { lens: { type: 'string' }, manifest: { type: 'object' }, request: { type: 'string', maxLength: 400 }, sources: { type: 'array', items: { type: 'string', enum: [...sources] } }, kind: { type: 'string', enum: ['feed', 'clips'] } } } } } }, responses: { 200: ok('Posts with their “why”'), 400: error, 404: error } } },
       '/v1/profiles/{handle}/resume': { get: { summary: 'A public professional profile as a resume page, drawn by the JSON Resume “even” theme', parameters: [{ name: 'handle', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: { description: 'HTML resume page', content: { 'text/html': {} } }, 404: error } } },
       '/v1/profiles/{handle}/resume.json': { get: { summary: 'The same resume as a JSON Resume document (imports into Reactive Resume and other JSON Resume tools)', parameters: [{ name: 'handle', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: ok('JSON Resume'), 404: error } } },
@@ -1612,7 +1632,7 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
       if (mode !== 'raw' && mode !== 'relevant') throw new AgentError(400, 'bad_request', 'mode must be raw or relevant.');
       const lensId = url.searchParams.get('lens');
       const lens = lensId ? (await lensCall(() => findLens(env, lensId))).lens : undefined;
-      const page = await feed(env, origin, { sources: chosen as Source[] | undefined, kind, mode, lens, cursor: url.searchParams.get('cursor') ?? undefined });
+      const page = await feed(env, origin, { sources: chosen as Source[] | undefined, kind, mode, lens, cursor: url.searchParams.get('cursor') ?? undefined, context: { languages: acceptedLanguages(request) } });
       return json({ ...page, next: page.nextCursor ? withParams(url, { cursor: page.nextCursor }) : null }, 30);
     }
     if (request.method === 'GET' && path === '/v1/search') return json(await search(env, origin, url.searchParams.get('q') ?? ''), 30);
@@ -1627,7 +1647,7 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     if (request.method === 'GET' && lensPath) { const found = await lensCall(() => findLens(env, decodeURIComponent(lensPath[1]))); return json(lensView(found.lens, origin, found.row), 60); }
     if (request.method === 'POST' && (path === '/v1/lenses/draft' || path === '/v1/lenses/preview')) {
       const input = await request.json().catch(() => ({})) as Record<string, unknown>;
-      if (path === '/v1/lenses/draft') return json(await lensCall(() => draftLens(input.request ?? input.text, origin)), 0);
+      if (path === '/v1/lenses/draft') return json(await lensCall(() => draftLens({ request: input.request ?? input.text, base: input.base }, origin, env)), 0);
       return json(await previewLens(env, origin, input), 0);
     }
     if (request.method === 'GET' && path === '/v1/networks') return json(networksDescription(env), 300);
@@ -1850,6 +1870,17 @@ function withParams(url: URL, params: Record<string, string>): string {
   const next = new URL(url.toString());
   for (const [key, value] of Object.entries(params)) next.searchParams.set(key, value);
   return next.toString();
+}
+
+/** Languages from an Accept-Language header, for lenses with the language permission (ADR 0020). */
+export function acceptedLanguages(request: Request): string[] {
+  const header = request.headers.get('accept-language') ?? '';
+  return [...new Set(header.split(',').map((part) => part.split(';')[0].trim().toLocaleLowerCase().split('-')[0]).filter((code) => /^[a-z]{2,3}$/.test(code)))].slice(0, 5);
+}
+
+function oldestPostTime(posts: SocialPost[]): number | undefined {
+  const times = posts.map((post) => Date.parse(post.createdAt)).filter(Number.isFinite);
+  return times.length ? Math.min(...times) : undefined;
 }
 
 function encodeJson(value: unknown): string {
