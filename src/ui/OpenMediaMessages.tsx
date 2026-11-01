@@ -64,19 +64,19 @@ export function OpenMediaMessages({
   const compact = width < 760;
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const [query, setQuery] = useState("");
+  const [unreadOnly, setUnreadOnly] = useState(false);
   const [selectedId, setSelectedId] = useState<string | undefined>(openConversationId);
   useEffect(() => { if (openConversationId) setSelectedId(openConversationId); }, [openConversationId]);
   const [peopleFilter, setPeopleFilter] = useState<PeopleFilter>("all");
   const [newMessageOpen, setNewMessageOpen] = useState(false);
   const filtered = useMemo(
     () =>
-      filterConversations(conversations, {
-        peopleFilter,
-        query,
-        unreadOnly: false,
-      }),
-    [conversations, peopleFilter, query],
+      filterConversations(
+        // The open conversation stays listed after reading it clears its unread mark.
+        unreadOnly ? conversations.filter((conversation) => conversation.unreadCount > 0 || conversation.id === selectedId) : conversations,
+        { peopleFilter, query: "", unreadOnly: false },
+      ),
+    [conversations, peopleFilter, unreadOnly, selectedId],
   );
   const selected =
     conversations.find((conversation) => conversation.id === selectedId) ??
@@ -109,6 +109,7 @@ export function OpenMediaMessages({
           blockedUserIds.includes(person.id),
         )}
         onBack={() => setSelectedId(undefined)}
+        focusOnOpen
         onSend={onSend}
         onSetBlocked={onSetBlocked}
         onReport={onReport}
@@ -149,25 +150,24 @@ export function OpenMediaMessages({
         {composing && compact ? (
           newMessagePanel
         ) : <>
-        <View style={styles.search}>
-          <Ionicons name="search" size={17} color={colors.textSecondary} />
-          <TextInput
-            accessibilityLabel="Search messages"
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Search people and messages"
-            placeholderTextColor={colors.textTertiary}
-            style={styles.searchInput}
-          />
-        </View>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           style={styles.filterBar}
           contentContainerStyle={styles.filters}
         >
-          {(["all", "direct", "groups", "favorites"] as PeopleFilter[]).map(
-            (filter) => (
+          {(["all", "unread", "direct", "groups", "favorites"] as const).map(
+            (filter) => filter === "unread" ? (
+              <Pressable
+                key="unread"
+                accessibilityRole="button"
+                accessibilityState={{ selected: unreadOnly }}
+                onPress={() => setUnreadOnly((value) => !value)}
+                style={[styles.chip, unreadOnly && styles.chipActive]}
+              >
+                <Text style={[styles.chipText, unreadOnly && styles.chipTextActive]}>Unread</Text>
+              </Pressable>
+            ) : (
               <Pressable
                 key={filter}
                 accessibilityRole="button"
@@ -247,6 +247,12 @@ export function OpenMediaMessages({
               </Pressable>
             ))}
           </ScrollView>
+        ) : unreadOnly && conversations.length ? (
+          <View style={styles.center}>
+            <Ionicons name="checkmark-done-outline" size={28} color={colors.textSecondary} />
+            <Text style={styles.emptyTitle}>You’re all caught up</Text>
+            <Text style={styles.statusText}>No unread messages or email.</Text>
+          </View>
         ) : (
           <View style={styles.center}>
             <Ionicons
@@ -289,6 +295,7 @@ export function OpenMediaMessages({
               blocked={selected.participants.some((person) =>
                 blockedUserIds.includes(person.id),
               )}
+              focusOnOpen={selected.id === selectedId}
               onSend={onSend}
               onSetBlocked={onSetBlocked}
               onReport={onReport}
@@ -393,6 +400,7 @@ function MessageThread({
   conversation,
   blocked,
   onBack,
+  focusOnOpen,
   onSend,
   onSetBlocked,
   onReport,
@@ -400,6 +408,8 @@ function MessageThread({
   conversation: Conversation;
   blocked: boolean;
   onBack?: () => void;
+  /** Put the cursor in the reply box when the conversation was chosen, so typing can start at once. */
+  focusOnOpen?: boolean;
   onSend: (conversationId: string, body: string, replyTo?: Message) => Promise<void>;
   onSetBlocked: (personId: string, blocked: boolean) => Promise<void>;
   onReport: (
@@ -442,6 +452,12 @@ function MessageThread({
     );
   const [replyTo, setReplyTo] = useState<Message>();
   const composerInput = useRef<TextInput>(null);
+  // Not on touch screens, where the keyboard would cover the conversation being opened.
+  useEffect(() => {
+    if (!focusOnOpen || !canSend || Platform.OS !== "web" || window.matchMedia?.("(pointer: coarse)").matches) return;
+    const timer = setTimeout(() => composerInput.current?.focus(), 0);
+    return () => clearTimeout(timer);
+  }, [focusOnOpen, canSend]);
   const startReply = (message: Message) => {
     setReplyTo(message);
     setTimeout(() => composerInput.current?.focus(), 0);
@@ -1444,27 +1460,6 @@ function createStyles(colors: ThemeColors) {
       fontWeight: "700",
       letterSpacing: 0.8,
     },
-    search: {
-      minHeight: 44,
-      marginHorizontal: 18,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8,
-      paddingHorizontal: 12,
-      borderRadius: 14,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.chrome,
-    },
-    searchInput: {
-      flex: 1,
-      minHeight: 42,
-      color: colors.text,
-      fontSize: 15,
-      letterSpacing: 0,
-      paddingVertical: 0,
-      outlineStyle: "none",
-    } as object,
     filterBar: { flexGrow: 0, flexShrink: 0 },
     filters: { paddingHorizontal: 18, paddingVertical: 10, gap: 7, alignItems: "center" },
     chip: {

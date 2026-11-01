@@ -154,15 +154,21 @@ export function rejectSuggestion(card: ContactCard, ref: IdentityRef, now = new 
   return { ...card, rejected: [...new Set([...card.rejected, refKey(ref)])], updatedAt: now };
 }
 
+/** The viewer's card for this identity: one it is linked to, else one that holds the same email or phone. */
 export function cardFor(cards: ContactCard[], ref: IdentityRef): ContactCard | undefined {
   const key = refKey(ref);
-  return cards.find((card) => card.links.some((link) => refKey(link.ref) === key));
+  const linked = cards.find((card) => card.links.some((link) => refKey(link.ref) === key));
+  if (linked || (ref.kind !== 'email' && ref.kind !== 'phone')) return linked;
+  return cards.find((card) => !card.rejected.includes(key) && (ref.kind === 'email'
+    ? card.emails.some((email) => normalizeEmail(email) === normalizeEmail(ref.address))
+    : card.phones.some((phone) => samePhone(phone, ref.number))));
 }
 
 /** All identities the viewer has linked to the same card as `ref` (including `ref`). */
 export function linkedIdentities(cards: ContactCard[], ref: IdentityRef): IdentityRef[] {
   const card = cardFor(cards, ref);
-  return card ? card.links.map((link) => link.ref) : [ref];
+  const refs = card ? card.links.map((link) => link.ref) : [];
+  return refs.some((item) => refKey(item) === refKey(ref)) ? refs : [ref, ...refs];
 }
 
 /**

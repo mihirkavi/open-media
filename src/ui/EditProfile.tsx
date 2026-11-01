@@ -4,6 +4,7 @@ import { ActivityIndicator, Image, Linking, Platform, Pressable, ScrollView, Sty
 
 import { loadMyProfileFields, loadProfessionalProfile, OpenMediaProfile, saveMyProfileFields, saveProfessionalProfile, saveProfileBasics } from '../data/openMediaService';
 import { loadPublicPerson, saveLinkedAccounts } from '../data/peopleService';
+import { AvatarChoice, findGravatar, pickAvatar, uploadAvatar } from '../data/avatarUpload';
 import { importFromLinkedInFiles, importFromWebsite, ImportResult } from '../data/profileImportService';
 import { applyProposals, ProfileProposal } from '../domain/profileImport';
 import { NetworkId } from '../domain/networkPosts';
@@ -60,6 +61,22 @@ export function EditProfile({ profile, onClose, onSaved }: { profile: OpenMediaP
   const [importing, setImporting] = useState<'linkedin' | 'website'>();
   const [importNote, setImportNote] = useState('');
   const scroll = useRef<ScrollView>(null);
+  // A picture chosen here, or the person's public Gravatar while they have no picture; uploaded on Save.
+  const [avatar, setAvatar] = useState<AvatarChoice>();
+  const [gravatar, setGravatar] = useState<AvatarChoice>();
+  useEffect(() => {
+    if (profile.avatarUrl) return;
+    let active = true;
+    findGravatar().then((found) => { if (active) setGravatar(found); }).catch(() => undefined);
+    return () => { active = false; };
+  }, [profile.avatarUrl]);
+  const chooseAvatar = async () => {
+    setMessage('');
+    try { const picked = await pickAvatar(); if (picked) setAvatar(picked); }
+    catch (reason) { setMessage(reason instanceof Error ? reason.message : 'That picture couldn’t be used. Try another one.'); }
+  };
+  const newAvatar = avatar ?? (profile.avatarUrl ? undefined : gravatar);
+  const shownAvatar = avatar?.previewUrl ?? profile.avatarUrl ?? gravatar?.previewUrl;
 
   useEffect(() => {
     let active = true;
@@ -134,13 +151,15 @@ export function EditProfile({ profile, onClose, onSaved }: { profile: OpenMediaP
         skills: list(skills), languages: list(languages),
       });
       const linked = openNetworks.flatMap((network) => networks[network.id]?.trim() ? [{ network: network.id, handle: networks[network.id].trim().replace(/^@/, '') }] : []);
+      const avatarUrl = newAvatar ? await uploadAvatar(newAvatar) : undefined;
       const [basics] = await Promise.all([
-        saveProfileBasics({ displayName: name, bio }),
+        saveProfileBasics({ displayName: name, bio, avatarUrl }),
         saveMyProfileFields(fields.filter((item) => item.value.trim())),
         saveProfessionalProfile(work),
         saveLinkedAccounts(linked),
       ]);
       onSaved({ ...basics, professional: work });
+      if (avatarUrl) { setAvatar(undefined); setGravatar(undefined); }
       setMessage('Saved. Your profile is up to date.');
     } catch (reason) {
       setMessage(reason instanceof Error ? reason.message : 'That didn’t save. Check the fields and try again.');
@@ -164,10 +183,14 @@ export function EditProfile({ profile, onClose, onSaved }: { profile: OpenMediaP
     {message ? <Text accessibilityLiveRegion="polite" style={styles.banner}>{message}</Text> : null}
     <ScrollView ref={scroll} style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
       <View style={styles.identity}>
-        {profile.avatarUrl ? <Image source={{ uri: profile.avatarUrl }} style={styles.avatar} accessibilityIgnoresInvertColors /> : <View style={styles.avatar}><Text style={styles.avatarText}>{shownName.charAt(0).toUpperCase()}</Text></View>}
+        <Pressable accessibilityRole="button" accessibilityLabel="Change your picture" onPress={chooseAvatar} style={({ pressed }) => pressed && styles.pressed}>
+          {shownAvatar ? <Image source={{ uri: shownAvatar }} style={styles.avatar} accessibilityIgnoresInvertColors /> : <View style={styles.avatar}><Text style={styles.avatarText}>{shownName.charAt(0).toUpperCase()}</Text></View>}
+          <View style={styles.avatarBadge}><Ionicons name="camera" size={14} color={colors.text} /></View>
+        </Pressable>
         <Text style={styles.identityName} numberOfLines={1}>{shownName}</Text>
         <Text style={styles.identityLine} numberOfLines={1}>{professional.headline?.trim() || `@${profile.handle}`}</Text>
         <Text style={styles.identityLinks}><Text accessibilityRole="link" onPress={() => open(address)} style={styles.link}>{address.replace('https://', '')}</Text>{'   ·   '}<Text accessibilityRole="link" onPress={() => open(`${address}/resume`)} style={styles.link}>Resume</Text></Text>
+        {newAvatar ? <Text style={styles.avatarNote}>{newAvatar.from === 'gravatar' ? 'Your Gravatar, used when you save. Tap it to choose a photo instead.' : 'New picture, used when you save.'}</Text> : null}
       </View>
 
       <View style={styles.importCard}>
@@ -372,6 +395,8 @@ function createStyles(colors: ThemeColors) {
     identity: { alignItems: 'center', paddingTop: 24, paddingBottom: 8 },
     avatar: { width: 76, height: 76, borderRadius: 38, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.text },
     avatarText: { color: colors.surface, fontSize: 28, fontWeight: '700' },
+    avatarBadge: { position: 'absolute', right: -2, bottom: -2, width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: colors.surface, backgroundColor: colors.chrome },
+    avatarNote: { marginTop: 8, color: colors.textTertiary, fontSize: 12 },
     identityName: { marginTop: 12, color: colors.text, fontSize: 21, fontWeight: '700', letterSpacing: -0.4 },
     identityLine: { marginTop: 3, color: colors.textSecondary, fontSize: 14 },
     identityLinks: { marginTop: 8, color: colors.textTertiary, fontSize: 13 },

@@ -4,6 +4,8 @@ import { ActivityIndicator, Platform, Pressable, StyleSheet, View } from 'react-
 
 import { loadPublicPerson, PublicPerson, saveLinkedAccounts } from '../data/peopleService';
 import { NetworkId, networks } from '../domain/networkPosts';
+import { ContactCard, IdentityRef } from '../domain/people';
+import { initialsFor } from '../domain/publicPosts';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { usePeople } from './people';
@@ -26,6 +28,8 @@ export function PeopleSettings({ handle }: { handle: string }) {
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState('');
   const [message, setMessage] = useState('');
+  const [showContacts, setShowContacts] = useState(false);
+  const sortedContacts = useMemo(() => [...(contacts?.cards ?? [])].sort((a, b) => a.name.localeCompare(b.name)), [contacts?.cards]);
 
   useEffect(() => {
     loadPublicPerson(handle).then((person) => setAccounts(person?.linkedAccounts ?? [])).catch(() => setAccounts([]));
@@ -89,19 +93,42 @@ export function PeopleSettings({ handle }: { handle: string }) {
       <Text style={styles.title}>Your contacts</Text>
       <Text style={styles.copy}>Only you can see your contacts. They are encrypted on the server and used to recognise people you already know. Links to accounts are made only on an exact email or phone match, and you can undo any of them from the person’s profile.</Text>
       <View style={styles.card}>
-        <View style={styles.row}>
+        <Pressable accessibilityRole="button" accessibilityState={{ expanded: showContacts }} disabled={!contacts.cards.length} onPress={() => setShowContacts((value) => !value)} style={styles.row}>
           <Ionicons name="lock-closed-outline" size={18} color={colors.text} />
           <Text style={[styles.rowText, styles.grow]}>{contacts.ready ? `${contacts.cards.length} saved ${contacts.cards.length === 1 ? 'contact' : 'contacts'}` : 'Loading…'}{contacts.suggestions.length ? <Text style={styles.rowMeta}> · {contacts.suggestions.length} to review</Text> : null}</Text>
           {Platform.OS !== 'web' ? <Pressable accessibilityRole="button" disabled={Boolean(busy)} onPress={importContacts} style={styles.small}>
             {busy === 'contacts' ? <ActivityIndicator color={colors.text} /> : <Text style={styles.smallText}>Import from this device</Text>}
           </Pressable> : null}
-        </View>
+          {contacts.cards.length ? <Ionicons name={showContacts ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textTertiary} /> : null}
+        </Pressable>
+        {showContacts ? sortedContacts.map((card) => <ContactRow key={card.id} card={card} onOpen={(target) => people?.open(target)} styles={styles} colors={colors} />) : null}
       </View>
       {Platform.OS === 'web' ? <Text style={styles.note}>Import contacts from the iPhone or Android app. You can also add someone from their profile.</Text> : null}
       {contacts.error ? <Text accessibilityRole="alert" style={styles.error}>{contacts.error}</Text> : null}
     </> : null}
     {message ? <Text accessibilityLiveRegion="polite" style={styles.note}>{message}</Text> : null}
   </>;
+}
+
+/** Where tapping a contact goes: their Open Media profile when linked, else their email or phone. */
+function contactTarget(card: ContactCard): { ref: IdentityRef; name: string } | undefined {
+  const linked = card.links.find((link) => link.ref.kind === 'open_media') ?? card.links[0];
+  const ref: IdentityRef | undefined = linked?.ref ?? (card.emails[0] ? { kind: 'email', address: card.emails[0] } : card.phones[0] ? { kind: 'phone', number: card.phones[0] } : undefined);
+  return ref ? { ref, name: card.name } : undefined;
+}
+
+function ContactRow({ card, onOpen, styles, colors }: { card: ContactCard; onOpen: (target: { ref: IdentityRef; name: string }) => void; styles: ReturnType<typeof createStyles>; colors: ThemeColors }) {
+  const target = contactTarget(card);
+  const onOpenMedia = card.links.some((link) => link.ref.kind === 'open_media');
+  const detail = [card.emails[0], card.phones[0]].filter(Boolean).join(' · ');
+  return <Pressable accessibilityRole={target ? 'link' : undefined} disabled={!target} onPress={() => target && onOpen(target)} style={({ pressed }) => [styles.row, styles.contactRow, pressed && styles.pressed]}>
+    <View style={styles.initials}><Text style={styles.initialsText}>{initialsFor(card.name || detail || '?')}</Text></View>
+    <View style={styles.grow}>
+      <Text numberOfLines={1} style={styles.contactName}>{card.name || detail}</Text>
+      {detail || onOpenMedia ? <Text numberOfLines={1} style={styles.rowMeta}>{[onOpenMedia ? 'On Open Media' : '', card.name ? detail : ''].filter(Boolean).join(' · ')}</Text> : null}
+    </View>
+    {target ? <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} /> : null}
+  </Pressable>;
 }
 
 function createStyles(colors: ThemeColors) {
@@ -115,6 +142,11 @@ function createStyles(colors: ThemeColors) {
     loading: { padding: 16 },
     row: { minHeight: 56, paddingHorizontal: 16, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 10 },
     divider: { borderBottomWidth: 1, borderBottomColor: colors.border },
+    contactRow: { minHeight: 60, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+    pressed: { opacity: 0.6 },
+    initials: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.chrome },
+    initialsText: { color: colors.text, fontSize: 12, fontWeight: '700' },
+    contactName: { color: colors.text, fontSize: 15, fontWeight: '600' },
     grow: { flex: 1 },
     rowText: { flex: 1, color: colors.text, fontSize: 15, fontWeight: '600' },
     rowMeta: { color: colors.textTertiary, fontWeight: '400' },

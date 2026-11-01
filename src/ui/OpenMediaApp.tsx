@@ -70,6 +70,7 @@ const primary: Array<{
 export type MessageMode = "open_media" | "matrix";
 
 const destinations: Destination[] = ["feed", "clips", "messages", "search", "profile", "settings"];
+const shortcutLabel = Platform.OS === "web" && typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘K" : "Ctrl K";
 
 /** On the web, the section lives in the address bar (#messages) so refresh and back keep your place. */
 function destinationFromURL(): Destination | undefined {
@@ -374,6 +375,23 @@ export function OpenMediaApp({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }), [openPerson, contacts, messageMode]);
 
+  // ⌘K (Ctrl+K elsewhere) opens universal search from anywhere on the web, as in most apps.
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    const onKey = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "k") return;
+      event.preventDefault();
+      setPerson(undefined);
+      navigate("search");
+      // Already on Search: put the cursor back in its field.
+      setTimeout(() => (document.querySelector('input[aria-label="Search everything"]') as HTMLInputElement | null)?.focus(), 50);
+    };
+    // Capture: text fields stop key events from reaching the window, and ⌘K must work while typing.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Create opens the writing box at the top of Feed; no pop-up.
   const startPost = () => {
     navigate("feed");
@@ -528,6 +546,7 @@ function DesktopRail({
       >
         <Ionicons name="search" size={16} color={colors.textSecondary} />
         <Text style={styles.railSearchText}>Search everything</Text>
+        {Platform.OS === "web" ? <Text style={styles.railShortcut}>{shortcutLabel}</Text> : null}
       </Pressable>
       <View style={styles.primary}>
         {primary.map((item) => (
@@ -756,7 +775,8 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.surfaceAlt,
     },
     railSearchActive: { borderColor: colors.text },
-    railSearchText: { color: colors.textTertiary, fontSize: 13 },
+    railSearchText: { flex: 1, color: colors.textTertiary, fontSize: 13 },
+    railShortcut: { color: colors.textTertiary, fontSize: 11, fontWeight: "600" },
     rail: {
       width: 218,
       padding: 16,

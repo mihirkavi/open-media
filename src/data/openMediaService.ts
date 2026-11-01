@@ -355,17 +355,18 @@ export async function saveMyProfileFields(values: ProfileFieldValue[]): Promise<
 }
 
 /** Name and bio, as they show at the top of the profile. */
-export async function saveProfileBasics(input: { displayName: string; bio: string }): Promise<OpenMediaProfile> {
+export async function saveProfileBasics(input: { displayName: string; bio: string; avatarUrl?: string }): Promise<OpenMediaProfile> {
   const displayName = input.displayName.trim();
   const bio = input.bio.trim();
   if (!displayName || displayName.length > 80) throw new Error("Enter your name (up to 80 characters).");
   if (bio.length > 240) throw new Error("Keep your bio under 240 characters.");
+  if (input.avatarUrl !== undefined && !/^https?:\/\//.test(input.avatarUrl)) throw new Error("That picture couldn’t be saved. Choose it again.");
   const client = requireClient();
   const { data: auth } = await client.auth.getUser();
   if (!auth.user) throw new Error("Sign in again to save your profile.");
   const { data, error } = await client
     .from("profiles")
-    .update({ display_name: displayName, bio, updated_at: new Date().toISOString() })
+    .update({ display_name: displayName, bio, ...(input.avatarUrl ? { avatar_url: input.avatarUrl } : {}), updated_at: new Date().toISOString() })
     .eq("id", auth.user.id)
     .select("id, handle, display_name, bio, avatar_url, professional")
     .single();

@@ -66,6 +66,13 @@ test('rejected suggestions stay rejected, and linked identities are found togeth
   assert.deepEqual(linkedIdentities([both], { kind: 'network', network: 'farcaster', handle: 'becca' }).map(refKey), ['open_media:rsmith', 'network:farcaster:becca']);
 });
 
+test('a saved email or phone finds its card before any link is made', () => {
+  const saved = card({ emails: ['Rebecca@Example.com'], phones: ['+1 415 555 0102'] });
+  assert.equal(cardFor([saved], { kind: 'email', address: 'rebecca@example.com' })?.id, 'c1');
+  assert.equal(cardFor([saved], { kind: 'phone', number: '(415) 555-0102' })?.id, 'c1');
+  assert.equal(cardFor([rejectSuggestion(saved, { kind: 'email', address: 'rebecca@example.com' }, now)], { kind: 'email', address: 'rebecca@example.com' }), undefined);
+});
+
 test('re-importing device contacts updates cards in place and keeps the viewer’s links and notes', () => {
   const existing = confirmLink(card({ notes: 'Met at the conference' }), { kind: 'open_media', handle: 'rsmith' }, now);
   const updated = importDeviceContacts([existing], [{ id: 'd1', fullName: 'Rebecca S', phones: [{ id: 'p', value: '+1 555 000 9999' }], emails: [] }], () => 'new', now);
