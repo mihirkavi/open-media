@@ -1,29 +1,21 @@
 import { forwardRef } from 'react';
 import { Platform, StyleSheet, Text as NativeText, TextInput as NativeTextInput, TextInputProps, TextProps, TextStyle } from 'react-native';
 
-import { geistTracking } from './typeMetrics';
+import { sfTracking } from './typeMetrics';
 
 /**
- * Open Media's type: Geist for everything people read and type, Instrument Serif for the few
- * editorial headlines on the landing and mission pages. Each weight is its own font file, so the
- * wrappers below turn `fontWeight` into the matching family instead of letting the platform fake
- * a bold. They also apply Geist's tracking: reading sizes keep the drawn spacing and large titles
- * close up slightly.
+ * Open Media's type: the device's own interface font for everything people read and type, and
+ * Instrument Serif for the few editorial headlines on the landing and mission pages. On iPhone,
+ * iPad and Mac that is SF Pro, the font apple.com uses; Android shows Roboto and Windows Segoe UI.
+ * System fonts carry every weight, so `fontWeight` is passed straight through. On the web the
+ * wrappers also apply apple.com's tracking; iOS applies SF's own tracking by itself.
  */
-export const uiFamilies: Record<string, string> = {
-  '400': 'Geist_400Regular',
-  '500': 'Geist_500Medium',
-  '600': 'Geist_600SemiBold',
-  '700': 'Geist_700Bold',
-  // 800 is drawn as Bold: ExtraBold reads as shouting in a black-and-white interface.
-  '800': 'Geist_700Bold',
-};
+export const uiFontStack = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 
 export const serifFamily = 'InstrumentSerif_400Regular';
 export const serifItalicFamily = 'InstrumentSerif_400Regular_Italic';
 
-/** On the web an unloaded font must still fall back to a sans-serif, never to Times. */
-const webFallback = ', Geist, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+/** On the web an unloaded font must still fall back to a serif that isn't Times. */
 const webSerifFallback = ', "Iowan Old Style", Georgia, serif';
 
 export function uiTextStyle(style: TextProps['style']): TextStyle {
@@ -39,11 +31,11 @@ export function uiTextStyle(style: TextProps['style']): TextStyle {
   }
   // Monospace and any other explicit family are left as they are.
   if (flat.fontFamily) return out;
-  const weight = String(flat.fontWeight ?? '400').replace('normal', '400').replace('bold', '700');
-  const family = uiFamilies[weight] ?? (Number(weight) > 700 ? uiFamilies['800'] : Number(weight) < 500 ? uiFamilies['400'] : uiFamilies['600']);
-  out.fontFamily = Platform.OS === 'web' ? family + webFallback : family;
-  delete out.fontWeight;
-  if (flat.letterSpacing === undefined) out.letterSpacing = Math.round(size * geistTracking(size) * 100) / 100;
+  // 800 is drawn as Bold: ExtraBold reads as shouting in a black-and-white interface.
+  if (flat.fontWeight === '800' || flat.fontWeight === '900') out.fontWeight = '700';
+  if (Platform.OS !== 'web') return out;
+  out.fontFamily = uiFontStack;
+  if (flat.letterSpacing === undefined) out.letterSpacing = Math.round(size * sfTracking(size) * 100) / 100;
   return out;
 }
 

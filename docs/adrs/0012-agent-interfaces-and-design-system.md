@@ -31,8 +31,8 @@ Chosen over: a separate agent service (duplicated logic), and OAuth for account 
 
 ### Typography and details
 
-- Geist for everything people read and type (Inter until 2026-10-31; Geist reads crisper and less generic at the same sizes), Instrument Serif for the few editorial headlines on the landing and mission pages. Both are open-licensed and bundled with the app (`@expo-google-fonts`).
-- `src/ui/Text.tsx` maps each weight to its own font file (no faux bold) and applies Geist's tracking, so large titles sit slightly tighter and reading sizes keep their drawn spacing. ExtraBold is drawn as Bold for a calmer hierarchy.
+- The device's own interface font for everything people read and type: SF Pro on iPhone, iPad and Mac (what apple.com uses), Roboto on Android, Segoe UI on Windows. It replaced Inter on 2026-10-31. Instrument Serif for the few editorial headlines on the landing and mission pages. The serif is open-licensed and bundled with the app (`@expo-google-fonts`); the interface font needs no download.
+- `src/ui/Text.tsx` passes weights straight to the system font (every weight is real, no faux bold) and, on the web, applies apple.com's SF Pro tracking; iOS applies it by itself. ExtraBold is drawn as Bold for a calmer hierarchy.
 - The splash screen waits for the fonts, so text never flashes in a fallback face.
 - The logo is a transparent mark drawn dark on light and light on dark everywhere, including the launch screen.
 

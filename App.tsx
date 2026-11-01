@@ -1,5 +1,4 @@
-import { Geist_400Regular, Geist_500Medium, Geist_600SemiBold, Geist_700Bold, useFonts } from '@expo-google-fonts/geist';
-import { InstrumentSerif_400Regular, InstrumentSerif_400Regular_Italic } from '@expo-google-fonts/instrument-serif';
+import { InstrumentSerif_400Regular, InstrumentSerif_400Regular_Italic, useFonts } from '@expo-google-fonts/instrument-serif';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
@@ -19,10 +18,10 @@ function ThemedApp() {
 }
 
 export default function App() {
-  // Geist for the interface, Instrument Serif for editorial headlines (src/ui/Text.tsx).
+  // The device's own font (SF Pro on Apple devices) for the interface, and Instrument Serif for
+  // editorial headlines (src/ui/Text.tsx). Only the serif needs loading.
   // If a font fails to load, the app still opens with the platform's own fonts.
   const [loaded, error] = useFonts({
-    Geist_400Regular, Geist_500Medium, Geist_600SemiBold, Geist_700Bold,
     InstrumentSerif_400Regular, InstrumentSerif_400Regular_Italic,
   });
   useEffect(() => {

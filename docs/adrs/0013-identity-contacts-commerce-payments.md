@@ -14,7 +14,7 @@ The rule for every decision below: **add capabilities, not complexity.** Feed, C
 | Area | What exists | State |
 | --- | --- | --- |
 | Navigation | Feed, Clips, Messages; Search, Create, Profile, Settings as utilities; web landing, mission and developer pages | Implemented |
-| Design system | Black-and-white tokens (`src/theme.ts`), Geist + Instrument Serif through `src/ui/Text.tsx`, light/dark/system | Implemented |
+| Design system | Black-and-white tokens (`src/theme.ts`), system font (SF Pro on Apple devices) + Instrument Serif through `src/ui/Text.tsx`, light/dark/system | Implemented |
 | Posts | `public.posts` (text, one optional video), canonical `SocialPost` shared by Feed and Clips, Raw/Relevant with "Why this?" | Implemented |
 | External networks | Farcaster, Lens, Hive, DeSo read in Feed/Clips/Search; cross-posting signed on device | Implemented (cross-posting untested live) |
 | Profiles | `public.profiles` (handle, display_name, bio, avatar). **Any signed-in user can read every profile row** (`using (true)`); public API exposes handle/name/bio/avatar/joined/post count | Implemented, **no visibility control** |
