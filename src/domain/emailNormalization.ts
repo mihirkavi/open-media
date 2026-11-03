@@ -94,7 +94,7 @@ export function normalizeStoredEmail(messages: StoredMailMessage[], { iconServic
       id: conversationId,
       participants, sourceSummary: [source], lastMessageAt: latest.sentAt,
       ...(people.length ? { groupTitle: groupTitle(participants) } : {}),
-      preview: latestAuthor ? `${latestAuthor}: ${latestText}` : latestText, unreadCount: 0, labels: [],
+      preview: latestAuthor ? `${latestAuthor}: ${latestText}` : latestText, unreadCount: inboundItems.filter((item) => item.unread).length, labels: [],
       email: {
         accountId: replyTarget.accountId, accountEmail: replyTarget.accountEmail, address: replyTarget.address, latestSubject: replyTarget.subject, latestMessageId: replyTarget.sourceMessageId,
         ...(people.length ? { recipients: people } : {}),
@@ -116,6 +116,21 @@ export function normalizeStoredEmail(messages: StoredMailMessage[], { iconServic
       })),
     };
   });
+}
+
+/** Unread mail in a conversation's email channels, by mailbox, for marking it read when opened (ADR 0026). */
+export function unreadMailIn(conversation: Conversation, stored: StoredMailMessage[]): Map<string, string[]> {
+  const unread = new Set(stored.filter((message) => message.unread).map((message) => `${message.accountId}:${message.sourceMessageId}`));
+  const byAccount = new Map<string, string[]>();
+  for (const channel of conversation.channels ?? [conversation]) {
+    if (!channel.email) continue;
+    for (const message of channel.messages) {
+      const accountId = message.emailContext?.accountId;
+      if (message.direction !== 'inbound' || !accountId || !unread.has(`${accountId}:${message.sourceMessageId}`)) continue;
+      byAccount.set(accountId, [...(byAccount.get(accountId) ?? []), message.sourceMessageId]);
+    }
+  }
+  return byAccount;
 }
 
 /** The conversation an email to these addresses lands in, so a new message can open it. */

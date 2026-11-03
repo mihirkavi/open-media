@@ -44,6 +44,8 @@ export interface StoredMailMessage extends SyncedMailMessage {
   attachments?: Array<{ filename: string; contentType: string; size: number; storagePath?: string; inline: boolean }>;
   /** Message-ID this email replies to. */
   inReplyTo?: string;
+  /** Inbound mail not read yet (not \Seen on the mail server, and not opened here). */
+  unread?: boolean;
 }
 
 export interface OutgoingMail {
@@ -78,10 +80,17 @@ export async function syncMailAccount(accountId: string): Promise<SyncedMailMess
  * One live sync: answers as soon as new mail arrives, or empty after about 40 seconds. Pass back
  * the `cursor` from the last answer, so the service skips folders that haven't changed (ADR 0025).
  */
-export async function followMailAccount(accountId: string, { cursor, signal }: { cursor?: string; signal?: AbortSignal } = {}): Promise<{ messages: SyncedMailMessage[]; cursor?: string }> {
+export async function followMailAccount(accountId: string, { cursor, signal }: { cursor?: string; signal?: AbortSignal } = {}): Promise<{ messages: SyncedMailMessage[]; cursor?: string; readChanged: boolean }> {
   const query = `?wait=1${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
-  const payload = await request<{ messages?: SyncedMailMessage[]; cursor?: string }>(`/v1/mail-accounts/${encodeURIComponent(accountId)}/sync${query}`, { method: 'POST', signal }, 'Mailbox sync failed.');
-  return { messages: payload.messages ?? [], cursor: typeof payload.cursor === 'string' ? payload.cursor : undefined };
+  const payload = await request<{ messages?: SyncedMailMessage[]; cursor?: string; readChanged?: boolean }>(`/v1/mail-accounts/${encodeURIComponent(accountId)}/sync${query}`, { method: 'POST', signal }, 'Mailbox sync failed.');
+  return { messages: payload.messages ?? [], cursor: typeof payload.cursor === 'string' ? payload.cursor : undefined, readChanged: payload.readChanged === true };
+}
+
+/** Marks mail read here and, for IMAP, on the mail server (ADR 0026). */
+export async function markMailSeen(accountId: string, sourceMessageIds: string[]): Promise<void> {
+  for (let start = 0; start < sourceMessageIds.length; start += 100) {
+    await request(`/v1/mail-accounts/${encodeURIComponent(accountId)}/seen`, { method: 'POST', body: { messageIds: sourceMessageIds.slice(start, start + 100) } }, 'Could not mark mail read.');
+  }
 }
 
 export async function sendMail(accountId: string, mail: OutgoingMail): Promise<SyncedMailMessage> {
@@ -93,9 +102,14 @@ export async function sendMail(accountId: string, mail: OutgoingMail): Promise<S
 export async function listStoredMail(limit = 500): Promise<StoredMailMessage[]> {
   const client = getSupabaseClient();
   if (!client) return [];
-  const { data, error } = await client.rpc('open_media_list_mail_messages', { p_limit: limit });
+  const [{ data, error }, unseen] = await Promise.all([
+    client.rpc('open_media_list_mail_messages', { p_limit: limit }),
+    // Read state (ADR 0026); without it, all mail counts as read.
+    Promise.resolve(client.rpc('open_media_unseen_mail')).then(({ data: rows }) => new Set(((rows ?? []) as Array<{ account_id: string; source_message_id: string }>).map((row) => `${row.account_id}:${row.source_message_id}`)), () => new Set<string>()),
+  ]);
   if (error) throw error;
   return ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
+    ...(unseen.has(`${row.account_id}:${row.source_message_id}`) ? { unread: true } : {}),
     accountId: String(row.account_id),
     accountEmail: String(row.account_email),
     sourceMessageId: String(row.source_message_id),

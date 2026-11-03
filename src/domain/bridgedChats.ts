@@ -9,7 +9,10 @@ export interface BridgeRoomSnapshot {
   network: string;
   name: string;
   members: { id: string; displayName: string }[];
-  events: { id: string; sender: string; body: string; timestamp: number }[];
+  /** On your own messages: when every other member received and read them, as the bridge reports. */
+  events: { id: string; sender: string; body: string; timestamp: number; deliveredAt?: number; readAt?: number }[];
+  /** Messages from others after where you last read. */
+  unread?: number;
 }
 
 export interface BridgeSnapshot {
@@ -49,6 +52,8 @@ export function mapBridgeSnapshot(snapshot: BridgeSnapshot): Conversation[] {
           channel: 'native',
           direction: outbound ? 'outbound' : 'inbound',
           deliveryState: outbound ? 'sent' : 'received',
+          ...(outbound && event.deliveredAt ? { deliveredAt: new Date(event.deliveredAt).toISOString() } : {}),
+          ...(outbound && event.readAt ? { readAt: new Date(event.readAt).toISOString() } : {}),
         };
       });
     const latest = messages[messages.length - 1];
@@ -60,7 +65,7 @@ export function mapBridgeSnapshot(snapshot: BridgeSnapshot): Conversation[] {
       sourceSummary: [source],
       lastMessageAt: latest?.sentAt ?? new Date(0).toISOString(),
       preview: latest?.body ?? `${label} chat connected.`,
-      unreadCount: 0,
+      unreadCount: Math.max(0, Math.floor(room.unread ?? 0)),
       groupTitle: group ? room.name : undefined,
       labels: group ? [label, 'Group'] : [label],
     } satisfies Conversation];

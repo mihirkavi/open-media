@@ -68,7 +68,10 @@ export interface BridgeRoomSnapshot {
   network: string;
   name: string;
   members: { id: string; displayName: string }[];
-  events: { id: string; sender: string; body: string; timestamp: number }[];
+  /** Your own messages carry when every other member's app received them and read them (ADR 0026). */
+  events: { id: string; sender: string; body: string; timestamp: number; deliveredAt?: number; readAt?: number }[];
+  /** Messages from others after where you last read. */
+  unread: number;
 }
 
 const idPattern = /^[A-Za-z0-9._:=-]{1,255}$/;
@@ -169,7 +172,10 @@ export class Bridges {
     const filter = {
       presence: { not_types: ['*'] },
       account_data: { not_types: ['*'] },
-      room: { timeline: { limit: 30 }, ephemeral: { not_types: ['*'] }, account_data: { not_types: ['*'] } },
+      // Synapse answers an identical sync from its response cache, which kept new messages and
+      // receipts out of view for minutes. An event type that never exists, changing every 15 s,
+      // keeps answers at most that old without recomputing every poll.
+      room: { timeline: { limit: 30, not_types: [`org.openmedia.fresh.${Math.floor(Date.now() / 15_000)}`] }, ephemeral: { types: ['m.receipt'] }, account_data: { not_types: ['*'] } },
     };
     const sync = await this.matrix('GET', `/_matrix/client/v3/sync?timeout=0&filter=${encodeURIComponent(JSON.stringify(filter))}`) as SyncResponse;
     // New chats from a bridge are joined automatically, in case the bridge couldn't join for us.
@@ -181,8 +187,19 @@ export class Bridges {
     return { userId: this.mxid, rooms };
   }
 
+  /**
+   * Reads a chat up to this message (ADR 0026). With read receipts shared, the bridge passes the
+   * receipt on to WhatsApp, Signal and the rest; otherwise a private receipt only clears the unread
+   * count here and tells no one.
+   */
+  async markRead(roomId: string, eventId: unknown, share: boolean): Promise<void> {
+    if (!roomPattern.test(roomId) || typeof eventId !== 'string' || !/^\$[A-Za-z0-9._~+/=:-]{1,255}$/.test(eventId)) throw new UserFacingError('Chat not found.');
+    const type = share ? 'm.read' : 'm.read.private';
+    await this.matrix('POST', `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/receipt/${type}/${encodeURIComponent(eventId)}`, {});
+  }
+
   async send(roomId: string, body: unknown): Promise<void> {
-    if (!/^![A-Za-z0-9._=-]+:[A-Za-z0-9.:-]+$/.test(roomId)) throw new UserFacingError('Chat not found.');
+    if (!roomPattern.test(roomId)) throw new UserFacingError('Chat not found.');
     const text = typeof body === 'string' ? body.trim() : '';
     if (!text) throw new UserFacingError('Write a message first.');
     if (text.length > 8000) throw new UserFacingError('Messages can be up to 8,000 characters.');
@@ -208,11 +225,43 @@ export class Bridges {
     const name = typeof state.findLast((event) => event.type === 'm.room.name')?.content?.name === 'string'
       ? String(state.findLast((event) => event.type === 'm.room.name')?.content?.name)
       : others.map(([, displayName]) => displayName).join(', ');
-    const events = (room.timeline?.events ?? [])
-      .filter((event) => event.type === 'm.room.message' && event.event_id && event.sender)
-      .map((event) => ({ id: event.event_id!, sender: event.sender!, body: messageText(event.content ?? {}), timestamp: event.origin_server_ts ?? 0 }))
-      .filter((event) => event.body);
-    return { id: roomId, network, name, members: others.map(([id, displayName]) => ({ id, displayName })), events };
+    const timeline = room.timeline?.events ?? [];
+    const receipts = readReceipts(room);
+    const position = (eventId?: string) => (eventId ? timeline.findIndex((event) => event.event_id === eventId) : -1);
+    // Delivery from the bridge's message status events, when it sends them.
+    const delivered = new Map<string, number>();
+    for (const event of timeline) {
+      const target = (event.content?.['m.relates_to'] as { event_id?: string } | undefined)?.event_id;
+      const to = event.content?.delivered_to_users;
+      if (event.type === 'com.beeper.message_send_status' && target && Array.isArray(to) && to.length) delivered.set(target, event.origin_server_ts ?? 0);
+    }
+    // A message is read once every other member's read receipt is at or past it.
+    const readers = others.map(([id]) => receipts.get(id));
+    const readUpTo = readers.every(Boolean) && readers.length ? Math.min(...readers.map((receipt) => position(receipt!.eventId))) : -1;
+    const readAt = readers.length && readers.every(Boolean) ? Math.min(...readers.map((receipt) => receipt!.ts)) : undefined;
+    const events = timeline.flatMap((event, index) => {
+      if (event.type !== 'm.room.message' || !event.event_id || !event.sender) return [];
+      const body = messageText(event.content ?? {});
+      if (!body) return [];
+      const item: BridgeRoomSnapshot['events'][number] = { id: event.event_id, sender: event.sender, body, timestamp: event.origin_server_ts ?? 0 };
+      if (event.sender === this.mxid) {
+        const read = index <= readUpTo && readAt !== undefined ? Math.max(readAt, item.timestamp) : undefined;
+        const deliveredAt = read ?? delivered.get(event.event_id);
+        if (deliveredAt !== undefined) item.deliveredAt = deliveredAt;
+        if (read !== undefined) item.readAt = read;
+      }
+      return [item];
+    });
+    // Unread: messages from others after your own receipt or your latest message, whichever is later.
+    const own = receipts.get(this.mxid);
+    const ownAt = position(own?.eventId);
+    const lastSent = timeline.findLastIndex((event) => event.type === 'm.room.message' && event.sender === this.mxid);
+    const since = Math.max(ownAt, lastSent);
+    const after = timeline.filter((event, index) => index > since && event.type === 'm.room.message' && event.sender !== this.mxid && event.event_id && messageText(event.content ?? {})).length;
+    // Nothing of yours among these 30 events: the server's own count, from your receipts, caps it.
+    const counted = room.unread_notifications?.notification_count;
+    const unread = since < 0 && typeof counted === 'number' ? Math.min(counted, after) : after;
+    return { id: roomId, network, name, members: others.map(([id, displayName]) => ({ id, displayName })), events, unread };
   }
 
   private networkOfUser(userId: string): string | undefined {
@@ -264,7 +313,37 @@ export class Bridges {
 }
 
 type MatrixEvent = { type: string; state_key?: string; sender?: string; event_id?: string; origin_server_ts?: number; content?: Record<string, unknown> };
-type JoinedRoom = { state?: { events?: MatrixEvent[] }; timeline?: { events?: MatrixEvent[] } };
+type JoinedRoom = { state?: { events?: MatrixEvent[] }; timeline?: { events?: MatrixEvent[] }; ephemeral?: { events?: MatrixEvent[] }; unread_notifications?: { notification_count?: number } };
+
+// Room version 12 ids are a bare hash (`!abc…`); older ones end in the server name (`!abc:server`).
+const roomPattern = /^![A-Za-z0-9._=+/-]{1,255}(:[A-Za-z0-9.:-]+)?$/;
+
+/**
+ * Each member's latest read receipt in the main timeline: public `m.read`, plus your own private
+ * `m.read.private` (the homeserver only ever shows you your own).
+ */
+function readReceipts(room: JoinedRoom): Map<string, { eventId: string; ts: number }> {
+  const latest = new Map<string, { eventId: string; ts: number }>();
+  for (const event of room.ephemeral?.events ?? []) {
+    if (event.type !== 'm.receipt') continue;
+    for (const [eventId, kinds] of Object.entries(event.content ?? {})) {
+      for (const kind of ['m.read', 'm.read.private']) {
+        const users = (kinds as Record<string, Record<string, { ts?: number; thread_id?: string }>> | undefined)?.[kind] ?? {};
+        for (const [userId, receipt] of Object.entries(users)) {
+          if (receipt?.thread_id && receipt.thread_id !== 'main') continue;
+          const ts = typeof receipt?.ts === 'number' ? receipt.ts : 0;
+          if ((latest.get(userId)?.ts ?? -1) < ts) latest.set(userId, { eventId, ts });
+        }
+      }
+    }
+  }
+  return latest;
+}
+
+/** For someone who doesn't share read receipts: others' read times are hidden too (delivery stays). */
+export function withoutReadTimes<T extends { rooms: BridgeRoomSnapshot[] }>(snapshot: T): T {
+  return { ...snapshot, rooms: snapshot.rooms.map((room) => ({ ...room, events: room.events.map(({ readAt: _readAt, ...event }) => event) })) };
+}
 type SyncResponse = { rooms?: { join?: Record<string, JoinedRoom>; invite?: Record<string, { invite_state?: { events?: MatrixEvent[] } }> } };
 
 export function networkOfProtocol(protocol: string | undefined): string | undefined {

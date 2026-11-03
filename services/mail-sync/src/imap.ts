@@ -103,7 +103,14 @@ export interface SyncOptions {
   cursor?: ImapCursor;
   /** Called once the whole sync has finished, with where it left each folder. */
   onCursor?: (cursor: ImapCursor) => void;
+  /**
+   * Called after INBOX is read, with the read (\Seen) and unread Message-IDs of the newest messages,
+   * after any new ones are saved, so read state set in other mail apps reaches Open Media (ADR 0026).
+   */
+  onSeen?: OnSeen;
 }
+
+export type OnSeen = (state: { seen: string[]; unseen: string[] }) => Promise<void>;
 
 /** A save failure: unlike a dropped connection, it must not be reported as a partial sync. */
 class SaveFailed {
@@ -128,7 +135,7 @@ class SaveFailed {
  * haven't changed is not read at all, so a live sync that finds nothing costs one sign-in and a few
  * short commands before it waits.
  */
-export async function syncImap(input: MailAccountInput, { limits = syncLimits, save, known, waitMs, cursor, onCursor }: SyncOptions = {}): Promise<SyncedMessage[]> {
+export async function syncImap(input: MailAccountInput, { limits = syncLimits, save, known, waitMs, cursor, onCursor, onSeen }: SyncOptions = {}): Promise<SyncedMessage[]> {
   const client = clientFor(input);
   const messages: SyncedMessage[] = [];
   const started = Date.now();
@@ -140,7 +147,7 @@ export async function syncImap(input: MailAccountInput, { limits = syncLimits, s
     const sent = folders.find((folder) => folder.specialUse === '\\Sent')?.path;
     const reached: ImapCursor = {};
     stage = 'INBOX';
-    reached.inbox = await fetchRecent(client, 'INBOX', 'INBOX', limits.INBOX, messages, save, known, cursor?.inbox);
+    reached.inbox = await fetchRecent(client, 'INBOX', 'INBOX', limits.INBOX, messages, save, known, cursor?.inbox, onSeen);
     if (sent) {
       stage = 'Sent';
       reached.sent = await fetchRecent(client, sent, 'Sent', limits.Sent, messages, save, known, cursor?.sent);
@@ -150,9 +157,10 @@ export async function syncImap(input: MailAccountInput, { limits = syncLimits, s
       const opened = await client.mailboxOpen('INBOX', { readOnly: true });
       // Mail that arrived after INBOX was read but before IDLE began is fetched now, not after the wait.
       const missed = Boolean(reached.inbox && opened.uidNext && opened.uidNext > reached.inbox.next);
-      if (missed || await newMailIn(client, opened.exists, waitMs)) {
+      // Mail read or marked unread in another app also ends the wait, so its read state is updated.
+      if (missed || await changeIn(client, opened.exists, waitMs)) {
         stage = 'INBOX';
-        reached.inbox = await fetchRecent(client, 'INBOX', 'INBOX', limits.INBOX, messages, save, known);
+        reached.inbox = await fetchRecent(client, 'INBOX', 'INBOX', limits.INBOX, messages, save, known, undefined, onSeen);
       }
     }
     logSync('done', started, messages.length);
@@ -167,25 +175,29 @@ export async function syncImap(input: MailAccountInput, { limits = syncLimits, s
 }
 
 /**
- * Waits in IDLE until the open mailbox grows past `exists`, or `ms` pass, or the connection closes.
- * Deleted mail lowers the count first, so a new message after a deletion still counts as new.
+ * Waits in IDLE until the open mailbox grows past `exists` or a message's flags change, or `ms`
+ * pass, or the connection closes. Deleted mail lowers the count first, so a new message after a
+ * deletion still counts as new.
  */
-function newMailIn(client: ImapFlow, exists: number, ms: number): Promise<boolean> {
+function changeIn(client: ImapFlow, exists: number, ms: number): Promise<boolean> {
   return new Promise((resolve) => {
     let count = exists;
-    const finish = (arrived: boolean) => {
+    const finish = (changed: boolean) => {
       clearTimeout(timer);
       client.off('exists', onExists);
       client.off('expunge', onExpunge);
+      client.off('flags', onFlags);
       client.off('close', onClose);
-      resolve(arrived);
+      resolve(changed);
     };
     const onExists = (update: { count: number }) => { if (update.count > count) finish(true); };
     const onExpunge = () => { count = Math.max(0, count - 1); };
+    const onFlags = () => finish(true);
     const onClose = () => finish(false);
     const timer = setTimeout(() => finish(false), ms);
     client.on('exists', onExists);
     client.on('expunge', onExpunge);
+    client.on('flags', onFlags);
     client.on('close', onClose);
     client.idle().catch(() => finish(false));
   });
@@ -198,7 +210,7 @@ function logSync(stage: string, started: number, count: number, error?: unknown)
 }
 
 /** Reads one folder's new mail and returns where it now stands (undefined when the server gives no UIDNEXT). */
-async function fetchRecent(client: ImapFlow, path: string, mailbox: string, limit: number, into: SyncedMessage[], save?: SaveBatch, known?: SyncOptions['known'], since?: FolderMark): Promise<FolderMark | undefined> {
+async function fetchRecent(client: ImapFlow, path: string, mailbox: string, limit: number, into: SyncedMessage[], save?: SaveBatch, known?: SyncOptions['known'], since?: FolderMark, onSeen?: OnSeen): Promise<FolderMark | undefined> {
   const opened = await client.mailboxOpen(path, { readOnly: true });
   const mark = opened.uidNext && opened.uidValidity !== undefined ? { validity: String(opened.uidValidity), next: opened.uidNext } : undefined;
   // Nothing was added since the last sync: no UID at or past the old UIDNEXT exists yet.
@@ -207,7 +219,7 @@ async function fetchRecent(client: ImapFlow, path: string, mailbox: string, limi
   const first = Math.max(1, opened.exists - limit + 1);
   // Headers and sizes first. They are small, so the stream never waits on our work.
   const fetched: FetchMessageObject[] = [];
-  for await (const item of client.fetch(`${first}:*`, { uid: true, envelope: true, internalDate: true, size: true })) fetched.push(item);
+  for await (const item of client.fetch(`${first}:*`, { uid: true, envelope: true, internalDate: true, size: true, flags: Boolean(onSeen) })) fetched.push(item);
   const stored = known ? await known(fetched.map((item) => messageIdOf(item, mailbox))) : new Map<string, StoredPeople>();
   // New mail, plus mail saved before names and Cc were kept: downloading it again adds them and
   // re-checks the verified badge. Newest first, so a sync cut short keeps recent mail.
@@ -231,7 +243,37 @@ async function fetchRecent(client: ImapFlow, path: string, mailbox: string, limi
     }
     into.push(...parsed);
   }
+  if (onSeen && fetched.length) {
+    const ids = (seen: boolean) => fetched.filter((item) => Boolean(item.flags?.has('\\Seen')) === seen).map((item) => messageIdOf(item, mailbox));
+    await onSeen({ seen: ids(true), unseen: ids(false) }).catch(() => undefined);
+  }
   return mark;
+}
+
+/**
+ * Marks these INBOX messages read (\Seen) on the mail server, as opening them in any mail app
+ * would (ADR 0026). Messages are found by Message-ID; ones stored without one by their UID.
+ * Returns how many were found.
+ */
+export async function markSeenImap(input: MailAccountInput, sourceMessageIds: string[]): Promise<number> {
+  const client = clientFor(input);
+  try {
+    await client.connect();
+    await client.mailboxOpen('INBOX');
+    const uids = sourceMessageIds.map((id) => id.match(/^imap-INBOX-(\d+)$/)?.[1]).filter((uid): uid is string => Boolean(uid));
+    const headers = sourceMessageIds.filter((id) => !/^imap-/.test(id));
+    const found = new Set<number>();
+    for (let start = 0; start < headers.length; start += 25) {
+      const terms = headers.slice(start, start + 25).map((id) => ({ header: { 'message-id': id } }));
+      const result = await client.search(terms.length === 1 ? terms[0] : { or: terms }, { uid: true });
+      for (const uid of result || []) found.add(uid);
+    }
+    for (const uid of uids) found.add(Number(uid));
+    if (found.size) await client.messageFlagsAdd([...found].join(','), ['\\Seen'], { uid: true });
+    return found.size;
+  } catch (error) {
+    throw new UserFacingError(describeMailError(error, input, 'IMAP'));
+  } finally { await logoutQuietly(client); }
 }
 
 /** Groups messages so each download stays under both the count and the byte budget. */

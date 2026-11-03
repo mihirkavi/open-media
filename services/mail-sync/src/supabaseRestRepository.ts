@@ -97,6 +97,28 @@ export class SupabaseRestRepository {
     }
   }
 
+  /**
+   * Records which inbound messages are read on the mail server (ADR 0026). Resolves with how many
+   * stored messages changed; 0 when the database doesn't keep read state yet.
+   */
+  async setSeen(accountId: string, seen: string[], unseen: string[] = []): Promise<number> {
+    if (!seen.length && !unseen.length) return 0;
+    try {
+      return Number(await this.rpc<number>('open_media_set_mail_seen', { p_account_id: accountId, p_seen: seen.slice(0, 500), p_unseen: unseen.slice(0, 500) })) || 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  /** Whether the person shares read receipts (ADR 0026). Off if the setting can't be read, so nothing is disclosed by mistake. */
+  async shareReadReceipts(): Promise<boolean> {
+    try {
+      return (await this.rpc<{ shareReadReceipts?: boolean } | null>('open_media_message_settings', {}))?.shareReadReceipts !== false;
+    } catch {
+      return false;
+    }
+  }
+
   async saveMessages(userId: string, accountId: string, messages: SyncedMessage[]): Promise<void> {
     const stored = new Set(messages.some((message) => message.attachments?.length)
       ? await this.rpc<string[]>('open_media_mail_messages_with_attachments', { p_account_id: accountId })

@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { StoredMailMessage } from '../connectors/mailApiConnector';
-import { correspondentKey, emailConversationId, normalizeStoredEmail, subjectFromBody } from './emailNormalization';
+import { correspondentKey, emailConversationId, normalizeStoredEmail, subjectFromBody, unreadMailIn } from './emailNormalization';
+import { receiptOf } from './receipts';
 
 const base = { accountId: 'acct-1', accountEmail: 'me@gmail.com', mailbox: 'INBOX', to: ['me@gmail.com'] };
 const mail = (overrides: Partial<StoredMailMessage>): StoredMailMessage => ({ ...base, sourceMessageId: 'id', subject: 'Plans', from: 'Ana <ana@example.com>', sentAt: '2026-10-01T10:00:00Z', text: 'hi', ...overrides });
@@ -109,4 +110,19 @@ test('a new email opens the conversation its recipients will be in', () => {
 test('a new email takes its subject from the first line', () => {
   assert.equal(subjectFromBody('Dinner Friday?\nThe new place on Valencia'), 'Dinner Friday?');
   assert.equal(subjectFromBody('Here is a long first line that keeps going well past what fits in a subject line'), 'Here is a long first line that keeps going well past what…');
+});
+
+test('unread email counts come from the mail server\'s read state, and sent email only ever says Sent (ADR 0026)', () => {
+  const stored = [
+    mail({ sourceMessageId: '<a@x>', sentAt: '2026-10-01T10:00:00Z', unread: false }),
+    mail({ sourceMessageId: '<b@x>', mailbox: 'Sent', from: 'me@gmail.com', to: ['ana@example.com'], sentAt: '2026-10-01T11:00:00Z' }),
+    mail({ sourceMessageId: '<c@x>', sentAt: '2026-10-01T12:00:00Z', unread: true }),
+    mail({ sourceMessageId: '<d@x>', accountId: 'acct-2', accountEmail: 'me@work.example', to: ['me@work.example'], sentAt: '2026-10-01T13:00:00Z', unread: true }),
+  ];
+  const [conversation] = normalizeStoredEmail(stored);
+  assert.equal(conversation.unreadCount, 2);
+  assert.equal(receiptOf(conversation.messages.find((message) => message.direction === 'outbound')!), 'sent');
+  // Opening it marks exactly the unread mail read, per mailbox.
+  assert.deepEqual([...unreadMailIn(conversation, stored)], [['acct-1', ['<c@x>']], ['acct-2', ['<d@x>']]]);
+  assert.equal(normalizeStoredEmail(stored.map((item) => ({ ...item, unread: false })))[0].unreadCount, 0);
 });

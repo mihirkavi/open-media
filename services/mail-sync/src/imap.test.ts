@@ -65,8 +65,11 @@ test('IMAP sign-in finishes when nextTick runs as a microtask, as on Cloudflare 
  * `withAttachment` adds a small file to each message; `reportedSize` overrides RFC822.SIZE.
  * IDLE is supported, and `deliver()` adds a message and tells idling clients, like new mail.
  */
-async function fakeMailbox({ count, dropAfterFetches, hangOnLogout = false, withAttachment = false, reportedSize, withCc = false, deliverWhenSentOpens = false }: { count: number; dropAfterFetches?: number; hangOnLogout?: boolean; withAttachment?: boolean; reportedSize?: number; withCc?: boolean; deliverWhenSentOpens?: boolean }) {
+async function fakeMailbox({ count, dropAfterFetches, hangOnLogout = false, withAttachment = false, reportedSize, withCc = false, deliverWhenSentOpens = false, unseen = [] }: { count: number; dropAfterFetches?: number; hangOnLogout?: boolean; withAttachment?: boolean; reportedSize?: number; withCc?: boolean; deliverWhenSentOpens?: boolean; unseen?: number[] }) {
   const sockets = new Set<Socket>();
+  /** Messages without \Seen; FETCH reports FLAGS when asked, and STORE +FLAGS (\Seen) removes them. */
+  const unread = new Set(unseen);
+  const stores: string[] = [];
   const fetched: string[] = [];
   /** Every FETCH range, headers included. */
   const fetches: string[] = [];
@@ -97,7 +100,16 @@ async function fakeMailbox({ count, dropAfterFetches, hangOnLogout = false, with
         else if (upper === 'EXAMINE' || upper === 'SELECT') {
           // New mail lands in INBOX while the Sent folder is being read.
           if (deliverWhenSentOpens && /Sent/.test(line)) { deliverWhenSentOpens = false; count += 1; }
-          socket.write(`* ${count} EXISTS\r\n* OK [UIDVALIDITY 1] ok\r\n* OK [UIDNEXT ${count + 1}] ok\r\n${tag} OK [READ-ONLY] done\r\n`);
+          socket.write(`* ${count} EXISTS\r\n* OK [UIDVALIDITY 1] ok\r\n* OK [UIDNEXT ${count + 1}] ok\r\n${tag} OK [${upper === 'SELECT' ? 'READ-WRITE' : 'READ-ONLY'}] done\r\n`);
+        }
+        else if (upper === 'UID' && arg?.toUpperCase() === 'SEARCH') {
+          const found = [...line.matchAll(/<m(\d+)@example\.test>/g)].map((match) => Number(match[1])).filter((i) => i <= count);
+          socket.write(`* SEARCH${found.map((i) => ` ${i}`).join('')}\r\n${tag} OK done\r\n`);
+        }
+        else if (upper === 'UID' && arg?.toUpperCase() === 'STORE') {
+          stores.push(line.split(' ').slice(3).join(' '));
+          for (const part of line.split(' ')[3].split(',')) unread.delete(Number(part));
+          socket.write(`${tag} OK done\r\n`);
         }
         else if (upper === 'FETCH' || (upper === 'UID' && arg?.toUpperCase() === 'FETCH')) {
           const range = upper === 'UID' ? line.split(' ')[3] : arg;
@@ -115,7 +127,8 @@ async function fakeMailbox({ count, dropAfterFetches, hangOnLogout = false, with
           let out = '';
           for (const i of [...wanted].sort((a, b) => a - b)) {
             const body = message(i);
-            out += `* ${i} FETCH (UID ${i} RFC822.SIZE ${reportedSize ?? body.length} ENVELOPE (NIL "Test ${i}" (("Sender" NIL "s${i}" "example.test")) NIL NIL (("Me" NIL "person" "example.test")) ${withCc ? '(("Ana Lima" NIL "ana" "example.test"))' : 'NIL'} NIL NIL "<m${i}@example.test>")${withBody ? ` BODY[] {${body.length}}\r\n${body}` : ''})\r\n`;
+            const flags = /FLAGS/i.test(line) ? `FLAGS (${unread.has(i) ? '' : '\\Seen'}) ` : '';
+            out += `* ${i} FETCH (UID ${i} ${flags}RFC822.SIZE ${reportedSize ?? body.length} ENVELOPE (NIL "Test ${i}" (("Sender" NIL "s${i}" "example.test")) NIL NIL (("Me" NIL "person" "example.test")) ${withCc ? '(("Ana Lima" NIL "ana" "example.test"))' : 'NIL'} NIL NIL "<m${i}@example.test>")${withBody ? ` BODY[] {${body.length}}\r\n${body}` : ''})\r\n`;
           }
           socket.write(`${out}${tag} OK done\r\n`);
         } else if (upper === 'LOGOUT') { if (!hangOnLogout) socket.end(`* BYE\r\n${tag} OK bye\r\n`); }
@@ -131,7 +144,9 @@ async function fakeMailbox({ count, dropAfterFetches, hangOnLogout = false, with
   const deliver = () => { count += 1; idling.forEach((socket) => socket.write(`* ${count} EXISTS\r\n`)); };
   /** The newest message is deleted, then a new one arrives: the count ends where it started. */
   const replaceNewest = () => { idling.forEach((socket) => socket.write(`* ${count} EXPUNGE\r\n* ${count} EXISTS\r\n`)); };
-  return { input, fetched, fetches, deliver, replaceNewest, close: () => { sockets.forEach((socket) => socket.destroy()); server.close(); } };
+  /** Message `i` is read in another mail app while we wait. */
+  const readElsewhere = (i: number) => { unread.delete(i); idling.forEach((socket) => socket.write(`* ${i} FETCH (FLAGS (\\Seen))\r\n`)); };
+  return { input, fetched, fetches, deliver, replaceNewest, readElsewhere, unread, stores, close: () => { sockets.forEach((socket) => socket.destroy()); server.close(); } };
 }
 
 /** How the fake mailbox's message `i` is stored once synced with names. */
@@ -324,5 +339,47 @@ test('a new message right after a deletion still ends the wait', async () => {
     setTimeout(mailbox.replaceNewest, 300);
     await syncImap(mailbox.input, { limits: { INBOX: 3, Sent: 0 }, known: storedAll, waitMs: 5_000 });
     assert.ok(Date.now() - started < 2_000, 'answers when the replacement arrives');
+  } finally { mailbox.close(); }
+});
+
+test('reading INBOX reports which messages are read on the server, after saving new ones (ADR 0026)', async () => {
+  const { syncImap } = await import('./imap.js');
+  const mailbox = await fakeMailbox({ count: 3, unseen: [2, 3] });
+  const order: string[] = [];
+  let state: { seen: string[]; unseen: string[] } | undefined;
+  try {
+    await syncImap(mailbox.input, {
+      limits: { INBOX: 3, Sent: 0 },
+      save: async () => { order.push('save'); },
+      onSeen: async (value) => { order.push('seen'); state = value; },
+    });
+    assert.deepEqual(state, { seen: ['<m1@example.test>'], unseen: ['<m2@example.test>', '<m3@example.test>'] });
+    assert.equal(order.at(-1), 'seen', 'unread state is written once the messages exist');
+  } finally { mailbox.close(); }
+});
+
+test('mail read in another app ends the wait, and its read state is reported', async () => {
+  const { syncImap } = await import('./imap.js');
+  const mailbox = await fakeMailbox({ count: 3, unseen: [3] });
+  const states: Array<{ seen: string[]; unseen: string[] }> = [];
+  try {
+    const started = Date.now();
+    setTimeout(() => mailbox.readElsewhere(3), 300);
+    const messages = await syncImap(mailbox.input, { limits: { INBOX: 3, Sent: 0 }, known: storedAll, waitMs: 5_000, onSeen: async (value) => { states.push(value); } });
+    assert.deepEqual(messages, []);
+    assert.ok(Date.now() - started < 2_000, 'answers when the flags change');
+    assert.deepEqual(states.at(-1)?.unseen, []);
+    assert.equal(states.length, 2);
+  } finally { mailbox.close(); }
+});
+
+test('opening mail marks it \\Seen on the server, found by Message-ID or by UID', async () => {
+  const { markSeenImap } = await import('./imap.js');
+  const mailbox = await fakeMailbox({ count: 4, unseen: [2, 3, 4] });
+  try {
+    const found = await markSeenImap(mailbox.input, ['<m2@example.test>', '<m3@example.test>', 'imap-INBOX-4', '<gone@example.test>']);
+    assert.equal(found, 3);
+    assert.deepEqual([...mailbox.unread], []);
+    assert.match(mailbox.stores[0], /\+FLAGS.*\\Seen/);
   } finally { mailbox.close(); }
 });

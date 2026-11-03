@@ -56,6 +56,11 @@ export async function loadBridgedConversations(): Promise<Conversation[]> {
   return mapBridgeSnapshot(await request<BridgeSnapshot>('/v1/bridges/conversations', {}, 'Could not load bridged chats.'));
 }
 
+/** Reads a bridged chat up to this message; the service decides whether the other side is told (ADR 0026). */
+export async function markBridgedChatRead(conversationId: string, eventId: string): Promise<void> {
+  await request(`/v1/bridges/rooms/${encodeURIComponent(conversationId)}/read`, { method: 'POST', body: { eventId } }, 'Could not mark the chat read.');
+}
+
 export async function sendBridgedMessage(conversationId: string, body: string): Promise<void> {
   await request(`/v1/bridges/rooms/${encodeURIComponent(conversationId)}/messages`, { method: 'POST', body: { body } }, 'The message wasn’t sent.');
 }

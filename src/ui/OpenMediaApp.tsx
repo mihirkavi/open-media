@@ -8,6 +8,7 @@ import {
   getAPIURL,
   listMailAccounts,
   listStoredMail,
+  markMailSeen,
   sendMail,
   syncMailAccount,
 } from "../connectors/mailApiConnector";
@@ -29,8 +30,8 @@ import {
   unsubscribeFromOpenMediaMessages,
 } from "../data/openMediaService";
 import { deletePost, reportPost } from "../data/postService";
-import { bridgedSourceOf, loadBridgedConversations, sendBridgedMessage } from "../connectors/bridgesConnector";
-import { emailConversationId, normalizeStoredEmail, replySubject, subjectFromBody } from "../domain/emailNormalization";
+import { bridgedSourceOf, loadBridgedConversations, markBridgedChatRead, sendBridgedMessage } from "../connectors/bridgesConnector";
+import { emailConversationId, normalizeStoredEmail, replySubject, subjectFromBody, unreadMailIn } from "../domain/emailNormalization";
 import { useLiveMail } from "./useLiveMail";
 import { profileHandleFromPath } from "../domain/profileFields";
 import { Conversation, Message, Person } from "../domain/models";
@@ -217,13 +218,34 @@ export function OpenMediaApp({
       if (sequence === refreshSequence.current) setMessagesLoading(false);
     }
   }, [currentUserId, messageMode]);
-  // A conversation on screen is read (ADR 0026): its Open Media chats record it, and its unread
-  // count clears at once. Email and bridged channels keep their own read state.
+  // A conversation on screen is read (ADR 0026), and its unread count clears at once. Each channel
+  // records it its own way: Open Media chats in the database, email as read on the mail server, and
+  // bridged chats with a Matrix read receipt (private when the person doesn't share receipts).
+  const mailStoreRef = useRef(mailStore);
+  mailStoreRef.current = mailStore;
   const readConversation = useCallback((conversation: Conversation) => {
-    const ids = (conversation.channels ?? [conversation]).filter((channel) => channel.sourceSummary.includes("open_media") && !channel.email).map((channel) => channel.id);
-    if (!ids.length || messageMode !== "open_media") return;
-    setNativeConversations((current) => current.map((item) => (ids.includes(item.id) && item.unreadCount ? { ...item, unreadCount: 0 } : item)));
-    ids.forEach((id) => { markConversationRead(id).catch(() => undefined); });
+    if (messageMode !== "open_media") return;
+    const channels = conversation.channels ?? [conversation];
+    const ids = channels.filter((channel) => channel.sourceSummary.includes("open_media") && !channel.email).map((channel) => channel.id);
+    if (ids.length) {
+      setNativeConversations((current) => current.map((item) => (ids.includes(item.id) && item.unreadCount ? { ...item, unreadCount: 0 } : item)));
+      ids.forEach((id) => { markConversationRead(id).catch(() => undefined); });
+    }
+    const mail = unreadMailIn(conversation, mailStoreRef.current.stored);
+    if (mail.size) {
+      const read = new Set([...mail].flatMap(([accountId, messageIds]) => messageIds.map((id) => `${accountId}:${id}`)));
+      setMailStore((current) => ({ ...current, stored: current.stored.map((message) => (message.unread && read.has(`${message.accountId}:${message.sourceMessageId}`) ? { ...message, unread: false } : message)) }));
+      mail.forEach((messageIds, accountId) => { markMailSeen(accountId, messageIds).catch(() => undefined); });
+    }
+    const rooms = channels.filter((channel) => channel.unreadCount && bridgedSourceOf(channel));
+    if (rooms.length) {
+      const roomIds = rooms.map((room) => room.id);
+      setBridgedConversations((current) => current.map((item) => (roomIds.includes(item.id) ? { ...item, unreadCount: 0 } : item)));
+      for (const room of rooms) {
+        const latest = [...room.messages].reverse().find((message) => message.direction === "inbound" && message.conversationId === room.id);
+        if (latest) markBridgedChatRead(room.id, latest.sourceMessageId).catch(() => undefined);
+      }
+    }
   }, [messageMode]);
   // Pulling down on Messages: every mailbox checks for new mail now, then mail and chats reload.
   const pullMessages = useCallback(async () => {

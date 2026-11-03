@@ -5,12 +5,12 @@
  */
 import { z } from 'zod';
 
-import { Bridges, BridgesEnv } from './bridges.js';
+import { Bridges, BridgesEnv, withoutReadTimes } from './bridges.js';
 import { decryptSecret, encryptSecret } from './crypto.js';
 import { createSignedKeyRequest, FarcasterSignerEnv, farcasterPublishingConfigured, forwardSignedMessage, parseEd25519PublicKey } from './farcasterSigner.js';
 import { UserFacingError } from './errors.js';
 import { formatCursor, parseCursor } from './mailCursor.js';
-import { syncImap, testImap } from './imap.js';
+import { markSeenImap, syncImap, testImap } from './imap.js';
 import { findSenderIcon, isIconDomain } from './senderIcons.js';
 import { resolveMailHost } from './networkSafety.js';
 import { handleAgentRequest, isAgentPath } from './agentApi.js';
@@ -39,6 +39,7 @@ export interface MailEnv extends FarcasterSignerEnv, SearchAssistEnv, TranslateE
   PUBLIC_API_RATE_LIMITER?: Limiter;
 }
 
+const seenSchema = z.object({ messageIds: z.array(z.string().min(1).max(998).refine((value) => !/[\r\n]/.test(value))).min(1).max(100) });
 const noNewlines = z.string().min(1).max(1024).refine((value) => !/[\r\n]/.test(value), 'Credentials cannot contain line breaks.');
 const schema = z.object({
   email: z.email(),
@@ -164,6 +165,7 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
       const input = await connectionInput({ ...account, password: decryptSecret(account.encryptedSecret, env.MAIL_CREDENTIALS_KEY) }, env);
       const since = parseCursor(url.searchParams.get('cursor'));
       let cursor: string | undefined;
+      let readChanged = false;
       // IMAP downloads only new mail and saves batch by batch, so attachments never pile up in
       // memory. With ?wait=1 it then waits for new mail, so the app can long-poll (ADR 0025).
       const messages = account.protocol === 'imap'
@@ -173,6 +175,7 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
           waitMs: url.searchParams.get('wait') === '1' ? mailWaitMs : undefined,
           cursor: since?.kind === 'imap' ? since.imap : undefined,
           onCursor: (imap) => { cursor = formatCursor({ kind: 'imap', imap }); },
+          onSeen: async ({ seen, unseen }) => { if (await repository.setSeen(account.id, seen, unseen)) readChanged = true; },
         })
         : await syncPop3(input, undefined, {
           cursor: since?.kind === 'pop' ? since.pop : undefined,
@@ -182,7 +185,24 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
       if (account.protocol !== 'imap' && messages.length) await repository.saveMessages(session.userId, account.id, messages);
       // File bytes stay on the server; clients read stored mail through the database.
       const summaries = messages.map(({ attachments, ...message }) => ({ ...message, attachmentCount: attachments?.length ?? 0 }));
-      return json(200, { messages: summaries, count: messages.length, mode: account.protocol === 'imap' ? 'sync' : 'import', cursor }, headers);
+      return json(200, { messages: summaries, count: messages.length, mode: account.protocol === 'imap' ? 'sync' : 'import', cursor, ...(readChanged ? { readChanged } : {}) }, headers);
+    }
+
+    // Opening an email conversation reads its mail (ADR 0026): stored as read, and marked \Seen on an
+    // IMAP server like any mail app. POP has no read state on the server; its mail is stored as read.
+    const seenMatch = request.method === 'POST' && url.pathname.match(/^\/v1\/mail-accounts\/([^/]+)\/seen$/);
+    if (seenMatch) {
+      if (!await allowed(env.MAIL_SYNC_RATE_LIMITER, `${session.userId}:${seenMatch[1]}:seen`)) return rateLimited(headers);
+      const ids = seenSchema.parse(await readJSON(request)).messageIds;
+      const account = await repository.findAccount(session.userId, seenMatch[1]);
+      if (!account) return json(404, { error: 'Mailbox not found.' }, headers);
+      const changed = await repository.setSeen(account.id, ids);
+      let server = false;
+      if (account.protocol === 'imap') {
+        const input = await connectionInput({ ...account, password: decryptSecret(account.encryptedSecret, env.MAIL_CREDENTIALS_KEY) }, env);
+        server = await markSeenImap(input, ids).then(() => true, () => false);
+      }
+      return json(200, { changed, server }, headers);
     }
 
     const sendMatch = request.method === 'POST' && url.pathname.match(/^\/v1\/mail-accounts\/([^/]+)\/send$/);
@@ -213,7 +233,18 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
     if (url.pathname.startsWith('/v1/bridges')) {
       const bridges = new Bridges(env, session.userId);
       if (request.method === 'GET' && url.pathname === '/v1/bridges') return json(200, await bridges.status(), headers);
-      if (request.method === 'GET' && url.pathname === '/v1/bridges/conversations') return json(200, await bridges.conversations(), headers);
+      if (request.method === 'GET' && url.pathname === '/v1/bridges/conversations') {
+        // Read receipts are reciprocal (ADR 0026): someone who doesn't send them doesn't see others'.
+        const [snapshot, share] = await Promise.all([bridges.conversations(), repository.shareReadReceipts()]);
+        return json(200, share ? snapshot : withoutReadTimes(snapshot), headers);
+      }
+      const readMatch = request.method === 'POST' && url.pathname.match(/^\/v1\/bridges\/rooms\/([^/]+)\/read$/);
+      if (readMatch) {
+        if (!await allowed(env.MAIL_SYNC_RATE_LIMITER, `${session.userId}:bridge-read`)) return rateLimited(headers);
+        const { eventId } = (await readJSON(request)) as { eventId?: unknown };
+        await bridges.markRead(decodeURIComponent(readMatch[1]), eventId, await repository.shareReadReceipts());
+        return json(200, { read: true }, headers);
+      }
       const roomMatch = request.method === 'POST' && url.pathname.match(/^\/v1\/bridges\/rooms\/([^/]+)\/messages$/);
       if (roomMatch) {
         if (!await allowed(env.MAIL_SEND_RATE_LIMITER, session.userId)) return rateLimited(headers);

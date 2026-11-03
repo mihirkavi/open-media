@@ -28,7 +28,8 @@ export function useLiveMail(enabled: boolean, accountsVersion: number, onNewMail
           cursor = answer.cursor;
           newMessages = answer.messages.length;
           failures = 0;
-          if (newMessages) onNewMailRef.current();
+          // New mail, or mail read or marked unread in another app: show the stored mail again.
+          if (newMessages || answer.readChanged) onNewMailRef.current();
         } catch {
           if (signal.aborted) return;
           failures += 1;

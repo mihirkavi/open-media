@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { availableNetworks, Bridges, matrixUserFor, messageText, networkOfProtocol, toStep } from './bridges.js';
+import { availableNetworks, Bridges, matrixUserFor, messageText, networkOfProtocol, toStep, withoutReadTimes } from './bridges.js';
 
 const env = {
   BRIDGES_HOMESERVER_URL: 'http://hs.test',
@@ -120,4 +120,67 @@ test('Discord uses its older sign-in API: token sign-in, status from ping, logou
 
 test('Google Voice is offered when its bridge is configured', () => {
   assert.deepEqual(availableNetworks({ ...env, BRIDGES_GVOICE_URL: 'http://gv.test' }), ['whatsapp', 'gvoice']);
+});
+
+/** A WhatsApp chat with Sam: two of your messages, then Sam's reply, then a third of yours. */
+function receiptRoom(ephemeral: Array<Record<string, unknown>>, extra: Array<Record<string, unknown>> = [], unread?: number) {
+  const me = '@om_4493a42e416b41d0baeaaed2666f5225:openmedia.test';
+  const sam = '@whatsapp_44700:openmedia.test';
+  const text = (id: string, sender: string, ts: number) => ({ type: 'm.room.message', event_id: id, sender, origin_server_ts: ts, content: { msgtype: 'm.text', body: id } });
+  return { me, sam, sync: { rooms: { join: { '!w:openmedia.test': {
+    state: { events: [
+      { type: 'm.room.member', state_key: me, content: { membership: 'join' } },
+      { type: 'm.room.member', state_key: sam, content: { membership: 'join', displayname: 'Sam' } },
+    ] },
+    timeline: { events: [text('$a', me, 1000), text('$b', me, 2000), ...extra, text('$c', sam, 3000), text('$d', sam, 4000), text('$e', me, 5000), text('$f', sam, 6000)] },
+    ephemeral: { events: ephemeral },
+    ...(unread === undefined ? {} : { unread_notifications: { notification_count: unread } }),
+  } } } } };
+}
+
+test('bridged chats read Matrix receipts: read up to the other side\'s receipt, delivered from message status (ADR 0026)', async () => {
+  const me = '@om_4493a42e416b41d0baeaaed2666f5225:openmedia.test';
+  const sam = '@whatsapp_44700:openmedia.test';
+  const { sync } = receiptRoom(
+    [{ type: 'm.receipt', content: { $b: { 'm.read': { [sam]: { ts: 2500 } } }, $d: { 'm.read.private': { [me]: { ts: 4100 } } } } }],
+    [{ type: 'com.beeper.message_send_status', event_id: '$s', sender: '@whatsappbot:openmedia.test', origin_server_ts: 1100, content: { 'm.relates_to': { rel_type: 'm.reference', event_id: '$e' }, status: 'SUCCESS', delivered_to_users: [sam] } }],
+  );
+  let result: Awaited<ReturnType<Bridges['conversations']>> | undefined;
+  const calls = await withFetch((url) => url.includes('/sync') ? sync : {}, async () => { result = await new Bridges(env, userId).conversations(); });
+  assert.match(decodeURIComponent(calls.find((call) => call.includes('/sync'))!), /"ephemeral":\{"types":\["m.receipt"\]\}/);
+  const events = Object.fromEntries(result!.rooms[0].events.map((event) => [event.id, event]));
+  assert.equal(events.$a.readAt, 2500);
+  assert.equal(events.$b.readAt, 2500);
+  assert.equal(events.$b.deliveredAt, 2500, 'read implies delivered');
+  assert.equal(events.$e.readAt, undefined, 'sent after the receipt');
+  assert.equal(events.$e.deliveredAt, 1100, 'delivered, from the bridge\'s status event');
+  assert.equal(events.$c.readAt, undefined, 'their messages carry no receipt');
+  // Your own message after their messages counts as reading them; only $f is new.
+  assert.equal(result!.rooms[0].unread, 1);
+  // Someone who doesn't share receipts sees delivery but no read times.
+  const hidden = withoutReadTimes(result!);
+  assert.equal(hidden.rooms[0].events.find((event) => event.id === '$b')?.readAt, undefined);
+  assert.equal(hidden.rooms[0].events.find((event) => event.id === '$b')?.deliveredAt, 2500);
+});
+
+test('without any receipt or message of yours in view, the server\'s unread count caps the count', async () => {
+  const { sync } = receiptRoom([], [], 1);
+  const room = sync.rooms.join['!w:openmedia.test'];
+  room.timeline.events = room.timeline.events.filter((event) => event.sender !== '@om_4493a42e416b41d0baeaaed2666f5225:openmedia.test');
+  let result: Awaited<ReturnType<Bridges['conversations']>> | undefined;
+  await withFetch((url) => url.includes('/sync') ? sync : {}, async () => { result = await new Bridges(env, userId).conversations(); });
+  assert.equal(result!.rooms[0].unread, 1);
+});
+
+test('opening a bridged chat sends m.read, or a private receipt when read receipts are off', async () => {
+  const bridges = new Bridges(env, userId);
+  const shared = await withFetch(() => ({}), () => bridges.markRead('!w:openmedia.test', '$f', true));
+  assert.match(shared[0], /^POST http:\/\/hs\.test\/_matrix\/client\/v3\/rooms\/!w%3Aopenmedia\.test\/receipt\/m\.read\/%24f\?user_id=%40om_/);
+  const hidden = await withFetch(() => ({}), () => bridges.markRead('!w:openmedia.test', '$f', false));
+  assert.match(hidden[0], /\/receipt\/m\.read\.private\/%24f/);
+  await assert.rejects(bridges.markRead('!w:openmedia.test', 'not-an-event', true));
+  await assert.rejects(bridges.markRead('../admin', '$f', true));
+  // Room version 12 ids have no server part.
+  const v12 = await withFetch(() => ({}), () => bridges.markRead('!C26jEaZ600yKt2YrYRwuuFqLX5Br7eYmjKK85Zyu9Sw', '$f', true));
+  assert.match(v12[0], /\/rooms\/!C26jEaZ600yKt2YrYRwuuFqLX5Br7eYmjKK85Zyu9Sw\/receipt\/m\.read\//);
 });

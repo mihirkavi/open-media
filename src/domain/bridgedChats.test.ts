@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { bridgedSourceOf, mapBridgeSnapshot } from './bridgedChats';
+import { receiptOf } from './receipts';
 
 const me = '@om_4493a42e416b41d0baeaaed2666f5225:openmedia.localhost';
 
@@ -49,4 +50,24 @@ test('every bridged network gets its own label, including Google Voice and Messe
     ],
   });
   assert.deepEqual(chats.map((chat) => [chat.labels[0], bridgedSourceOf(chat)]), [['Google Voice', 'gvoice'], ['Messenger', 'messenger']]);
+});
+
+test('bridged chats show what the bridge reports: delivered, read, and unread counts (ADR 0026)', () => {
+  const [chat] = mapBridgeSnapshot({
+    userId: me,
+    rooms: [{
+      id: '!abc:openmedia.localhost', network: 'whatsapp', name: 'Ada', unread: 2,
+      members: [{ id: '@whatsapp_15550001:openmedia.localhost', displayName: 'Ada' }],
+      events: [
+        { id: '$1', sender: me, body: 'Lunch?', timestamp: 1_000, deliveredAt: 1_500, readAt: 1_800 },
+        { id: '$2', sender: me, body: 'At noon', timestamp: 2_000, deliveredAt: 2_100 },
+        { id: '$3', sender: me, body: 'Or one', timestamp: 3_000 },
+        { id: '$4', sender: '@whatsapp_15550001:openmedia.localhost', body: 'Noon', timestamp: 4_000, readAt: 4_100 },
+      ],
+    }],
+  });
+  assert.deepEqual(chat.messages.map(receiptOf), ['read', 'delivered', 'sent', undefined]);
+  assert.equal(chat.messages[0].readAt, new Date(1_800).toISOString());
+  assert.equal(chat.messages[3].readAt, undefined, 'only your own messages carry receipts');
+  assert.equal(chat.unreadCount, 2);
 });
