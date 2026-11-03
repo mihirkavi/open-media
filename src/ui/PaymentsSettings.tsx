@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, Switch, View } from 'react-native';
+import { Linking, Platform, Pressable, StyleSheet, Switch, View } from 'react-native';
 
 import { getSupabaseClient } from '../auth/supabase';
 import { apiConfigured } from '../connectors/mailApiConnector';
@@ -10,6 +10,7 @@ import { formatMoney, Payment, paymentChains, paymentStatusLabels } from '../dom
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { Text } from './Text';
+import { Loader } from './Loader';
 
 export async function openExternal(url: string) {
   if (Platform.OS === 'web') window.open(url, '_blank', 'noopener');
@@ -74,10 +75,10 @@ export function PaymentsSettings() {
               : 'Stripe collects your bank and tax details. Open Media never sees them.'}</Text>
           </View>
           {setup.available.card && !cardReady ? <Pressable accessibilityRole="button" disabled={Boolean(busy)} onPress={() => run('payouts', async () => openExternal((await startPayouts()).url))} style={styles.small}>
-            {busy === 'payouts' ? <ActivityIndicator color={colors.text} /> : <Text style={styles.smallText}>{card ? 'Continue' : 'Set up'}</Text>}
+            {busy === 'payouts' ? <Loader color={colors.text} /> : <Text style={styles.smallText}>{card ? 'Continue' : 'Set up'}</Text>}
           </Pressable> : null}
           {card ? <Pressable accessibilityRole="button" accessibilityLabel="Check Stripe setup again" disabled={Boolean(busy)} onPress={() => run('refresh', refreshPayouts)} style={styles.small}>
-            {busy === 'refresh' ? <ActivityIndicator color={colors.text} /> : <Ionicons name="refresh" size={16} color={colors.text} />}
+            {busy === 'refresh' ? <Loader color={colors.text} /> : <Ionicons name="refresh" size={16} color={colors.text} />}
           </Pressable> : null}
         </View>
 
@@ -96,7 +97,7 @@ export function PaymentsSettings() {
           </View>)}
           {chain ? browserWalletsSupported()
             ? <Pressable accessibilityRole="button" disabled={Boolean(busy)} onPress={linkBrowserWallet} style={[styles.small, styles.start]}>
-              {busy === 'wallet' ? <ActivityIndicator color={colors.text} /> : <Text style={styles.smallText}>Link a browser wallet</Text>}
+              {busy === 'wallet' ? <Loader color={colors.text} /> : <Text style={styles.smallText}>Link a browser wallet</Text>}
             </Pressable>
             : <Text style={styles.hint}>Link wallets in the Open Media web app for now.</Text> : null}
         </View>
@@ -121,7 +122,7 @@ export function PaymentsSettings() {
             <Text style={styles.amount}>{formatMoney(payment.amountMinor, payment.currency)}</Text>
           </View>) : <Text style={styles.hint}>No payments yet.</Text>}
         </View>
-      </> : message ? null : <ActivityIndicator style={styles.loading} color={colors.text} />}
+      </> : message ? null : <Loader style={styles.loading} color={colors.text} />}
     </View>
     {message ? <Text accessibilityLiveRegion="polite" style={styles.error}>{message}</Text> : null}
   </>;

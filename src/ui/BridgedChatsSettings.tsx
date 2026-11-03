@@ -1,8 +1,9 @@
 import { Ionicons } from '@expo/vector-icons';
 import QRCode from 'qrcode';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from './Text';
+import { Loader } from './Loader';
 
 import {
   BridgeLoginStep,
@@ -116,7 +117,7 @@ export function BridgedChatsSettings() {
   return <View>
     <Text style={styles.intro}>WhatsApp and other chat apps can join Messages through Open Media’s chat bridges, the same way Beeper connects them. These bridges aren’t made or approved by those companies, so connecting is your choice, one network at a time.</Text>
     <View style={styles.card}>
-      {statuses === null ? <ActivityIndicator style={styles.spinner} color={colors.text} /> : null}
+      {statuses === null ? <Loader style={styles.spinner} color={colors.text} /> : null}
       {offered.map((status, index) => {
         const connected = status.logins.length > 0;
         return <View key={status.id} style={[styles.row, index > 0 && styles.divider]}>
@@ -189,14 +190,14 @@ function FlowCard({ flow, phone, error, onBegin, onClose, onSubmit, onValues }: 
     <Text style={styles.detail}>• Open Media’s bridge server keeps your {flow.name} session and can read the chats it brings into Messages. These chats aren’t end-to-end encrypted inside Open Media.</Text>
     <Text style={styles.detail}>• You can disconnect any time here{guide?.linkedDevices ? ` or in ${guide.linkedDevices}` : ''}.</Text>
     <View style={styles.rowWrap}>
-      {flow.flows ? orderFlows(flow.flows, phone).map((option, index) => <Button key={option.id} label={flowLabel(option, index)} primary={index === 0} onPress={() => onBegin(option.id)} />) : <ActivityIndicator color={colors.text} />}
+      {flow.flows ? orderFlows(flow.flows, phone).map((option, index) => <Button key={option.id} label={flowLabel(option, index)} primary={index === 0} onPress={() => onBegin(option.id)} />) : <Loader color={colors.text} />}
       <Button label="Cancel" onPress={onClose} />
     </View>
     {error ? <Text accessibilityLiveRegion="assertive" style={styles.error}>{error}</Text> : null}
   </View>;
 
   return <View accessibilityLiveRegion="polite" style={styles.flow}>
-    {!step ? <ActivityIndicator color={colors.text} /> : null}
+    {!step ? <Loader color={colors.text} /> : null}
     {step?.type === 'display_and_wait' && step.display?.type === 'qr' && step.display.data ? <>
       <Text style={styles.name}>Scan with {flow.name}</Text>
       <Text style={styles.detail}>{guide?.qr ?? step.instructions}</Text>
@@ -218,7 +219,7 @@ function FlowCard({ flow, phone, error, onBegin, onClose, onSubmit, onValues }: 
     {step?.type === 'display_and_wait' && (step.display?.type === 'nothing' || !step.display?.data) ? <>
       <Text style={styles.name}>Finish in {flow.name}</Text>
       <Text style={styles.detail}>{step.instructions || `Approve the sign-in in ${flow.name}, then come back here.`}</Text>
-      <ActivityIndicator color={colors.text} />
+      <Loader color={colors.text} />
     </> : null}
     {step?.type === 'user_input' ? <>
       <Text style={styles.name}>{step.instructions || `Connect ${flow.name}`}</Text>

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, Image, Linking, Pressable, StyleSheet, Switch, View } from 'react-native';
+import { Image, Linking, Pressable, StyleSheet, Switch, View } from 'react-native';
 import { Text, TextInput } from './Text';
 
 import { publishingConnector } from '../data/crossPostService';
@@ -8,6 +8,7 @@ import { networks } from '../domain/networkPosts';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { useCrossPosting } from './useCrossPosting';
+import { Loader } from './Loader';
 
 /**
  * Settings → Cross-posting. Connect a network once; after that every Open Media post goes there
@@ -27,7 +28,7 @@ export function CrossPostingSettings() {
             <Text style={styles.name}>{name}</Text>
             <Text style={styles.detail}>{item.account ? `Connected as ${item.account.handle}` : item.availability.available ? 'Not connected' : item.availability.reason}</Text>
           </View>
-          {item.busy ? <ActivityIndicator color={colors.text} /> : item.account
+          {item.busy ? <Loader color={colors.text} /> : item.account
             ? <Pressable accessibilityRole="button" accessibilityLabel={`Disconnect ${name}`} onPress={() => crossPosting.disconnect(item.network)} style={styles.button}><Text style={styles.buttonText}>Disconnect</Text></Pressable>
             : item.availability.available ? <Pressable accessibilityRole="button" accessibilityLabel={`Connect ${name}`} onPress={() => crossPosting.connect(item.network)} style={[styles.button, styles.primary]}><Text style={[styles.buttonText, styles.primaryText]}>Connect</Text></Pressable> : <Ionicons name="time-outline" size={18} color={colors.textTertiary} />}
         </View>

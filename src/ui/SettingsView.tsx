@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { Text, TextInput } from './Text';
 
 import { applyContactCleanup, scanDeviceContacts } from '../contacts/deviceContacts';
@@ -11,6 +11,7 @@ import { defaultSmtpPort, MailProviderPreset, SmtpSecurity } from '../domain/mai
 import { radii, ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { BridgedChatsSettings } from './BridgedChatsSettings';
+import { Loader } from './Loader';
 
 interface SettingsViewProps { onClose: () => void; onMailSynced: () => void; }
 
@@ -242,7 +243,7 @@ export function SettingsView({ onClose, onMailSynced }: SettingsViewProps) {
             {mailError ? <Text accessibilityRole="alert" style={styles.error}>{mailError}</Text> : null}
             {missing.length ? <Text style={styles.hint}>Still needed: {missing.join(', ')}.</Text> : null}
             <Pressable accessibilityRole="button" disabled={mailBusy || missing.length > 0} onPress={submitMail} style={[styles.primary, (mailBusy || missing.length > 0) && styles.primaryDisabled]}>
-              {mailBusy ? <ActivityIndicator color={colors.surface} /> : <Text style={styles.primaryText}>Connect</Text>}
+              {mailBusy ? <Loader color={colors.surface} /> : <Text style={styles.primaryText}>Connect</Text>}
             </Pressable>
             <Text style={styles.footnote}>We test the sign-in with your provider before saving.</Text>
         </View>
@@ -283,7 +284,7 @@ export function SettingsView({ onClose, onMailSynced }: SettingsViewProps) {
           <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
         </Pressable>
       </View>
-      {mailBusy && !mailForm ? <ActivityIndicator style={styles.inlineSpinner} color={colors.text} /> : null}
+      {mailBusy && !mailForm ? <Loader style={styles.inlineSpinner} color={colors.text} /> : null}
       {mailError && !mailForm ? <Text accessibilityRole="alert" style={styles.error}>{mailError}</Text> : null}
       <Text style={styles.footnote}>Passwords are encrypted by the mail service and never stored in the app.</Text>
 
@@ -294,7 +295,7 @@ export function SettingsView({ onClose, onMailSynced }: SettingsViewProps) {
           <View style={styles.row}>
             <View style={styles.rowIcon}><Ionicons name="person-outline" size={18} color={colors.text} /></View>
             <View style={styles.rowCopy}><Text style={styles.rowTitle}>Contacts on this device</Text><Text style={styles.rowDetail}>{contactsConnected ? `${contactSuggestions.length} suggestions` : 'Stays on this device'}</Text></View>
-            {contactsBusy ? <ActivityIndicator color={colors.text} /> : <Switch accessibilityLabel="Review Contacts" value={contactsConnected} onValueChange={(enabled) => enabled ? connectContacts() : (setContactsConnected(false), setContactSuggestions([]))} trackColor={{ false: colors.border, true: colors.text }} thumbColor={colors.surface} {...({ activeThumbColor: colors.surface } as object)} />}
+            {contactsBusy ? <Loader color={colors.text} /> : <Switch accessibilityLabel="Review Contacts" value={contactsConnected} onValueChange={(enabled) => enabled ? connectContacts() : (setContactsConnected(false), setContactSuggestions([]))} trackColor={{ false: colors.border, true: colors.text }} thumbColor={colors.surface} {...({ activeThumbColor: colors.surface } as object)} />}
           </View>
           {contactSuggestions.map((suggestion) => (
             <View key={suggestion.contactId} style={[styles.row, styles.rowDivider]}>

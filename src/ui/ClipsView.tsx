@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Image, LayoutChangeEvent, Linking, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Image, LayoutChangeEvent, Linking, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { PersonLink, targetForPost } from './people';
 import { Text } from './Text';
 
@@ -11,6 +11,7 @@ import { ClipVideo } from './ClipVideo';
 import { useMixedFeed } from './useMixedFeed';
 import { TranslationNote, useTranslation } from './useTranslation';
 import { VerifiedTick } from './VerifiedTick';
+import { Loader } from './Loader';
 
 /**
  * Clips: the same canonical posts as Feed, shown as an immersive vertical stream of short videos
@@ -69,10 +70,10 @@ export function ClipsView({ sessionKey }: { sessionKey?: string }) {
   return <View style={styles.screen} onLayout={onLayout}>
     {height ? <ScrollView ref={scroller} pagingEnabled showsVerticalScrollIndicator={false} onScroll={onScroll} scrollEventThrottle={32} style={styles.screen}>
       {visible.map((post, index) => <Clip key={post.id} post={post} height={height} active={index === active} mounted={Math.abs(index - active) <= 1} muted={muted} onToggleMute={() => setMuted((value) => !value)} onFailed={markFailed} />)}
-      {clips.loadingMore ? <View style={[styles.status, { height: height / 3 }]}><ActivityIndicator color="#FFFFFF" /></View> : null}
+      {clips.loadingMore ? <View style={[styles.status, { height: height / 3 }]}><Loader color="#FFFFFF" /></View> : null}
     </ScrollView> : null}
     {clips.pendingCount > 0 ? <Pressable accessibilityRole="button" accessibilityLabel={`Show ${clips.pendingCount} new ${clips.pendingCount === 1 ? 'clip' : 'clips'}`} onPress={jumpToNew} style={styles.newClips}><Ionicons name="arrow-up" size={14} color="#111111" /><Text style={styles.newClipsText}>{clips.pendingCount} new {clips.pendingCount === 1 ? 'clip' : 'clips'}</Text></Pressable> : null}
-    {(clips.loading || !settled) && !visible.length ? <View style={[StyleSheet.absoluteFill, styles.status]}><ActivityIndicator color="#FFFFFF" /><Text style={styles.statusText}>Finding new clips…</Text></View> : null}
+    {(clips.loading || !settled) && !visible.length ? <View style={[StyleSheet.absoluteFill, styles.status]}><Loader color="#FFFFFF" /><Text style={styles.statusText}>Finding new clips…</Text></View> : null}
     {!clips.loading && settled && !visible.length ? <View style={[StyleSheet.absoluteFill, styles.status]}>
       <Ionicons name="film-outline" size={28} color="#B9B9B4" />
       <Text style={styles.statusText}>{clips.error || 'No clips right now.'}</Text>

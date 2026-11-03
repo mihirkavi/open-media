@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Modal, Pressable, StyleSheet, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, View } from 'react-native';
 
 import { getSupabaseClient } from '../auth/supabase';
 import { browserWalletsSupported, connectBrowserWallet, sendUsdcTransfer, signWalletLink } from '../connectors/wallets/browserWallet';
@@ -13,6 +13,7 @@ import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { openExternal } from './PaymentsSettings';
 import { Text } from './Text';
+import { Loader } from './Loader';
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const tipChoices = [200, 500, 1000, 2000];
@@ -130,7 +131,7 @@ export function PaymentSheet({ target, recipient, onClose, onPaid }: { target: P
           <Text style={styles.heading}>{heading}</Text>
           <Pressable accessibilityRole="button" accessibilityLabel="Close" disabled={busy} onPress={onClose} hitSlop={8}><Ionicons name="close" size={22} color={colors.text} /></Pressable>
         </View>
-        {!options && !error ? <ActivityIndicator style={styles.loading} color={colors.text} /> : null}
+        {!options && !error ? <Loader style={styles.loading} color={colors.text} /> : null}
         {options && !options.available && !done ? <Text style={styles.hint}>{options.unavailableReason}</Text> : null}
         {options?.available && !rail ? <Text style={styles.hint}>{usdcPossible && !browserWalletsSupported() ? `@${recipient} takes USDC, which you can pay from a browser wallet in the Open Media web app. Paying with USDC on phones is coming.` : `@${recipient} doesn’t take payments in Open Media yet.`}</Text> : null}
         {options?.available && rail && preview ? <>
@@ -152,10 +153,10 @@ export function PaymentSheet({ target, recipient, onClose, onPaid }: { target: P
           </View>
           {rail === 'onchain' && chain ? <Text style={styles.hint}>USDC goes from your wallet straight to @{recipient} on {paymentChains[chain].name}. Payments on a blockchain can’t be reversed.</Text> : null}
           {!done && !payment ? <Pressable accessibilityRole="button" disabled={busy} onPress={confirm} style={[styles.primary, busy && styles.disabled]}>
-            {busy ? <ActivityIndicator color={colors.surface} /> : <Text style={styles.primaryText}>{`${target.kind === 'tip' ? 'Tip' : 'Pay'} ${formatMoney(preview.amountMinor, preview.currency)}`}</Text>}
+            {busy ? <Loader color={colors.surface} /> : <Text style={styles.primaryText}>{`${target.kind === 'tip' ? 'Tip' : 'Pay'} ${formatMoney(preview.amountMinor, preview.currency)}`}</Text>}
           </Pressable> : null}
           {payment && !done && payment.rail === 'card' ? <Pressable accessibilityRole="button" disabled={busy} onPress={recheck} style={styles.secondary}>
-            {busy ? <ActivityIndicator color={colors.text} /> : <Text style={styles.secondaryText}>I’ve paid. Check again</Text>}
+            {busy ? <Loader color={colors.text} /> : <Text style={styles.secondaryText}>I’ve paid. Check again</Text>}
           </Pressable> : null}
         </> : null}
         {status ? <Text accessibilityLiveRegion="polite" style={styles.status}>{status}</Text> : null}

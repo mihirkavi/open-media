@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Switch, View } from 'react-native';
+import { Pressable, StyleSheet, Switch, View } from 'react-native';
 
 import { apiConfigured } from '../connectors/mailApiConnector';
 import { loadOndcStore, saveOndcStore, SavedOndcStore } from '../data/ondcService';
@@ -8,6 +8,7 @@ import { emptyOndcStore, ondcCategories, OndcStore, OndcStoreErrors, ondcReturnW
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { Text, TextInput } from './Text';
+import { Loader } from './Loader';
 
 type Field = 'storeName' | 'building' | 'locality' | 'city' | 'state' | 'areaCode' | 'stdCode' | 'gps' | 'phone' | 'email';
 const fields: { key: Field; label: string; placeholder: string; keyboard?: 'numeric' | 'phone-pad' | 'email-address' }[] = [
@@ -77,7 +78,7 @@ export function OndcStoreSettings() {
         </View>
         <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textTertiary} />
       </Pressable>
-      {open ? saved === undefined ? <ActivityIndicator style={styles.loading} color={colors.text} /> : <View style={[styles.block, styles.divider]}>
+      {open ? saved === undefined ? <Loader style={styles.loading} color={colors.text} /> : <View style={[styles.block, styles.divider]}>
         <View style={styles.notice}>
           <Ionicons name="information-circle-outline" size={18} color={colors.textSecondary} />
           <Text style={[styles.hint, styles.grow]}>Open Media is joining ONDC as a seller app. Until registration finishes, your store is saved but not yet visible on the network. When it is, buyer apps can show your items and prices; orders through ONDC come later, so buyers contact you to buy. Prices should include delivery.</Text>
@@ -109,7 +110,7 @@ export function OndcStoreSettings() {
         {errors.declarationAccepted ? <Text style={styles.error}>{errors.declarationAccepted}</Text> : null}
         <View style={styles.actions}>
           <Pressable accessibilityRole="button" disabled={busy} onPress={() => save({ ...draft, enabled: !draft.enabled })} style={styles.primary}>
-            {busy ? <ActivityIndicator color={colors.surface} /> : <Text style={styles.primaryText}>{draft.enabled ? 'Turn store off' : 'Turn store on'}</Text>}
+            {busy ? <Loader color={colors.surface} /> : <Text style={styles.primaryText}>{draft.enabled ? 'Turn store off' : 'Turn store on'}</Text>}
           </Pressable>
           <Pressable accessibilityRole="button" disabled={busy} onPress={() => save(draft)} style={styles.small}><Text style={styles.smallText}>Save</Text></Pressable>
         </View>

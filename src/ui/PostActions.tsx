@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { createClientId } from '../data/openMediaService';
 import { addPostComment, interactOnNetwork, loadPostComments, networkInteractionsDone, setPostLike, setPostReshare } from '../data/interactionService';
@@ -14,6 +14,7 @@ import { RichText } from './RichText';
 import { Text, TextInput } from './Text';
 import { useCrossPosting } from './useCrossPosting';
 import { TranslationNote, useTranslation } from './useTranslation';
+import { Loader } from './Loader';
 
 const zero: PostEngagement = { replies: 0, reposts: 0, likes: 0, liked: false, reshared: false };
 
@@ -157,7 +158,7 @@ function Comments({ post, route, signedIn, onCommented }: { post: SocialPost; ro
   };
   const placeholder = route.via === 'network' ? `Reply on ${networks[route.network].displayName} as ${route.handle}…` : 'Add a comment…';
   return <View style={styles.comments}>
-    {native && comments === undefined && !error ? <ActivityIndicator color={colors.textSecondary} /> : null}
+    {native && comments === undefined && !error ? <Loader color={colors.textSecondary} /> : null}
     {native && comments?.length === 0 ? <Text style={styles.commentMeta}>No comments yet.</Text> : null}
     {comments?.map((comment) => <View key={comment.id} style={styles.comment}>
       <Text numberOfLines={1} style={styles.commentMeta}><Text style={styles.commentAuthor}>{comment.author.displayName}</Text> {comment.author.handle} · {formatRelativeTime(comment.createdAt)}</Text>
@@ -168,7 +169,7 @@ function Comments({ post, route, signedIn, onCommented }: { post: SocialPost; ro
     {sent ? <Text accessibilityLiveRegion="polite" style={styles.commentMeta}>{sent}</Text> : null}
     {signedIn ? <View style={styles.commentField}>
       <TextInput accessibilityLabel={placeholder.replace('…', '')} value={draft} onChangeText={setDraft} placeholder={placeholder} placeholderTextColor={colors.textTertiary} maxLength={maxCommentLength} editable={!sending} returnKeyType="send" submitBehavior="submit" onSubmitEditing={send} style={styles.commentInput} />
-      {sending ? <ActivityIndicator color={colors.textSecondary} /> : null}
+      {sending ? <Loader color={colors.textSecondary} /> : null}
     </View> : <Text style={styles.commentMeta}>Sign in to comment.</Text>}
   </View>;
 }

@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Children, Fragment, isValidElement, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Image, Linking, Platform, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Image, Linking, Platform, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import { loadMyProfileFields, loadProfessionalProfile, OpenMediaProfile, saveMyProfileFields, saveProfessionalProfile, saveProfileBasics } from '../data/openMediaService';
 import { loadPublicPerson, saveLinkedAccounts } from '../data/peopleService';
@@ -13,6 +13,7 @@ import { EducationEntry, emptyProfessional, OpenTo, parseProfessional, Professio
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { Text, TextInput } from './Text';
+import { Loader } from './Loader';
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
@@ -178,7 +179,7 @@ export function EditProfile({ profile, onClose, onSaved }: { profile: OpenMediaP
     <View style={styles.bar}><View style={styles.barInner}>
       <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={onClose} style={styles.back}><Ionicons name="chevron-back" size={22} color={colors.text} /></Pressable>
       <Text accessibilityRole="header" style={styles.title}>Edit profile</Text>
-      <Pressable accessibilityRole="button" accessibilityLabel="Save profile" disabled={saving || loading} onPress={save} style={[styles.save, (saving || loading) && styles.disabled]}>{saving ? <ActivityIndicator size="small" color={colors.surface} /> : <Text style={styles.saveText}>Save</Text>}</Pressable>
+      <Pressable accessibilityRole="button" accessibilityLabel="Save profile" disabled={saving || loading} onPress={save} style={[styles.save, (saving || loading) && styles.disabled]}>{saving ? <Loader size="small" color={colors.surface} /> : <Text style={styles.saveText}>Save</Text>}</Pressable>
     </View></View>
     {message ? <Text accessibilityLiveRegion="polite" style={styles.banner}>{message}</Text> : null}
     <ScrollView ref={scroll} style={styles.scroll} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
@@ -204,10 +205,10 @@ export function EditProfile({ profile, onClose, onSaved }: { profile: OpenMediaP
           </View>
         </View>
       </View>
-      {importing ? <View style={styles.importing}><ActivityIndicator color={colors.text} /><Text style={styles.footnote}>{importing === 'linkedin' ? 'Reading your LinkedIn file…' : `Reading ${website.replace(/^https?:\/\//, '')}…`}</Text></View> : null}
+      {importing ? <View style={styles.importing}><Loader color={colors.text} /><Text style={styles.footnote}>{importing === 'linkedin' ? 'Reading your LinkedIn file…' : `Reading ${website.replace(/^https?:\/\//, '')}…`}</Text></View> : null}
       {importNote ? <Text accessibilityLiveRegion="polite" style={styles.message}>{importNote}</Text> : null}
       {review ? <Review review={review} current={{ name, bio, professional, fields }} onToggle={(id) => setReview((current) => { if (!current) return current; const chosen = new Set(current.chosen); if (chosen.has(id)) chosen.delete(id); else chosen.add(id); return { ...current, chosen }; })} onUse={useChosen} onCancel={() => setReview(undefined)} styles={styles} colors={colors} /> : null}
-      {loading ? <ActivityIndicator style={styles.loading} color={colors.text} /> : null}
+      {loading ? <Loader style={styles.loading} color={colors.text} /> : null}
 
       <Section title="Basics" styles={styles}>
         <Field label="Name" value={name} onChange={setName} max={80} styles={styles} colors={colors} />

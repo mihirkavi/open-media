@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Image, Keyboard, Platform, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
+import { Image, Keyboard, Platform, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from './Text';
 
 import { citedAnswer } from '../domain/aiCitations';
@@ -19,10 +19,12 @@ import { conversationTitle } from '../domain/selectors';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { AiMark } from './AiMark';
+import { AiThinking } from './AiThinking';
 import { FeedViewer, PostCard } from './OpenMediaFeed';
 import { Highlighted, SearchHighlight } from './RichText';
 import type { FeedLenses } from './useFeedLenses';
 import { useUniversalSearch } from './useUniversalSearch';
+import { Loader } from './Loader';
 
 export type SearchTarget = 'feed' | 'messages' | 'settings';
 
@@ -132,8 +134,9 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
     {hasQuery && search.parsed.understood.length ? <Text style={styles.hint}>Understood: {search.parsed.understood.join(' · ')}{search.parsed.text ? ` · “${search.parsed.text}”` : ''}</Text> : null}
 
     {search.ai.status === 'loading' || search.ai.status === 'done' || search.ai.status === 'failed' ? <View accessibilityLiveRegion="polite" style={styles.ai}>
-      <View style={styles.aiHeader}><AiMark size={15} color={colors.text} /><Text style={styles.aiTitle}>AI summary</Text>{search.ai.status === 'loading' ? <ActivityIndicator size="small" color={colors.textTertiary} style={styles.aiSpinner} /> : null}</View>
-      {search.ai.status === 'loading' ? <Text style={styles.aiWaiting}>Reading the public posts below…</Text> : null}
+      <View style={styles.aiHeader}><AiMark size={15} color={colors.text} thinking={search.ai.status === 'loading'} /><Text style={styles.aiTitle}>AI summary</Text></View>
+      {/* The AI's own drawing, under the AI mark and title, so people can tell an AI answer is coming. */}
+      {search.ai.status === 'loading' ? <><AiThinking color={colors.text} /><Text style={styles.aiWaiting}>AI is reading the public posts below…</Text></> : null}
       {search.ai.status === 'failed' ? <Text style={styles.aiWaiting}>{search.ai.message}</Text> : null}
       {search.ai.status === 'done' && cited ? <>
         <Text selectable style={styles.aiText}>{cited.pieces.map((piece, index) => 'text' in piece
@@ -168,7 +171,7 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
       <PostCard post={post} mode="raw" viewer={viewer} />
       {spotlight === post.id ? <View pointerEvents="none" style={styles.spotlight} /> : null}
     </View>)}
-    {hasQuery && search.searching && !search.posts.length ? <View style={styles.status}><ActivityIndicator color={colors.text} /></View> : null}
+    {hasQuery && search.searching && !search.posts.length ? <View style={styles.status}><Loader color={colors.text} /></View> : null}
     {nothing ? <View style={styles.status}><Ionicons name="search-outline" size={26} color={colors.textTertiary} /><Text style={styles.empty}>No results for “{search.parsed.raw}”. Try fewer or different words.</Text></View> : null}
   </ScrollView></SearchHighlight.Provider>;
 }
@@ -377,7 +380,6 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   ai: { marginTop: 14, gap: 12, paddingHorizontal: 18, paddingTop: 16, paddingBottom: 14, borderRadius: 20, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, backgroundColor: colors.surfaceAlt },
   aiHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   aiTitle: { color: colors.text, fontSize: 13, fontWeight: '600', letterSpacing: 0.1 },
-  aiSpinner: { marginLeft: 2, transform: [{ scale: 0.75 }] },
   aiWaiting: { color: colors.textSecondary, fontSize: 15, lineHeight: 22 },
   aiText: { color: colors.text, fontSize: 16, lineHeight: 25, letterSpacing: -0.1 },
   // Inline citation: a small number in a soft rounded tile (the tile is drawn on the web; phones show the shaded number).

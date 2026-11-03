@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { apiConfigured } from '../connectors/mailApiConnector';
 import { answerFollowRequest, loadMyFollows, loadMyIdentity, MyFollows, MyIdentity, removeFollower, saveMyIdentity, startIdentityVerification } from '../data/peopleService';
@@ -9,6 +9,7 @@ import { useOpenMediaTheme } from '../themeContext';
 import { usePeople } from './people';
 import { Text } from './Text';
 import { VerifiedTick } from './VerifiedTick';
+import { Loader } from './Loader';
 
 const tierCopy: Record<MyIdentity['tier'], string> = {
   2: 'Others see your handle only.',
@@ -86,10 +87,10 @@ export function IdentitySettings({ handle }: { handle: string }) {
             <Text style={styles.hint}>{identity.verified ? 'Your legal name stays private unless you choose to show it.' : identity.verificationAvailable ? 'With Stripe Identity: a photo ID and a selfie. Stripe keeps them; Open Media keeps only the result.' : 'Not available yet. No one has a blue tick until it is.'}</Text>
           </View>
           {!identity.verified && identity.verificationAvailable ? <Pressable accessibilityRole="button" disabled={Boolean(busy)} onPress={verify} style={styles.small}>
-            {busy === 'verify' ? <ActivityIndicator color={colors.text} /> : <Text style={styles.smallText}>{status === 'pending' || status === 'failed' ? 'Try again' : 'Verify'}</Text>}
+            {busy === 'verify' ? <Loader color={colors.text} /> : <Text style={styles.smallText}>{status === 'pending' || status === 'failed' ? 'Try again' : 'Verify'}</Text>}
           </Pressable> : null}
         </View>
-      </> : message ? null : <ActivityIndicator style={styles.loading} color={colors.text} />}
+      </> : message ? null : <Loader style={styles.loading} color={colors.text} />}
     </View>
 
     {follows ? <>
