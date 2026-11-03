@@ -77,6 +77,13 @@ test('rules are tidied and a collapsed post shows its opening blocks', () => {
   const blocks = tidyBlocks(parseMarkdown(cleanPostMarkdown(report)), 'SplinterBoost Daily Report 11/1/2026');
   assert.deepEqual(blocks.map((block) => block.kind), ['table', 'paragraph', 'table']);
   assert.deepEqual(tidyBlocks(parseMarkdown('## Other heading\n\nOne\n\n---\n\nTwo'), 'A title').map((block) => block.kind), ['heading', 'paragraph', 'rule', 'paragraph']);
+  // An event description that opens with its title in bold: the repeat goes, the rest stays.
+  const event = '**Atheist Community Members—Please vote this week!**\nPlease vote well before Election Day (Tuesday November 3).';
+  assert.equal(looksLikeMarkdown(event), true);
+  assert.deepEqual(tidyBlocks(parseMarkdown(event), 'Atheist Community Members—Please vote this week!'), [{ kind: 'paragraph', content: [{ kind: 'text', text: 'Please vote well before Election Day (Tuesday November 3).' }] }]);
+  // Bold that starts a sentence, or doesn't repeat the title, is kept.
+  assert.equal(tidyBlocks(parseMarkdown('**Note:** doors open at 6'), 'Book club').length, 1);
+  assert.equal(inlineText((tidyBlocks(parseMarkdown('**Note:** doors open at 6'), 'Book club')[0] as { content: Parameters<typeof inlineText>[0] }).content), 'Note: doors open at 6');
   const short = previewBlocks(parseMarkdown('One short paragraph.'));
   assert.equal(short.more, false);
   const long = previewBlocks(parseMarkdown(Array.from({ length: 12 }, (_, index) => `Paragraph ${index} ${'word '.repeat(20)}`).join('\n\n')));

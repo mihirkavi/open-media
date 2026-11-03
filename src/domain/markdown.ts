@@ -164,10 +164,20 @@ const words = (text: string) => new Set(text.toLocaleLowerCase().split(/[^\p{L}\
 export function tidyBlocks(blocks: MdBlock[], title?: string): MdBlock[] {
   let out = [...blocks];
   const first = out.find((block) => block.kind !== 'rule');
-  if (title && first?.kind === 'heading') {
-    const a = words(title); const b = words(inlineText(first.content));
+  const repeatsTitle = (content: MdInline[]) => {
+    const a = words(title ?? ''); const b = words(inlineText(content));
     const shared = [...b].filter((word) => a.has(word)).length;
-    if (b.size && shared / Math.max(a.size, b.size) >= 0.6) out.splice(out.indexOf(first), 1);
+    return b.size > 0 && shared / Math.max(a.size, b.size) >= 0.6;
+  };
+  if (title && first?.kind === 'heading' && repeatsTitle(first.content)) out.splice(out.indexOf(first), 1);
+  // Events and posts often open with the title again in bold on its own line: drop that line only.
+  if (title && first?.kind === 'paragraph') {
+    const [lead, next, ...rest] = first.content;
+    const ownLine = !next || (next.kind === 'text' && /^\s*\n/.test(next.text));
+    if (lead?.kind === 'strong' && ownLine && repeatsTitle(lead.children)) {
+      const remaining: MdInline[] = next?.kind === 'text' ? [...(next.text.trim() ? [{ kind: 'text' as const, text: next.text.replace(/^\s+/, '') }] : []), ...rest] : rest;
+      out.splice(out.indexOf(first), 1, ...(remaining.length ? [{ kind: 'paragraph' as const, content: remaining }] : []));
+    }
   }
   const plain = (block: MdBlock | undefined) => block?.kind === 'paragraph' || block?.kind === 'list' || block?.kind === 'quote';
   out = out.filter((block, index) => block.kind !== 'rule' || (plain(out[index - 1]) && plain(out[index + 1])));

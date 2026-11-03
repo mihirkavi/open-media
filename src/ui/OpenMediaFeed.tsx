@@ -17,7 +17,7 @@ import { PostReportReason, publishListing, publishPaidPost, publishPost, rateLis
 import { loadPaidContent } from '../data/paymentsService';
 import { eventRegistration, ListingInput, listingLine, parsePrice, validateListing } from '../domain/listings';
 import { reportChoices } from '../domain/listingSafety';
-import { parseMarkdown, previewBlocks, tidyBlocks } from '../domain/markdown';
+import { cleanPostMarkdown, looksLikeMarkdown, parseMarkdown, previewBlocks, tidyBlocks } from '../domain/markdown';
 import { crossPostVideo, discardPreparedVideo, draftCrossPostVideo, prepareVideo, PreparedVideo, uploadPostVideo, UploadedVideo, VideoError } from '../data/videoUpload';
 import { CrossPostOutcome, CrossPostVideo, destinationSummary, outcomeSummary, prepareCrossPost } from '../domain/crossPosting';
 import { NetworkId, networks, safeHttpsUrl, sourceName } from '../domain/networkPosts';
@@ -329,8 +329,11 @@ function NetworkPostCard({ post, mode, lensContext, viewer, onDelete, onReport }
   const image = post.media?.[0];
   // External posts can be long; Open Media posts are short enough to show whole.
   const [showAll, setShowAll] = useState(false);
-  // Hive and Lens posts keep their own formatting; a collapsed one shows its opening blocks.
-  const blocks = useMemo(() => post.markdown ? tidyBlocks(parseMarkdown(post.markdown), post.title) : undefined, [post.markdown, post.title]);
+  // Posts keep their own formatting: Hive and Lens send Markdown, and any other post (events,
+  // Farcaster, Open Media, …) whose text reads as Markdown is shown the same way. Plain text stays
+  // plain. A collapsed post shows its opening blocks.
+  const markdown = useMemo(() => post.markdown ?? (looksLikeMarkdown(post.body) ? cleanPostMarkdown(post.body) || undefined : undefined), [post.markdown, post.body]);
+  const blocks = useMemo(() => markdown ? tidyBlocks(parseMarkdown(markdown), post.title) : undefined, [markdown, post.title]);
   const preview = useMemo(() => blocks ? previewBlocks(blocks) : undefined, [blocks]);
   const long = preview ? preview.more : !native && (!post.title || Boolean(post.event)) && (post.body.length > 420 || post.body.split('\n').length > 8);
   const [payTarget, setPayTarget] = useState<PaymentTarget>();
