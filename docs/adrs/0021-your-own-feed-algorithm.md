@@ -149,6 +149,16 @@ The builder prompt settles where it belongs. Section 20 lists **Feed** and **Alg
 
 Verified on the web (local stack, signed in, desktop and 375 px): tuning saved a new version to the account, “undo” listed the earlier version, a new lens and shared lenses were offered, unknown words showed the hint, no horizontal scroll. iOS and Android were not tested: the owner asked to defer phone testing because the simulators crash the laptop.
 
+### 10. The algorithm shown as code, with its effect (2026-11-03)
+
+The owner said the algorithm "is not saving" and "not showing the difference", and asked to "expose the source code when the user writes the algorithm prompt", for total transparency.
+
+- **What was wrong:** a boost only nudges scores, so "less hive" could leave the Feed looking the same, and nothing showed what changed. Saving to the account also swallowed errors, so a failed save looked like a success.
+- **The code:** Settings → Feed → Your algorithm now shows "The code that runs your Feed": the lens manifest exactly as the runner reads it, with its version (`lensSource` in `src/domain/lensSource.ts`). A lens is data, so the manifest is its whole source.
+- **The diff and the effect:** while the person types, it shows the exact lines their words would change (+ added, − removed), and what that does to the top 20 posts of their own Feed by network ("Hive 10 → 1") before they choose it (`sourceDiff`, `lensImpact`).
+- **Saving:** it says "Saved to your account as version N", or the real error, instead of hiding failures (`saveStatus` in `useFeedLenses`).
+- **Agents:** agents already read and change the same manifest (`get_my_feed`, `tune_feed_lens`, `get_my_feed_lens_history`).
+
 ## Consequences
 
 - People can now *develop* an algorithm: start from Relevant, Raw, Work or anyone's shared lens, and lean it a little at a time in their own words. Each step is visible in “Why this?”, can be undone, and can be audited if shared.

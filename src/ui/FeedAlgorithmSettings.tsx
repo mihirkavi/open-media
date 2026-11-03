@@ -1,9 +1,11 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useState } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from './Text';
 
-import { describeLensRules, forbiddenSignals } from '../domain/feedLenses';
+import { describeLensRules, FeedLens, forbiddenSignals, lensFromRequest, looksLikeLensRequest, looksLikeTuneRequest, tuneLens } from '../domain/feedLenses';
+import { changedLines, lensImpact, lensSource, SourceLine, sourceDiff } from '../domain/lensSource';
+import { SocialPost } from '../domain/posts';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { LensRow, useLensRows } from './SearchView';
@@ -16,8 +18,12 @@ const examples = 'more videos, less hive, only people I follow, mute crypto';
  * Algorithms in Settings (section 20) and asks for plain words with a confirmation (section 22), so
  * this is a field for writing the algorithm in words. It shows the rules of the lens in use, and the
  * same rows Search offers for the words typed: choosing one is the confirmation that saves it.
+ *
+ * Section 10: the algorithm is shown as what it is, its manifest, so nothing about it is hidden.
+ * Typing shows the exact lines the words would change and what that does to the top of the person's
+ * own Feed, before they choose it; saving says whether the account kept it, and which version.
  */
-export function FeedAlgorithmSettings({ lenses, signedIn }: { lenses: FeedLenses; signedIn: boolean }) {
+export function FeedAlgorithmSettings({ lenses, signedIn, posts = [] }: { lenses: FeedLenses; signedIn: boolean; posts?: SocialPost[] }) {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
   const [words, setWords] = useState('');
   const [saved, setSaved] = useState('');
@@ -31,6 +37,18 @@ export function FeedAlgorithmSettings({ lenses, signedIn }: { lenses: FeedLenses
     }).catch((reason) => setSaved(reason instanceof Error ? reason.message : 'That didn’t save. Try again.'));
   };
   const typed = words.trim().length >= 3;
+  // The lens these words would make: a change to the one in use, or a new one.
+  const candidate = useMemo<FeedLens | undefined>(() => {
+    const value = words.trim();
+    if (value.length < 3 || !(looksLikeTuneRequest(value) || looksLikeLensRequest(value))) return undefined;
+    const tuned = tuneLens(lenses.tuneBase, value);
+    if (tuned.changes.length) return tuned.lens;
+    const draft = lensFromRequest(value);
+    return draft.understood.length ? draft.lens : undefined;
+  }, [words, lenses.tuneBase]);
+  const diff = useMemo(() => candidate ? changedLines(sourceDiff(lensSource(lenses.lens), lensSource(candidate))) : [], [candidate, lenses.lens]);
+  const impact = useMemo(() => candidate && posts.length ? lensImpact(posts, lenses.lens, candidate, lenses.context) : [], [candidate, posts, lenses.lens, lenses.context]);
+  const status = lenses.saveStatus?.lensId === lenses.lens.id ? lenses.saveStatus : undefined;
 
   return <View style={styles.box}>
     <Text style={styles.title}>Your algorithm</Text>
@@ -46,10 +64,34 @@ export function FeedAlgorithmSettings({ lenses, signedIn }: { lenses: FeedLenses
         <View style={styles.rowCopy}><Text style={styles.rowTitle}>{row.title}</Text><Text style={styles.rowSubtitle}>{row.subtitle}</Text></View>
       </Pressable>)}
     </View> : null}
+    {candidate && diff.length ? <View style={styles.preview}>
+      <Text style={styles.previewTitle}>What this changes</Text>
+      {posts.length ? <Text style={styles.impact}>{impact.length ? `Top 20 of your Feed: ${impact.slice(0, 4).map((shift) => `${shift.network} ${shift.before} → ${shift.after}`).join(' · ')}` : 'Top 20 of your Feed: the same posts, in a different order.'}</Text> : null}
+      <Code lines={diff} />
+    </View> : null}
     {typed && !rows.length ? <Text style={styles.hint}>Not understood yet. Try words like “{examples.split(', ').slice(0, 2).join('”, “')}”, “a bit more about design”, “newest first” or “undo”.</Text> : null}
     {saved ? <Text accessibilityLiveRegion="polite" style={styles.saved}>{saved}</Text> : null}
+    {status?.state === 'saving' ? <Text style={styles.hint}>Saving to your account…</Text> : null}
+    {status?.state === 'saved' ? <Text style={styles.hint}>Saved to your account as version {status.version}. Your agents and other devices use it too.</Text> : null}
+    {status?.state === 'failed' ? <Text accessibilityRole="alert" style={styles.failed}>Not saved to your account: {status.message} It works on this device until it saves.</Text> : null}
+    {status?.state === 'device' ? <Text style={styles.hint}>Saved on this device. Sign in to keep it in your account.</Text> : null}
+    <Text style={styles.codeTitle}>The code that runs your Feed · {lenses.lens.name}{lenses.lens.builtIn ? '' : ` · version ${lenses.lens.version}`}</Text>
+    <Text style={styles.hint}>This manifest is the whole algorithm: Open Media's runner reads it and nothing else. Agents can read and change it too.</Text>
+    <Code lines={lensSource(lenses.lens).split('\n').map((text) => ({ kind: 'same' as const, text }))} />
     <Text style={styles.hint}>Never used by any algorithm: {forbiddenSignals.map((signal) => (/^[A-Z][a-z]/.test(signal) ? signal[0].toLocaleLowerCase() + signal.slice(1) : signal)).join(', ')}.</Text>
   </View>;
+}
+
+/** A manifest or a patch, in a monospace block; added lines are marked +, removed ones − and struck through. */
+function Code({ lines }: { lines: SourceLine[] }) {
+  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
+  return <ScrollView horizontal style={styles.code} contentContainerStyle={styles.codeContent}>
+    <View>
+      {lines.map((line, index) => <Text key={index} selectable style={[styles.codeLine, line.kind === 'add' && styles.codeAdd, line.kind === 'remove' && styles.codeRemove]}>
+        {line.kind === 'add' ? '+ ' : line.kind === 'remove' ? '− ' : lines.some((item) => item.kind !== 'same') ? '  ' : ''}{line.text}
+      </Text>)}
+    </View>
+  </ScrollView>;
 }
 
 function createStyles(colors: ThemeColors) { return StyleSheet.create({
@@ -68,4 +110,14 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   rowSubtitle: { marginTop: 2, color: colors.textSecondary, fontSize: 12, lineHeight: 16 },
   hint: { marginTop: 10, color: colors.textTertiary, fontSize: 12, lineHeight: 17 },
   saved: { marginTop: 10, color: colors.text, fontSize: 13, fontWeight: '600' },
+  failed: { marginTop: 10, color: colors.danger, fontSize: 12, lineHeight: 17, fontWeight: '600' },
+  preview: { marginTop: 10, gap: 6 },
+  previewTitle: { color: colors.text, fontSize: 13, fontWeight: '700' },
+  impact: { color: colors.textSecondary, fontSize: 12, lineHeight: 17 },
+  codeTitle: { marginTop: 18, color: colors.text, fontSize: 13, fontWeight: '700' },
+  code: { marginTop: 8, borderRadius: 12, backgroundColor: colors.chrome },
+  codeContent: { padding: 12 },
+  codeLine: { color: colors.textSecondary, fontSize: 12, lineHeight: 18, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  codeAdd: { color: colors.text, fontWeight: '600' },
+  codeRemove: { color: colors.textTertiary, textDecorationLine: 'line-through' },
 }); }

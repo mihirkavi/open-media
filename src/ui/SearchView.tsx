@@ -6,7 +6,7 @@ import { Text, TextInput } from './Text';
 
 import { citedAnswer } from '../domain/aiCitations';
 import { LensVersion, searchSharedLenses, StoredLens } from '../data/lensService';
-import { loadProfessionalProfile, saveProfessionalProfile } from '../data/openMediaService';
+import { loadProfessionalProfile, loadShareReadReceipts, saveProfessionalProfile, setShareReadReceipts } from '../data/openMediaService';
 import { builtInLensFor, lensFromRequest, lensSummary, looksLikeLensRequest, looksLikeTuneRequest, ownCopyId, relevantLens, tuneLens } from '../domain/feedLenses';
 import { Conversation } from '../domain/models';
 import { networks, sourceName } from '../domain/networkPosts';
@@ -49,6 +49,7 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
   const hasQuery = Boolean(search.parsed.raw);
   const lensRows = useLensRows(search.parsed.raw, lenses, Boolean(viewer));
   const profileRows = useProfileRows(query, Boolean(viewer));
+  const receiptRows = useReadReceiptRows(query, Boolean(viewer));
   const feedRows = useWebFeedRows(query, Boolean(viewer));
   const nothing = hasQuery && !search.searching && !search.posts.length && !search.settings.length && !search.messages.length && !lensRows.length && !profileRows.length && !feedRows.length;
   // Choosing a lens shows the Feed through it.
@@ -71,6 +72,7 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
   const items: ResultItem[] = (hasQuery ? [
     ...lensRows.map((row) => ({ key: row.key, section: 'Feed', icon: 'options-outline' as const, title: row.title, subtitle: row.subtitle, run: () => { row.run().then((leave) => { if (leave) showFeed(); }).catch(() => undefined); } })),
     ...feedRows.map((row) => ({ key: row.key, section: 'Web feeds', icon: 'logo-rss' as const, title: row.title, subtitle: row.subtitle, run: () => { row.run().then((leave) => { if (leave) showFeed(); }).catch(() => undefined); } })),
+    ...receiptRows.map((row) => ({ key: row.key, section: 'Messages', icon: 'checkmark-done-outline' as const, title: row.title, subtitle: row.subtitle, run: () => { row.run().catch(() => undefined); } })),
     ...profileRows.map((row) => ({ key: row.key, section: 'Your profile', icon: 'briefcase-outline' as const, title: row.title, subtitle: row.subtitle, run: () => { row.run().catch(() => undefined); } })),
     ...search.settings.map((setting) => ({ key: setting.id, section: 'Settings', icon: 'settings-outline' as const, title: setting.title, subtitle: setting.description, run: () => onNavigate?.('settings') })),
     ...search.messages.map((conversation) => ({ key: conversation.id, section: 'Messages and email', icon: (conversation.email ? 'mail-outline' : 'chatbubble-outline') as keyof typeof Ionicons.glyphMap, title: conversationTitle(conversation), subtitle: matchingLine(conversation), run: () => onOpenConversation ? onOpenConversation(conversation.id) : onNavigate?.('messages') })),
@@ -201,6 +203,39 @@ function useProfileRows(query: string, signedIn: boolean): LensRow[] {
         await saveProfessionalProfile(applyProfessionalIntent(current, intent));
         setStatus({ query, text: 'Saved. It shows on your profile.' });
       } catch (reason) { setStatus({ query, text: reason instanceof Error ? reason.message : 'That didn’t save. Try again.' }); }
+      return false;
+    },
+  }];
+}
+
+/**
+ * Read receipts are changed by saying so (ADR 0026), like everything else here: “turn off read
+ * receipts”, “read receipts on”. They are reciprocal, and the row says so before it is chosen.
+ */
+function useReadReceiptRows(query: string, signedIn: boolean): LensRow[] {
+  const [share, setShare] = useState<boolean>();
+  const [status, setStatus] = useState('');
+  const asked = /\bread\s*receipts?\b|\bseen\s*(status|receipts?)\b/i.test(query);
+  useEffect(() => {
+    if (!asked || !signedIn) return;
+    let active = true;
+    loadShareReadReceipts().then((value) => { if (active) setShare(value); }).catch(() => undefined);
+    return () => { active = false; };
+  }, [asked, signedIn]);
+  if (!asked) return [];
+  if (!signedIn) return [{ key: 'receipts', title: 'Read receipts', subtitle: 'Sign in to choose whether people see when you’ve read their messages.', run: async () => false }];
+  const wantsOff = /\b(off|stop|hide|disable|no)\b/i.test(query);
+  const wantsOn = /\b(on|start|show|enable|send)\b/i.test(query);
+  const next = wantsOff ? false : wantsOn ? true : share === undefined ? false : !share;
+  return [{
+    key: 'receipts',
+    title: next ? 'Send read receipts again' : 'Stop sending read receipts',
+    subtitle: status || (next
+      ? 'People see “Read” when you’ve opened their messages, and you see when they read yours.'
+      : `${share === false ? 'Already off. ' : ''}People won’t see when you read their messages, and you won’t see when they read yours. “Delivered” still shows.`),
+    run: async () => {
+      try { const saved = await setShareReadReceipts(next); setShare(saved); setStatus(saved ? 'Read receipts are on.' : 'Read receipts are off.'); }
+      catch (reason) { setStatus(reason instanceof Error ? reason.message : 'That didn’t save. Try again.'); }
       return false;
     },
   }];

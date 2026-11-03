@@ -12,6 +12,7 @@ import { useOpenMediaTheme } from '../themeContext';
 import { Text } from './Text';
 import { TranslationNote, useTranslation } from './useTranslation';
 import { VerifiedTick } from './VerifiedTick';
+import { OriginalLink } from './OriginalLink';
 
 /**
  * An item from a web feed the viewer follows (ADR 0024), laid out like a news card: the site's icon
@@ -58,9 +59,7 @@ export function WebFeedCard({ post, mode, lensContext }: { post: SocialPost; mod
     <TranslationNote note={translation.note} />
     {byline ? <Text numberOfLines={1} style={styles.byline}>{byline}</Text> : null}
     <View style={styles.footer}>
-      {articleUrl ? <Pressable accessibilityRole="link" accessibilityLabel={`Read the full ${feed.audio ? 'episode' : feed.alert ? 'alert' : 'article'} on ${articleHost}`} onPress={() => open(articleUrl)} style={styles.read}>
-        <Text style={styles.readText}>{feed.audio ? 'Listen' : 'Read'} on {articleHost}</Text><Ionicons name="arrow-up-outline" size={13} color={colors.text} style={styles.readArrow} />
-      </Pressable> : null}
+      {articleUrl ? <OriginalLink url={articleUrl} label={`${feed.audio ? 'Listen' : 'Read'} on ${articleHost}`} accessibilityLabel={`Read the full ${feed.audio ? 'episode' : feed.alert ? 'alert' : 'article'} on ${articleHost}`} /> : null}
       <Pressable accessibilityRole="button" accessibilityState={{ expanded }} onPress={() => setExpanded((value) => !value)} style={styles.why}><Text style={styles.whyText}>Why this?</Text></Pressable>
     </View>
     {expanded ? <View style={styles.explanation}>
@@ -142,11 +141,9 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   excerpt: { marginTop: 6, color: colors.textSecondary, fontSize: 15, lineHeight: 22 },
   excerptAlone: { marginTop: 12, color: colors.text, fontSize: 16, lineHeight: 23.5 },
   byline: { marginTop: 8, color: colors.textTertiary, fontSize: 12 },
-  footer: { marginTop: 12, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  read: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, backgroundColor: colors.surfaceAlt },
-  readText: { color: colors.text, fontSize: 12, fontWeight: '600' },
-  readArrow: { transform: [{ rotate: '45deg' }] },
-  why: { marginLeft: 'auto', minHeight: 32, justifyContent: 'center' },
+  // The same bottom-right group as every post: the original, then Why this?
+  footer: { marginTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 14 },
+  why: { minHeight: 32, justifyContent: 'center' },
   whyText: { color: colors.textSecondary, fontSize: 12, textDecorationLine: 'underline' },
   alert: { marginTop: 14, flexDirection: 'row', gap: 12, padding: 14, borderRadius: 14, backgroundColor: colors.chrome },
   alertBar: { width: 3, borderRadius: 2 },

@@ -22,6 +22,7 @@ import { networkConnectors } from '../../../src/connectors/networkFeeds';
 import { networkSearches } from '../../../src/connectors/networkSearch';
 import { collapseRepeatedPosts, NetworkId, networks } from '../../../src/domain/networkPosts';
 import { explainFeedPost, FeedMode, selectFeed, SocialPost } from '../../../src/domain/posts';
+import { applyReceipts, receiptOf, unreadCount } from '../../../src/domain/receipts';
 import { builtInLenses, FeedLens, LensContext, LensError, lensSummary, relevantLens, workLens } from '../../../src/domain/feedLenses';
 import { fieldDefinition, fieldHref, ProfileFieldError, ProfileFieldValue, profileFieldDefinitions, readVisibleFields, validateProfileFields } from '../../../src/domain/profileFields';
 import { fromJsonResume, fromLinkedInExport, isEmptyProfessional, parseProfessional, ProfessionalError, toJsonResume } from '../../../src/domain/professionalProfile';
@@ -494,6 +495,16 @@ export class Account {
     const profiles = people.length ? await this.rpc<{ id: string; handle: string; displayName: string }[]>('open_media_profile_cards', { p_ids: people }) : [];
     const byId = new Map((profiles ?? []).map((row) => [row.id, row]));
     const name = (id: string) => byId.get(id)?.displayName || byId.get(id)?.handle || 'Someone';
+    // Receipts (ADR 0026): the same rules as the app, including hidden read receipts.
+    const receipts = await this.rpc<{ conversation_id: string; user_id: string; delivered_at: string | null; read_at: string | null }[]>('open_media_conversation_receipts', { p_conversation_ids: ids }).catch(() => []) ?? [];
+    const receiptOfMessage = (conversationId: string, sentAt: string) => {
+      const others = members.filter((row) => row.conversation_id === conversationId && row.user_id !== this.userId)
+        .map((row) => receipts.find((receipt) => receipt.conversation_id === conversationId && receipt.user_id === row.user_id));
+      const [message] = applyReceipts([{ id: '', sourceMessageId: '', conversationId, senderPersonId: '', senderIdentityId: '', recipientPersonIds: [], sentAt, body: '', source: 'open_media', channel: 'native', direction: 'outbound', deliveryState: 'sent' }],
+        others.map((receipt) => ({ deliveredAt: receipt?.delivered_at ?? undefined, readAt: receipt?.read_at ?? undefined })));
+      return { receipt: receiptOf(message), ...(message.readAt ? { readAt: message.readAt } : {}) };
+    };
+    const ownRead = (conversationId: string) => receipts.find((receipt) => receipt.conversation_id === conversationId && receipt.user_id === this.userId)?.read_at ?? undefined;
     return {
       data: conversations.map((conversation) => ({
         id: conversation.id,
@@ -501,10 +512,25 @@ export class Account {
         title: conversation.title ?? members.filter((row) => row.conversation_id === conversation.id && row.user_id !== this.userId).map((row) => name(row.user_id)).join(', '),
         with: members.filter((row) => row.conversation_id === conversation.id && row.user_id !== this.userId).map((row) => ({ handle: byId.get(row.user_id)?.handle ?? null, name: name(row.user_id) })),
         updatedAt: conversation.updated_at,
+        unread: unreadCount(messages.filter((message) => message.conversation_id === conversation.id)
+          .map((message) => ({ id: message.id, sourceMessageId: message.id, conversationId: conversation.id, senderPersonId: message.sender_id, senderIdentityId: '', recipientPersonIds: [], sentAt: message.created_at, body: '', source: 'open_media' as const, channel: 'native' as const, direction: message.sender_id === this.userId ? 'outbound' as const : 'inbound' as const, deliveryState: 'sent' as const })), ownRead(conversation.id)),
         messages: messages.filter((message) => message.conversation_id === conversation.id).slice(0, limitMessages).reverse()
-          .map((message) => ({ id: message.id, from: message.sender_id === this.userId ? 'me' : name(message.sender_id), body: message.body, sentAt: message.created_at })),
+          .map((message) => ({ id: message.id, from: message.sender_id === this.userId ? 'me' : name(message.sender_id), body: message.body, sentAt: message.created_at, ...(message.sender_id === this.userId ? receiptOfMessage(conversation.id, message.created_at) : {}) })),
       })),
     };
+  }
+
+  /** Marks a conversation read, as opening it in the app does; the other person sees it if both share read receipts. */
+  async markRead(conversationId: string) {
+    if (!uuid.test(conversationId)) throw new AgentError(404, 'not_found', 'Conversation not found.');
+    const readAt = await this.rpc<string>('open_media_mark_read', { p_conversation_id: conversationId });
+    return { conversationId, readAt };
+  }
+
+  /** Read receipts are reciprocal: turning them off also hides other people's. */
+  async setReadReceipts(share: unknown) {
+    if (typeof share !== 'boolean') throw new AgentError(400, 'bad_request', 'Say true to share read receipts or false to stop.');
+    return this.rpc<{ shareReadReceipts: boolean }>('open_media_set_read_receipts', { p_share: share });
   }
 
   async startConversation(handle: unknown) {
@@ -1277,6 +1303,8 @@ function registerAccountTools(server: McpServer, account: Account) {
   tool(server, 'list_conversations', { title: 'My conversations', description: 'The person’s Open Media conversations with recent messages, newest first.', input: { messagesPerConversation: z.number().int().min(1).max(50).optional() }, readOnly: true }, (args) => account.conversations(Number(args.messagesPerConversation ?? 20)));
   tool(server, 'start_conversation', { title: 'Start a conversation', description: 'Open a direct conversation with someone by their Open Media handle.', input: { handle: z.string() }, readOnly: false }, (args) => account.startConversation(args.handle));
   tool(server, 'send_message', { title: 'Send a message', description: 'Send a message in one of the person’s conversations. Confirm the exact text with the person first.', input: { conversationId: z.string(), text: z.string().min(1).max(8000) }, readOnly: false }, (args) => account.send(String(args.conversationId), args.text));
+  tool(server, 'mark_conversation_read', { title: 'Mark a conversation read', description: 'Mark one of the person’s conversations as read, as opening it does. The other person sees “Read” only if both of them share read receipts.', input: { conversationId: z.string() }, readOnly: false }, (args) => account.markRead(String(args.conversationId)));
+  tool(server, 'set_read_receipts', { title: 'Share or hide read receipts', description: 'Turn the person’s read receipts on or off. They are reciprocal: with them off, the person also stops seeing when others read. Delivery is always shown. Confirm with the person first.', input: { share: z.boolean() }, readOnly: false }, (args) => account.setReadReceipts(args.share));
   tool(server, 'export_my_data', { title: 'Export my data', description: 'A readable copy of the person’s Open Media data.', input: {}, readOnly: true }, () => account.exportData());
   tool(server, 'block_person', { title: 'Block or unblock someone', description: 'Block (or unblock) an Open Media person by handle. Blocked people cannot message the person, and their posts are hidden.', input: { handle: z.string(), blocked: z.boolean().optional() }, readOnly: false }, (args) => account.block(args.handle, args.blocked));
   tool(server, 'report_conversation', { title: 'Report a conversation', description: 'Report unwanted contact in a conversation, naming the other person’s handle.', input: { conversationId: z.string(), handle: z.string(), messageId: z.string().optional() }, readOnly: false }, (args) => account.reportConversation(String(args.conversationId), args.handle, args.messageId));
@@ -1515,6 +1543,8 @@ function baseOpenApi(origin: string) {
         get: { summary: 'Your conversations with recent messages', security: bearer, responses: { 200: ok('Conversations'), 401: error } },
         post: { summary: 'Start a conversation with a handle', security: bearer, requestBody: textBody('handle', 24), responses: { 201: ok('The conversation'), 404: error, 401: error } },
       },
+      '/v1/me/conversations/{id}/read': { post: { summary: 'Mark a conversation read (the other person sees it only if both share read receipts)', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], responses: { 200: ok('Read'), 401: error, 403: error, 404: error } } },
+      '/v1/me/settings/read-receipts': { put: { summary: 'Share or hide read receipts (reciprocal)', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['share'], properties: { share: { type: 'boolean' } } } } } }, responses: { 200: ok('Saved'), 400: error, 401: error } } },
       '/v1/me/conversations/{id}/messages': { post: { summary: 'Send a message', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], requestBody: textBody('body', 8000), responses: { 201: ok('Sent'), 400: error, 401: error, 403: error } } },
       '/v1/me/export': { get: { summary: 'Export a readable copy of your data', security: bearer, responses: { 200: ok('Your data'), 401: error } } },
       '/v1/me/email': { get: { summary: 'Your stored email, newest first', security: bearer, parameters: [{ name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 500, default: 50 } }], responses: { 200: ok('Email'), 401: error } } },
@@ -1842,6 +1872,9 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     if (request.method === 'GET' && path === '/v1/me/export') return json(await account.exportData(), 0);
     if (request.method === 'GET' && path === '/v1/me/email') return json(await account.email(Number(url.searchParams.get('limit') ?? 50)), 0);
     if (request.method === 'POST' && path === '/v1/me/blocks') return json(await account.block(body.handle, body.blocked), 0);
+    const readMatch = path.match(/^\/v1\/me\/conversations\/([^/]+)\/read$/);
+    if (request.method === 'POST' && readMatch) return json(await account.markRead(decodeURIComponent(readMatch[1])), 0);
+    if (request.method === 'PUT' && path === '/v1/me/settings/read-receipts') return json(await account.setReadReceipts(body.share), 0);
     const conversationReport = path.match(/^\/v1\/me\/conversations\/([^/]+)\/report$/);
     if (request.method === 'POST' && conversationReport) return json(await account.reportConversation(decodeURIComponent(conversationReport[1]), body.handle, body.messageId), 0);
     if (request.method === 'DELETE' && path === '/v1/me') return json(await account.deleteAccount(body.confirmation), 0);

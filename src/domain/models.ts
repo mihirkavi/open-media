@@ -80,6 +80,9 @@ export interface Message {
   replyToMessageId?: string;
   direction: 'inbound' | 'outbound';
   deliveryState: 'received' | 'sent' | 'pending' | 'failed';
+  /** For a message you sent: when it reached everyone else's app, and when everyone read it (ADR 0026). */
+  deliveredAt?: string;
+  readAt?: string;
 }
 
 export interface Conversation {

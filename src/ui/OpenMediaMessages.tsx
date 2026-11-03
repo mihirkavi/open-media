@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, Animated, Easing, Image, Keyboard, Linking, Modal, Platform, Pressable, ScrollView, StyleProp, StyleSheet, TextStyle, View, useWindowDimensions } from "react-native";
 import { Loader } from "./Loader";
 import { PullToRefresh } from "./PullToRefresh";
+import { receiptLabel, receiptOf } from "../domain/receipts";
 import { PersonLink, PersonTarget, useSavedName } from "./people";
 import { Text, TextInput } from "./Text";
 
@@ -40,6 +41,8 @@ interface Props {
   openConversationId?: string;
   /** Pull down on the list: ask every mailbox and chat for anything new. */
   onRefresh?: () => Promise<void>;
+  /** The conversation on screen has been seen: record it as read (ADR 0026). */
+  onRead?: (conversation: Conversation) => void;
   onSetBlocked: (personId: string, blocked: boolean) => Promise<void>;
   onReport: (
     conversationId: string,
@@ -65,6 +68,7 @@ export function OpenMediaMessages({
   onReport,
   openConversationId,
   onRefresh,
+  onRead,
 }: Props) {
   const { width } = useWindowDimensions();
   const compact = width < 760;
@@ -88,6 +92,13 @@ export function OpenMediaMessages({
     // A profile's “Message” opens a person's chat by its own id, which may now be one channel of a merged conversation.
     conversations.find((conversation) => conversation.id === selectedId || conversation.channels?.some((channel) => channel.id === selectedId)) ??
     (!compact ? filtered[0] : undefined);
+  // A conversation on screen is read (ADR 0026) once its latest message is from someone else.
+  const latest = selected?.messages[selected.messages.length - 1];
+  useEffect(() => {
+    if (selected && latest?.direction === "inbound") onRead?.(selected);
+    // Only when the conversation or its latest message changes, not on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id, latest?.id]);
   const composing = newMessageOpen && messageMode === "open_media";
   const newMessagePanel = (
           <NewMessagePanel
@@ -494,6 +505,7 @@ function MessageThread({
   const isGroup = conversation.participants.length > 1;
   const senderOf = (message: Message) => conversation.participants.find((person) => person.id === message.senderPersonId) ?? otherPerson;
   const senderLabel = (message: Message) => message.direction === "outbound" ? "You" : (senderOf(message)?.name ?? "Them");
+  const lastOutboundId = [...conversation.messages].reverse().find((message) => message.direction === "outbound")?.id;
   const deliver = async (item: PendingMessage) => {
     setPending((items) => items.map((other) => (other.id === item.id ? { ...other, failed: undefined } : other)));
     try {
@@ -659,6 +671,10 @@ function MessageThread({
                   )}
                 </ReplyableBubble>
                 <MessageMedia message={item.message} />
+                {/* Receipts under your messages: a tick per group, and words under the latest one. */}
+                {item.message.direction === "outbound" && (item.groupEnd || item.message.id === lastOutboundId) ? (
+                  <ReceiptLine message={item.message} withLabel={item.message.id === lastOutboundId} />
+                ) : null}
                 {item.groupEnd && (conversation.sourceSummary.length > 1 || channels.length > 1) ? (
                   <View style={[styles.bubbleSource, item.message.direction === "outbound" && styles.outboundWrap]}>
                     <SourceMarker source={item.message.source} showLabel />
@@ -1499,6 +1515,27 @@ function capitalize(value: string) {
   return value[0].toUpperCase() + value.slice(1);
 }
 
+/**
+ * The receipt under a message you sent (ADR 0026), in the familiar symbols: a clock while sending,
+ * one tick when sent, two when delivered, two in full colour when read. The latest message also says
+ * it in words, "Read 9:41 PM", so the state never depends on telling greys apart.
+ */
+function ReceiptLine({ message, withLabel }: { message: Message; withLabel: boolean }) {
+  const { colors } = useOpenMediaTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const receipt = receiptOf(message);
+  if (!receipt) return null;
+  const icon = receipt === "sending" ? "time-outline" : receipt === "failed" ? "alert-circle" : receipt === "sent" ? "checkmark" : "checkmark-done";
+  const tint = receipt === "read" ? colors.text : receipt === "failed" ? colors.danger : colors.textTertiary;
+  const label = receiptLabel(receipt, message, (iso) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
+  return (
+    <View accessible accessibilityLabel={label} style={styles.receiptLine}>
+      {withLabel ? <Text style={[styles.receiptText, receipt === "read" && styles.receiptTextRead]}>{label}</Text> : null}
+      <Ionicons name={icon} size={receipt === "sent" ? 13 : 15} color={tint} />
+    </View>
+  );
+}
+
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     layout: { flex: 1, flexDirection: "row", backgroundColor: colors.surface },
@@ -1832,6 +1869,9 @@ function createStyles(colors: ThemeColors) {
     sendingBubble: { opacity: 0.72 },
     failedBubble: { opacity: 0.45 },
     deliveryStatus: { marginTop: 3, marginRight: 6, alignSelf: "flex-end", color: colors.textTertiary, fontSize: 11 },
+    receiptLine: { minHeight: 18, marginTop: 3, marginRight: 6, flexDirection: "row", alignItems: "center", alignSelf: "flex-end", gap: 4 },
+    receiptText: { color: colors.textTertiary, fontSize: 11, fontWeight: "500" },
+    receiptTextRead: { color: colors.textSecondary },
     deliveryLine: { minHeight: 24, marginTop: 2, flexDirection: "row", alignItems: "center", alignSelf: "flex-end", gap: 4 },
     deliveryFailed: { color: colors.danger, fontSize: 12, fontWeight: "600" },
     disabledComposer: {

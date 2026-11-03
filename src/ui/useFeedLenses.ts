@@ -33,7 +33,11 @@ export interface FeedLenses {
   history: (id: string) => Promise<LensVersion[]>;
   /** Makes an earlier version the newest one and shows it in the Feed. */
   revert: (id: string, version: number) => Promise<void>;
+  /** The last save to the account, so a failure is said out loud instead of looking saved. */
+  saveStatus?: LensSaveStatus;
 }
+
+export type LensSaveStatus = { lensId: string; state: 'saving' } | { lensId: string; state: 'saved'; version: number } | { lensId: string; state: 'failed'; message: string } | { lensId: string; state: 'device' };
 
 /**
  * The Feed's lenses (ADR 0017). Saved lenses and the chosen one stay on this device, and for a
@@ -86,13 +90,19 @@ export function useFeedLenses(viewerId?: string, fallback: 'relevant' | 'raw' = 
     return () => { active = false; };
   }, [viewerId]);
 
+  const [saveStatus, setSaveStatus] = useState<LensSaveStatus>();
   const apply = useCallback((lens: FeedLens, forkedFrom?: string) => {
     if (lens.builtIn) { setActiveId(lens.id); return; }
     setSaved((existing) => mergeLenses(existing, [lens]));
     setActiveId(lens.id);
+    // Signed out, the lens lives on this device only.
+    if (!viewerId) { setSaveStatus({ lensId: lens.id, state: 'device' }); return; }
     // A shared lens stays shared when it is tuned; the account assigns the version number.
     const visibility = sharedIds.current.has(lens.id) ? 'public' : 'private';
-    if (viewerId) saveMyLens(lens, visibility, forkedFrom).then((stored) => setSaved((existing) => mergeLenses(existing, [stored.lens]))).catch(() => undefined);
+    setSaveStatus({ lensId: lens.id, state: 'saving' });
+    saveMyLens(lens, visibility, forkedFrom)
+      .then((stored) => { setSaved((existing) => mergeLenses(existing, [stored.lens])); setSaveStatus({ lensId: lens.id, state: 'saved', version: stored.lens.version }); })
+      .catch((reason) => setSaveStatus({ lensId: lens.id, state: 'failed', message: reason instanceof Error ? reason.message : 'Couldn’t save it to your account.' }));
   }, [viewerId]);
 
   // A share link (?lens=…) opens that lens; the link is then removed from the address bar.
@@ -140,7 +150,7 @@ export function useFeedLenses(viewerId?: string, fallback: 'relevant' | 'raw' = 
   const lenses = useMemo(() => [...builtInLenses, ...saved], [saved]);
   const tuneBase = useMemo(() => (lens.builtIn ? saved.find((item) => item.id === ownCopyId(lens)) ?? lens : lens), [lens, saved]);
   const context = useMemo<LensContext>(() => ({ followedAuthorIds: followed, interests }), [followed, interests]);
-  return { lens, lenses, context, interests, choose: setActiveId, apply, remove, share, addInterests, tuneBase, history, revert };
+  return { lens, lenses, context, interests, choose: setActiveId, apply, remove, share, addInterests, tuneBase, history, revert, saveStatus };
 }
 
 function validLenses(values: unknown): FeedLens[] {

@@ -5,6 +5,7 @@ import {
 } from "@supabase/supabase-js";
 
 import { Conversation, Message, Person } from "../domain/models";
+import { applyReceipts, unreadCount } from "../domain/receipts";
 import { isEmptyProfessional, parseProfessional, ProfessionalProfile, toJsonResume } from "../domain/professionalProfile";
 import { ProfileFieldValue, validateProfileFields } from "../domain/profileFields";
 import { getSupabaseClient } from "../auth/supabase";
@@ -249,6 +250,11 @@ export async function loadOpenMediaConversations(
   if (conversationResult.error) throw conversationResult.error;
   if (membersResult.error) throw membersResult.error;
   if (messagesResult.error) throw messagesResult.error;
+  // Receipts (ADR 0026): everyone's delivery and read times the caller may see. Loading the
+  // conversations is itself delivery, so it is recorded once this list arrives.
+  const { data: receiptData } = await client.rpc("open_media_conversation_receipts", { p_conversation_ids: conversationIds });
+  const receipts = (receiptData ?? []) as ReceiptRow[];
+  client.rpc("open_media_mark_delivered").then(() => undefined, () => undefined);
 
   const rows = (membersResult.data ?? []) as MembershipRow[];
   const userIds = [...new Set(rows.map((row) => row.user_id))];
@@ -272,9 +278,12 @@ export async function loadOpenMediaConversations(
         .map((row) => profiles.get(row.user_id))
         .filter((card): card is ProfileCard => Boolean(card))
         .map(personFromCard);
-      const conversationMessages = messages
+      const own = receipts.find((row) => row.conversation_id === conversation.id && row.user_id === currentUserId);
+      const others = participantRows.map((row) => receipts.find((receipt) => receipt.conversation_id === conversation.id && receipt.user_id === row.user_id))
+        .map((receipt) => ({ deliveredAt: receipt?.delivered_at ?? undefined, readAt: receipt?.read_at ?? undefined }));
+      const conversationMessages = applyReceipts(messages
         .filter((message) => message.conversation_id === conversation.id)
-        .map((message) => mapMessage(message, currentUserId, participantRows));
+        .map((message) => mapMessage(message, currentUserId, participantRows)), others);
       const lastMessage = conversationMessages[conversationMessages.length - 1];
       return {
         id: conversation.id,
@@ -287,7 +296,7 @@ export async function loadOpenMediaConversations(
         sourceSummary: ["open_media"],
         lastMessageAt: lastMessage?.sentAt ?? conversation.created_at,
         preview: lastMessage?.body ?? "Start the conversation.",
-        unreadCount: 0,
+        unreadCount: unreadCount(conversationMessages, own?.read_at ?? undefined),
         labels: conversation.kind === "group" ? ["Group"] : [],
       } satisfies Conversation;
     })
@@ -296,6 +305,28 @@ export async function loadOpenMediaConversations(
         new Date(right.lastMessageAt).getTime() -
         new Date(left.lastMessageAt).getTime(),
     );
+}
+
+interface ReceiptRow { conversation_id: string; user_id: string; delivered_at: string | null; read_at: string | null }
+
+/** Opening a conversation reads it (ADR 0026). Resolves with the read time the database recorded. */
+export async function markConversationRead(conversationId: string): Promise<string | undefined> {
+  const { data, error } = await requireClient().rpc("open_media_mark_read", { p_conversation_id: conversationId });
+  if (error) throw error;
+  return (data as string | null) ?? undefined;
+}
+
+/** Whether the person sends (and so also sees) read receipts. On unless they turned it off. */
+export async function loadShareReadReceipts(): Promise<boolean> {
+  const { data, error } = await requireClient().rpc("open_media_message_settings");
+  if (error) throw error;
+  return (data as { shareReadReceipts?: boolean } | null)?.shareReadReceipts !== false;
+}
+
+export async function setShareReadReceipts(share: boolean): Promise<boolean> {
+  const { data, error } = await requireClient().rpc("open_media_set_read_receipts", { p_share: share });
+  if (error) throw error;
+  return (data as { shareReadReceipts?: boolean } | null)?.shareReadReceipts !== false;
 }
 
 export function subscribeToOpenMediaMessages(

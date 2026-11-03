@@ -18,6 +18,7 @@ import {
 import {
   listBlockedUserIds,
   loadOpenMediaConversations,
+  markConversationRead,
   OpenMediaProfile as OpenMediaProfileData,
   reportConversation,
   searchOpenMediaProfiles,
@@ -216,6 +217,14 @@ export function OpenMediaApp({
       if (sequence === refreshSequence.current) setMessagesLoading(false);
     }
   }, [currentUserId, messageMode]);
+  // A conversation on screen is read (ADR 0026): its Open Media chats record it, and its unread
+  // count clears at once. Email and bridged channels keep their own read state.
+  const readConversation = useCallback((conversation: Conversation) => {
+    const ids = (conversation.channels ?? [conversation]).filter((channel) => channel.sourceSummary.includes("open_media") && !channel.email).map((channel) => channel.id);
+    if (!ids.length || messageMode !== "open_media") return;
+    setNativeConversations((current) => current.map((item) => (ids.includes(item.id) && item.unreadCount ? { ...item, unreadCount: 0 } : item)));
+    ids.forEach((id) => { markConversationRead(id).catch(() => undefined); });
+  }, [messageMode]);
   // Pulling down on Messages: every mailbox checks for new mail now, then mail and chats reload.
   const pullMessages = useCallback(async () => {
     const mailboxes = messageMode === "open_media" ? await listMailAccounts().catch(() => []) : [];
@@ -493,6 +502,7 @@ export function OpenMediaApp({
             blockedUserIds={blockedUserIds}
             onRetry={refreshMessages}
             onRefresh={pullMessages}
+            onRead={readConversation}
             onSend={sendMessage}
             onSearchProfiles={searchProfiles}
             onStartConversation={beginConversation}
@@ -529,6 +539,7 @@ export function OpenMediaApp({
           <OpenMediaSettings
             lenses={lenses}
             signedIn={Boolean(currentUserId)}
+            posts={feed.posts}
             onMailSynced={onMailSynced}
           />
         ) : null}
