@@ -136,6 +136,19 @@ The owner reported two problems after trying phase 1:
 - **"Why this?" says when Relevant has nothing else to go on.** This shows when a ranked lens reads follows or topics but the person has neither. It tells them to follow people or search "more about …".
 - **Your copy takes Relevant's place in the picker.** The picker still has at most three choices: My Relevant (or Relevant), Raw, and Work or a saved lens. To get Open Media's own Relevant back, search "original relevant" (also "reset relevant" or "relevant again"). That switches the Feed and keeps your copy. Searching "my relevant" brings your copy back. No new buttons.
 
+### 9. A place to write your algorithm: Settings → Feed → Your algorithm (2026-11-02)
+
+The owner could not find where to type their algorithm. Search was the only place, and nothing on screen said so.
+
+The builder prompt settles where it belongs. Section 20 lists **Feed** and **Algorithms** among what Settings contains, and section 22 asks for plain words with a confirmation for consequential changes. Settings already had a Feed section with the picker, so the field goes there; it is not a new screen or button.
+
+- **Your algorithm** sits under Default feed. It shows the lens in use and its rules in words (inspect, section 24), then a text field: “more videos, less hive, only people I follow, mute crypto”.
+- Typing shows the same rows Search shows for those words (`useLensRows`, now exported from `SearchView.tsx`): tune the lens in use, write a new lens, use a shared one, or go back a version with “undo”. Nothing changes until a row is chosen; choosing it is the confirmation. Return chooses the first row.
+- Words it doesn't understand say so and give examples. The section ends with the signals no algorithm may use (sections 23 and 26).
+- Search keeps working as before. The “Why this?” hint and agents' `why.tuneHint` now say “type … in Settings → Feed or in Search”.
+
+Verified on the web (local stack, signed in, desktop and 375 px): tuning saved a new version to the account, “undo” listed the earlier version, a new lens and shared lenses were offered, unknown words showed the hint, no horizontal scroll. iOS and Android were not tested: the owner asked to defer phone testing because the simulators crash the laptop.
+
 ## Consequences
 
 - People can now *develop* an algorithm: start from Relevant, Raw, Work or anyone's shared lens, and lean it a little at a time in their own words. Each step is visible in “Why this?”, can be undone, and can be audited if shared.

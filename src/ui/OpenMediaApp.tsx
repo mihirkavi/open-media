@@ -498,9 +498,8 @@ export function OpenMediaApp({
         ) : null}
         {!person && destination === "settings" ? (
           <OpenMediaSettings
-            feedLens={lenses.lens.id}
-            feedLenses={lenses.lenses}
-            onFeedLensChange={lenses.choose}
+            lenses={lenses}
+            signedIn={Boolean(currentUserId)}
             onMailSynced={onMailSynced}
           />
         ) : null}

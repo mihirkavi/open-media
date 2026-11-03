@@ -136,7 +136,7 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
   </ScrollView></SearchHighlight.Provider>;
 }
 
-interface LensRow { key: string; title: string; subtitle: string; run: () => Promise<boolean> }
+export interface LensRow { key: string; title: string; subtitle: string; run: () => Promise<boolean> }
 
 /**
  * The work side of a profile (ADR 0018) is changed by saying it: “my headline is Product designer”,
@@ -172,9 +172,10 @@ const originalRelevantPattern = /\b(original|default|reset|plain|built[- ]?in|op
  * follow, no crypto” becomes one result row showing the lens it understood, and choosing the row
  * switches the Feed to it. Saved lenses can be switched to, shared or removed by name, and lenses
  * other people shared are offered for the same words. Words like “less hive” or “more videos” tune
- * the lens in use, and “undo” goes back a version (ADR 0021). No other control exists for lenses.
+ * the lens in use, and “undo” goes back a version (ADR 0021). Settings → Feed offers the same rows
+ * under “Your algorithm”, for people who look for their algorithm there.
  */
-function useLensRows(query: string, lenses: FeedLenses | undefined, signedIn: boolean): LensRow[] {
+export function useLensRows(query: string, lenses: FeedLenses | undefined, signedIn: boolean): LensRow[] {
   const [shared, setShared] = useState<StoredLens[]>([]);
   const [status, setStatus] = useState<Record<string, string>>({});
   const [versions, setVersions] = useState<{ id: string; items: LensVersion[]; error?: string }>();

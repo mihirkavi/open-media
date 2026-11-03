@@ -462,12 +462,12 @@ function tuneHintFor(post: SocialPost, lens: FeedLens, signals: Signals): string
   const kind = postKinds(post)[0];
   const source = sourceName(post.provenance.connectorId).toLocaleLowerCase();
   const name = lens.builtIn ? `your own ${lens.name}` : lens.name;
-  const tune = `To change ${name}, search “less ${source}” or “more ${kindLabels[kind]}”.`;
+  const tune = `To change ${name}, type “less ${source}” or “more ${kindLabels[kind]}” in Settings → Feed or in Search.`;
   // With nobody followed and no topics, a lens that reads only those has little to go on: say so.
   const reads = (lens.objectives.follows > 0 && signals.followsAllowed) || (lens.objectives.interests > 0 && signals.interestsAllowed);
   const hasSignals = signals.followed.size > 0 || signals.interests.length > 0;
   if (lens.order !== 'ranked' || !reads || hasSignals) return tune;
-  return `${lens.name} has only newness and the network mix to go on: you follow no one yet and chose no topics. Follow people, or search “more about design” (any topic), and it will lift those posts. ${tune}`;
+  return `${lens.name} has only newness and the network mix to go on: you follow no one yet and chose no topics. Follow people, or type “more about design” (any topic), and it will lift those posts. ${tune}`;
 }
 
 export function explainLensPost(post: SocialPost, lens: FeedLens, context: LensContext = {}): LensExplanation {
