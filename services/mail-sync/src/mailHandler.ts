@@ -9,6 +9,7 @@ import { Bridges, BridgesEnv } from './bridges.js';
 import { decryptSecret, encryptSecret } from './crypto.js';
 import { createSignedKeyRequest, FarcasterSignerEnv, farcasterPublishingConfigured, forwardSignedMessage, parseEd25519PublicKey } from './farcasterSigner.js';
 import { UserFacingError } from './errors.js';
+import { formatCursor, parseCursor } from './mailCursor.js';
 import { syncImap, testImap } from './imap.js';
 import { findSenderIcon, isIconDomain } from './senderIcons.js';
 import { resolveMailHost } from './networkSafety.js';
@@ -53,8 +54,11 @@ const schema = z.object({
     security: z.enum(['tls', 'starttls']),
   }).optional(),
 });
-/** How long a long-polling sync waits for new mail before answering; browsers keep requests this long. */
-const mailWaitMs = 25_000;
+/**
+ * How long a live sync waits for new mail before answering. Browsers, Cloudflare (100 s) and the
+ * phones' network stacks (iOS gives up after 60 s of silence) all keep a request open this long.
+ */
+const mailWaitMs = 40_000;
 const mailPorts = new Set([993, 143, 995, 110, 465, 587, 2525]);
 const address = z.email().max(320);
 const sendSchema = z.object({
@@ -153,23 +157,32 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
 
     const syncMatch = request.method === 'POST' && url.pathname.match(/^\/v1\/mail-accounts\/([^/]+)\/sync$/);
     if (syncMatch) {
-      if (!await allowed(env.MAIL_SYNC_RATE_LIMITER, session.userId)) return rateLimited(headers);
+      // Per mailbox, so several mailboxes and devices following mail live don't crowd each other out.
+      if (!await allowed(env.MAIL_SYNC_RATE_LIMITER, `${session.userId}:${syncMatch[1]}`)) return rateLimited(headers);
       const account = await repository.findAccount(session.userId, syncMatch[1]);
       if (!account) return json(404, { error: 'Mailbox not found.' }, headers);
       const input = await connectionInput({ ...account, password: decryptSecret(account.encryptedSecret, env.MAIL_CREDENTIALS_KEY) }, env);
+      const since = parseCursor(url.searchParams.get('cursor'));
+      let cursor: string | undefined;
       // IMAP downloads only new mail and saves batch by batch, so attachments never pile up in
-      // memory. With ?wait=1 it then waits briefly for new mail, so the app can long-poll.
+      // memory. With ?wait=1 it then waits for new mail, so the app can long-poll (ADR 0025).
       const messages = account.protocol === 'imap'
         ? await syncImap(input, {
           save: (batch) => repository.saveMessages(session.userId, account.id, batch),
           known: (ids) => repository.knownSenders(account.id, ids),
           waitMs: url.searchParams.get('wait') === '1' ? mailWaitMs : undefined,
+          cursor: since?.kind === 'imap' ? since.imap : undefined,
+          onCursor: (imap) => { cursor = formatCursor({ kind: 'imap', imap }); },
         })
-        : await syncPop3(input);
-      if (account.protocol !== 'imap') await repository.saveMessages(session.userId, account.id, messages);
+        : await syncPop3(input, undefined, {
+          cursor: since?.kind === 'pop' ? since.pop : undefined,
+          onCursor: (pop) => { cursor = formatCursor({ kind: 'pop', pop }); },
+          known: (ids) => repository.knownSenders(account.id, ids),
+        });
+      if (account.protocol !== 'imap' && messages.length) await repository.saveMessages(session.userId, account.id, messages);
       // File bytes stay on the server; clients read stored mail through the database.
-  const summaries = messages.map(({ attachments, ...message }) => ({ ...message, attachmentCount: attachments?.length ?? 0 }));
-  return json(200, { messages: summaries, count: messages.length, mode: account.protocol === 'imap' ? 'sync' : 'import' }, headers);
+      const summaries = messages.map(({ attachments, ...message }) => ({ ...message, attachmentCount: attachments?.length ?? 0 }));
+      return json(200, { messages: summaries, count: messages.length, mode: account.protocol === 'imap' ? 'sync' : 'import', cursor }, headers);
     }
 
     const sendMatch = request.method === 'POST' && url.pathname.match(/^\/v1\/mail-accounts\/([^/]+)\/send$/);

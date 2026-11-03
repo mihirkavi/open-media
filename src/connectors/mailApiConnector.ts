@@ -68,10 +68,20 @@ export async function disconnectMailAccount(accountId: string): Promise<void> {
   await request(`/v1/mail-accounts/${encodeURIComponent(accountId)}`, { method: 'DELETE' }, 'Could not disconnect this mailbox.');
 }
 
-/** Fetches new mail. With `wait`, the service holds the request open briefly and answers as soon as new mail arrives. */
-export async function syncMailAccount(accountId: string, { wait = false, signal }: { wait?: boolean; signal?: AbortSignal } = {}): Promise<SyncedMailMessage[]> {
-  const payload = await request<{ messages?: SyncedMailMessage[] }>(`/v1/mail-accounts/${encodeURIComponent(accountId)}/sync${wait ? '?wait=1' : ''}`, { method: 'POST', signal }, 'Mailbox sync failed.');
+/** Fetches new mail now. */
+export async function syncMailAccount(accountId: string): Promise<SyncedMailMessage[]> {
+  const payload = await request<{ messages?: SyncedMailMessage[] }>(`/v1/mail-accounts/${encodeURIComponent(accountId)}/sync`, { method: 'POST' }, 'Mailbox sync failed.');
   return payload.messages ?? [];
+}
+
+/**
+ * One live sync: answers as soon as new mail arrives, or empty after about 40 seconds. Pass back
+ * the `cursor` from the last answer, so the service skips folders that haven't changed (ADR 0025).
+ */
+export async function followMailAccount(accountId: string, { cursor, signal }: { cursor?: string; signal?: AbortSignal } = {}): Promise<{ messages: SyncedMailMessage[]; cursor?: string }> {
+  const query = `?wait=1${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`;
+  const payload = await request<{ messages?: SyncedMailMessage[]; cursor?: string }>(`/v1/mail-accounts/${encodeURIComponent(accountId)}/sync${query}`, { method: 'POST', signal }, 'Mailbox sync failed.');
+  return { messages: payload.messages ?? [], cursor: typeof payload.cursor === 'string' ? payload.cursor : undefined };
 }
 
 export async function sendMail(accountId: string, mail: OutgoingMail): Promise<SyncedMailMessage> {

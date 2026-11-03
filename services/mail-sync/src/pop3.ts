@@ -6,7 +6,8 @@ import { UserFacingError } from './errors.js';
 import { describeMailError } from './imap.js';
 import { collectAttachments, collectRemoteImages } from './mailMedia.js';
 import { verifySender } from './senderVerification.js';
-import { MailAccountInput, SyncedMessage } from './types.js';
+import { PopCursor } from './mailCursor.js';
+import { MailAccountInput, StoredPeople, SyncedMessage } from './types.js';
 
 interface PopConnection {
   command(command: string, multiline?: boolean): Promise<string>;
@@ -27,15 +28,39 @@ export async function testPop3(input: MailAccountInput): Promise<void> {
   } finally { connection.close(); }
 }
 
-export async function syncPop3(input: MailAccountInput, limit = 50): Promise<SyncedMessage[]> {
+export interface PopSyncOptions {
+  /** Where the last sync left the mailbox: unchanged means nothing is downloaded. */
+  cursor?: PopCursor;
+  /** Called after a finished sync with where it left the mailbox. */
+  onCursor?: (cursor: PopCursor) => void;
+  /** Stored Message-IDs, so only mail that isn't stored yet is returned. */
+  known?: (sourceMessageIds: string[]) => Promise<Map<string, StoredPeople>>;
+}
+
+/**
+ * Downloads the newest messages. POP has no way to wait for mail, so the app asks again every few
+ * seconds; with a cursor, a mailbox that hasn't changed costs a sign-in, STAT and UIDL, and only
+ * messages after the last one seen are downloaded. With `known`, only unstored mail is returned.
+ */
+export async function syncPop3(input: MailAccountInput, limit = 50, { cursor, onCursor, known }: PopSyncOptions = {}): Promise<SyncedMessage[]> {
   const connection = await connectPop3(input);
   try {
     await connection.command(`USER ${input.username}`);
     await connection.command(`PASS ${input.password}`);
     const stat = await connection.command('STAT');
     const count = Number(stat.split(/\s+/)[1] ?? 0);
+    // Unique ids by message number; servers without UIDL fall back to comparing the count.
+    const ids = count ? await connection.command('UIDL', true).then(parseUidl, () => new Map<number, string>()) : new Map<number, string>();
+    const reached = { count, last: ids.get(count) ?? '' };
+    if (cursor && cursor.count === reached.count && cursor.last === reached.last) {
+      await connection.command('QUIT');
+      onCursor?.(reached);
+      return [];
+    }
+    // Only messages after the newest one seen last time, when it is still there.
+    const seenAt = cursor?.last ? [...ids].find(([, id]) => id === cursor.last)?.[0] : undefined;
     const messages: SyncedMessage[] = [];
-    for (let index = Math.max(1, count - limit + 1); index <= count; index += 1) {
+    for (let index = Math.max(1, count - limit + 1, (seenAt ?? 0) + 1); index <= count; index += 1) {
       const source = await connection.command(`RETR ${index}`, true);
       const parsed = await simpleParser(source);
       const brand = await verifySender(parsed.from?.value[0]?.address ?? '', parsed.headerLines);
@@ -50,8 +75,21 @@ export async function syncPop3(input: MailAccountInput, limit = 50): Promise<Syn
       });
     }
     await connection.command('QUIT');
-    return messages;
+    onCursor?.(reached);
+    if (!known) return messages;
+    const stored = await known(messages.map((message) => message.sourceMessageId));
+    return messages.filter((message) => !stored.has(message.sourceMessageId));
   } finally { connection.close(); }
+}
+
+/** "1 abc\r\n2 def" → message number → unique id. */
+function parseUidl(listing: string): Map<number, string> {
+  const ids = new Map<number, string>();
+  for (const line of listing.split('\r\n')) {
+    const [number, id] = line.trim().split(/\s+/);
+    if (number && id) ids.set(Number(number), id);
+  }
+  return ids;
 }
 
 async function connectPop3(input: MailAccountInput): Promise<PopConnection> {
@@ -72,8 +110,10 @@ async function connectPop3(input: MailAccountInput): Promise<PopConnection> {
   await new Promise<void>((resolve, reject) => { socket.once(input.allowPlaintext ? 'connect' : 'secureConnect', () => resolve()); socket.once('error', reject); });
 
   const readResponse = async (multiline = false) => {
-    const terminator = multiline ? '\r\n.\r\n' : '\r\n';
-    while (!buffer.includes(terminator)) {
+    // An error is always one line, even for a command that answers with a list.
+    const terminatorFor = () => (multiline && !buffer.startsWith('-') ? '\r\n.\r\n' : '\r\n');
+    let terminator = terminatorFor();
+    while (!buffer.includes((terminator = terminatorFor()))) {
       if (failure) throw failure;
       await new Promise<string>((resolve) => { waiter = resolve; });
     }

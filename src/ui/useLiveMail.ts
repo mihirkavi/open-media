@@ -1,13 +1,15 @@
 import { useEffect, useRef } from "react";
-import { AppState } from "react-native";
+import { AppState, Platform } from "react-native";
 
-import { listMailAccounts, syncMailAccount } from "../connectors/mailApiConnector";
+import { followMailAccount, listMailAccounts } from "../connectors/mailApiConnector";
 import { nextMailPoll } from "../domain/liveMail";
 
 /**
  * Keeps email live while the app is open, like a chat: each mailbox has one waiting sync that
- * the service answers the moment new mail arrives. It stops in the background and catches up
- * when the app comes back. `accountsVersion` restarts it after a mailbox is added or removed.
+ * the service answers the moment new mail arrives (ADR 0025). Each answer carries a cursor that
+ * makes the next wait cheap. On a phone it stops in the background, where the system would
+ * suspend it anyway, and catches up when the app comes back; a web tab keeps following mail when
+ * it is hidden, like any mail client. `accountsVersion` restarts it after a mailbox is added or removed.
  */
 export function useLiveMail(enabled: boolean, accountsVersion: number, onNewMail: () => void) {
   const onNewMailRef = useRef(onNewMail);
@@ -17,11 +19,14 @@ export function useLiveMail(enabled: boolean, accountsVersion: number, onNewMail
     let controller: AbortController | undefined;
     const follow = async (accountId: string, signal: AbortSignal) => {
       let failures = 0;
+      let cursor: string | undefined;
       while (!signal.aborted) {
         const started = Date.now();
         let newMessages = 0;
         try {
-          newMessages = (await syncMailAccount(accountId, { wait: true, signal })).length;
+          const answer = await followMailAccount(accountId, { cursor, signal });
+          cursor = answer.cursor;
+          newMessages = answer.messages.length;
           failures = 0;
           if (newMessages) onNewMailRef.current();
         } catch {
@@ -37,14 +42,21 @@ export function useLiveMail(enabled: boolean, accountsVersion: number, onNewMail
       controller = current;
       listMailAccounts()
         .then((accounts) => accounts.forEach((account) => follow(account.id, current.signal)))
-        .catch(() => undefined);
+        .catch(() => {
+          // Try again on the next return to the app.
+          if (controller === current) controller = undefined;
+        });
     };
     const stop = () => {
       controller?.abort();
       controller = undefined;
     };
-    if (AppState.currentState !== "background") start();
-    const subscription = AppState.addEventListener("change", (state) => (state === "active" ? start() : state === "background" ? stop() : undefined));
+    const followsInBackground = Platform.OS === "web";
+    if (followsInBackground || AppState.currentState !== "background") start();
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") start();
+      else if (state === "background" && !followsInBackground) stop();
+    });
     return () => {
       subscription.remove();
       stop();

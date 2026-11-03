@@ -65,9 +65,11 @@ test('IMAP sign-in finishes when nextTick runs as a microtask, as on Cloudflare 
  * `withAttachment` adds a small file to each message; `reportedSize` overrides RFC822.SIZE.
  * IDLE is supported, and `deliver()` adds a message and tells idling clients, like new mail.
  */
-async function fakeMailbox({ count, dropAfterFetches, hangOnLogout = false, withAttachment = false, reportedSize, withCc = false }: { count: number; dropAfterFetches?: number; hangOnLogout?: boolean; withAttachment?: boolean; reportedSize?: number; withCc?: boolean }) {
+async function fakeMailbox({ count, dropAfterFetches, hangOnLogout = false, withAttachment = false, reportedSize, withCc = false, deliverWhenSentOpens = false }: { count: number; dropAfterFetches?: number; hangOnLogout?: boolean; withAttachment?: boolean; reportedSize?: number; withCc?: boolean; deliverWhenSentOpens?: boolean }) {
   const sockets = new Set<Socket>();
   const fetched: string[] = [];
+  /** Every FETCH range, headers included. */
+  const fetches: string[] = [];
   const idling = new Set<Socket>();
   const headers = (i: number) => `Message-ID: <m${i}@example.test>\r\nFrom: Sender <s${i}@example.test>\r\nSubject: Test ${i}\r\n`;
   const message = (i: number) => withAttachment
@@ -92,10 +94,15 @@ async function fakeMailbox({ count, dropAfterFetches, hangOnLogout = false, with
         if (upper === 'LOGIN') socket.write(`${tag} OK logged in\r\n`);
         else if (upper === 'CAPABILITY') socket.write(`* CAPABILITY IMAP4rev1 SPECIAL-USE IDLE\r\n${tag} OK done\r\n`);
         else if (upper === 'LIST') socket.write(`* LIST (\\HasNoChildren) "/" "INBOX"\r\n* LIST (\\HasNoChildren \\Sent) "/" "Sent Messages"\r\n${tag} OK done\r\n`);
-        else if (upper === 'EXAMINE' || upper === 'SELECT') socket.write(`* ${count} EXISTS\r\n* OK [UIDVALIDITY 1] ok\r\n${tag} OK [READ-ONLY] done\r\n`);
+        else if (upper === 'EXAMINE' || upper === 'SELECT') {
+          // New mail lands in INBOX while the Sent folder is being read.
+          if (deliverWhenSentOpens && /Sent/.test(line)) { deliverWhenSentOpens = false; count += 1; }
+          socket.write(`* ${count} EXISTS\r\n* OK [UIDVALIDITY 1] ok\r\n* OK [UIDNEXT ${count + 1}] ok\r\n${tag} OK [READ-ONLY] done\r\n`);
+        }
         else if (upper === 'FETCH' || (upper === 'UID' && arg?.toUpperCase() === 'FETCH')) {
           const range = upper === 'UID' ? line.split(' ')[3] : arg;
           const withBody = /BODY(\.PEEK)?\[\]/i.test(line);
+          fetches.push(range);
           if (withBody) {
             fetched.push(range);
             if (dropAfterFetches !== undefined && ++bodyFetches > dropAfterFetches) { socket.destroy(); return; }
@@ -122,7 +129,9 @@ async function fakeMailbox({ count, dropAfterFetches, hangOnLogout = false, with
   if (!address || typeof address === 'string') throw new Error('No port');
   const input = { email: 'person@example.test', protocol: 'imap' as const, host: '127.0.0.1', port: address.port, secure: false, username: 'person', password: 'test-password', allowPlaintext: true };
   const deliver = () => { count += 1; idling.forEach((socket) => socket.write(`* ${count} EXISTS\r\n`)); };
-  return { input, fetched, deliver, close: () => { sockets.forEach((socket) => socket.destroy()); server.close(); } };
+  /** The newest message is deleted, then a new one arrives: the count ends where it started. */
+  const replaceNewest = () => { idling.forEach((socket) => socket.write(`* ${count} EXPUNGE\r\n* ${count} EXISTS\r\n`)); };
+  return { input, fetched, fetches, deliver, replaceNewest, close: () => { sockets.forEach((socket) => socket.destroy()); server.close(); } };
 }
 
 /** How the fake mailbox's message `i` is stored once synced with names. */
@@ -262,5 +271,58 @@ test('Cc recipients are kept, and mail saved before Cc was kept is downloaded on
     const messages = await syncImap(mailbox.input, { limits: { INBOX: 2, Sent: 0 }, known: async () => stored });
     assert.deepEqual(messages.map((message) => message.subject), ['Test 2'], 'only the message saved without Cc');
     assert.deepEqual(messages[0].to, ['"Me" <person@example.test>', '"Ana Lima" <ana@example.test>']);
+  } finally { mailbox.close(); }
+});
+
+const storedAll = async (ids: string[]) => new Map(ids.map((id) => [id, people(Number(id.match(/\d+/)![0]))]));
+
+test('a sync hands back a cursor, and with it an unchanged mailbox reads no headers at all', async () => {
+  const { syncImap } = await import('./imap.js');
+  const mailbox = await fakeMailbox({ count: 5 });
+  try {
+    let cursor: import('./mailCursor.js').ImapCursor | undefined;
+    await syncImap(mailbox.input, { limits: { INBOX: 5, Sent: 5 }, known: storedAll, onCursor: (next) => { cursor = next; } });
+    assert.deepEqual(cursor, { inbox: { validity: '1', next: 6 }, sent: { validity: '1', next: 6 } });
+    const before = mailbox.fetches.length;
+    const messages = await syncImap(mailbox.input, { limits: { INBOX: 5, Sent: 5 }, known: async () => { throw new Error('should not ask'); }, cursor });
+    assert.deepEqual(messages, []);
+    assert.equal(mailbox.fetches.length, before, 'no FETCH when nothing changed');
+    // New mail moves UIDNEXT on, so the next sync with the same cursor reads INBOX again.
+    mailbox.deliver();
+    const fresh = await syncImap(mailbox.input, { limits: { INBOX: 6, Sent: 5 }, known: async (ids) => new Map([...(await storedAll(ids))].filter(([id]) => id !== '<m6@example.test>')), cursor });
+    // (The fake serves the same messages as Sent too.)
+    assert.deepEqual(fresh.filter((message) => message.mailbox === 'INBOX').map((message) => message.subject), ['Test 6']);
+  } finally { mailbox.close(); }
+});
+
+test('a cursor from another UIDVALIDITY is ignored', async () => {
+  const { syncImap } = await import('./imap.js');
+  const mailbox = await fakeMailbox({ count: 2 });
+  try {
+    const messages = await syncImap(mailbox.input, { limits: { INBOX: 2, Sent: 0 }, cursor: { inbox: { validity: '99', next: 50 } } });
+    assert.deepEqual(messages.map((message) => message.subject), ['Test 2', 'Test 1']);
+  } finally { mailbox.close(); }
+});
+
+test('mail that arrives between reading INBOX and starting IDLE is fetched at once', async () => {
+  const { syncImap } = await import('./imap.js');
+  const mailbox = await fakeMailbox({ count: 3, deliverWhenSentOpens: true });
+  try {
+    const started = Date.now();
+    const known = async (ids: string[]) => new Map([...(await storedAll(ids))].filter(([id]) => id !== '<m4@example.test>'));
+    const messages = await syncImap(mailbox.input, { limits: { INBOX: 4, Sent: 1 }, known, waitMs: 5_000 });
+    assert.deepEqual(messages.map((message) => message.subject), ['Test 4']);
+    assert.ok(Date.now() - started < 2_000, 'not left waiting for the next mail');
+  } finally { mailbox.close(); }
+});
+
+test('a new message right after a deletion still ends the wait', async () => {
+  const { syncImap } = await import('./imap.js');
+  const mailbox = await fakeMailbox({ count: 3 });
+  try {
+    const started = Date.now();
+    setTimeout(mailbox.replaceNewest, 300);
+    await syncImap(mailbox.input, { limits: { INBOX: 3, Sent: 0 }, known: storedAll, waitMs: 5_000 });
+    assert.ok(Date.now() - started < 2_000, 'answers when the replacement arrives');
   } finally { mailbox.close(); }
 });

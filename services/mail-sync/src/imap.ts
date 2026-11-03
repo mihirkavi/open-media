@@ -4,6 +4,7 @@ import { simpleParser } from 'mailparser';
 import { UserFacingError } from './errors.js';
 import { collectAttachments, collectRemoteImages } from './mailMedia.js';
 import { verifySender } from './senderVerification.js';
+import { FolderMark, ImapCursor } from './mailCursor.js';
 import { MailAccountInput, StoredPeople, SyncedMessage } from './types.js';
 
 function clientFor(input: MailAccountInput): ImapFlow {
@@ -98,6 +99,10 @@ export interface SyncOptions {
   known?: (sourceMessageIds: string[]) => Promise<Map<string, StoredPeople>>;
   /** When nothing new arrived, wait up to this long for new INBOX mail (IMAP IDLE) and fetch it. */
   waitMs?: number;
+  /** Where the last sync left each folder: a folder that hasn't moved on is skipped without reading its headers. */
+  cursor?: ImapCursor;
+  /** Called once the whole sync has finished, with where it left each folder. */
+  onCursor?: (cursor: ImapCursor) => void;
 }
 
 /** A save failure: unlike a dropped connection, it must not be reported as a partial sync. */
@@ -119,9 +124,11 @@ class SaveFailed {
  *
  * With `known`, only mail that isn't stored yet is downloaded, so a sync with nothing new takes
  * about a second. With `waitMs`, the request then stays open in IDLE, so the app sees new mail
- * moments after it arrives, like a chat.
+ * moments after it arrives, like a chat. With `cursor`, a folder whose UIDVALIDITY and UIDNEXT
+ * haven't changed is not read at all, so a live sync that finds nothing costs one sign-in and a few
+ * short commands before it waits.
  */
-export async function syncImap(input: MailAccountInput, { limits = syncLimits, save, known, waitMs }: SyncOptions = {}): Promise<SyncedMessage[]> {
+export async function syncImap(input: MailAccountInput, { limits = syncLimits, save, known, waitMs, cursor, onCursor }: SyncOptions = {}): Promise<SyncedMessage[]> {
   const client = clientFor(input);
   const messages: SyncedMessage[] = [];
   const started = Date.now();
@@ -131,19 +138,25 @@ export async function syncImap(input: MailAccountInput, { limits = syncLimits, s
     stage = 'list';
     const folders = await client.list();
     const sent = folders.find((folder) => folder.specialUse === '\\Sent')?.path;
-    for (const [path, mailbox, limit] of [['INBOX', 'INBOX', limits.INBOX], ...(sent ? [[sent, 'Sent', limits.Sent] as const] : [])] as const) {
-      stage = mailbox;
-      await fetchRecent(client, path, mailbox, limit, messages, save, known);
+    const reached: ImapCursor = {};
+    stage = 'INBOX';
+    reached.inbox = await fetchRecent(client, 'INBOX', 'INBOX', limits.INBOX, messages, save, known, cursor?.inbox);
+    if (sent) {
+      stage = 'Sent';
+      reached.sent = await fetchRecent(client, sent, 'Sent', limits.Sent, messages, save, known, cursor?.sent);
     }
     if (waitMs && !messages.length) {
       stage = 'wait';
       const opened = await client.mailboxOpen('INBOX', { readOnly: true });
-      if (await newMailIn(client, opened.exists, waitMs)) {
+      // Mail that arrived after INBOX was read but before IDLE began is fetched now, not after the wait.
+      const missed = Boolean(reached.inbox && opened.uidNext && opened.uidNext > reached.inbox.next);
+      if (missed || await newMailIn(client, opened.exists, waitMs)) {
         stage = 'INBOX';
-        await fetchRecent(client, 'INBOX', 'INBOX', limits.INBOX, messages, save, known);
+        reached.inbox = await fetchRecent(client, 'INBOX', 'INBOX', limits.INBOX, messages, save, known);
       }
     }
     logSync('done', started, messages.length);
+    onCursor?.(reached);
     return messages;
   } catch (error) {
     if (error instanceof SaveFailed) { logSync('save', started, messages.length, error.cause); throw error.cause; }
@@ -153,19 +166,26 @@ export async function syncImap(input: MailAccountInput, { limits = syncLimits, s
   } finally { await logoutQuietly(client); }
 }
 
-/** Waits in IDLE until the open mailbox grows past `exists`, or `ms` pass, or the connection closes. */
+/**
+ * Waits in IDLE until the open mailbox grows past `exists`, or `ms` pass, or the connection closes.
+ * Deleted mail lowers the count first, so a new message after a deletion still counts as new.
+ */
 function newMailIn(client: ImapFlow, exists: number, ms: number): Promise<boolean> {
   return new Promise((resolve) => {
+    let count = exists;
     const finish = (arrived: boolean) => {
       clearTimeout(timer);
       client.off('exists', onExists);
+      client.off('expunge', onExpunge);
       client.off('close', onClose);
       resolve(arrived);
     };
-    const onExists = (update: { count: number }) => { if (update.count > exists) finish(true); };
+    const onExists = (update: { count: number }) => { if (update.count > count) finish(true); };
+    const onExpunge = () => { count = Math.max(0, count - 1); };
     const onClose = () => finish(false);
     const timer = setTimeout(() => finish(false), ms);
     client.on('exists', onExists);
+    client.on('expunge', onExpunge);
     client.on('close', onClose);
     client.idle().catch(() => finish(false));
   });
@@ -177,9 +197,13 @@ function logSync(stage: string, started: number, count: number, error?: unknown)
   console.log(JSON.stringify({ event: 'imap_sync', stage, ms: Date.now() - started, messages: count, ...(error ? { errorCode: detail?.code, error: detail?.message?.slice(0, 120) } : {}) }));
 }
 
-async function fetchRecent(client: ImapFlow, path: string, mailbox: string, limit: number, into: SyncedMessage[], save?: SaveBatch, known?: SyncOptions['known']): Promise<void> {
+/** Reads one folder's new mail and returns where it now stands (undefined when the server gives no UIDNEXT). */
+async function fetchRecent(client: ImapFlow, path: string, mailbox: string, limit: number, into: SyncedMessage[], save?: SaveBatch, known?: SyncOptions['known'], since?: FolderMark): Promise<FolderMark | undefined> {
   const opened = await client.mailboxOpen(path, { readOnly: true });
-  if (!opened.exists) return;
+  const mark = opened.uidNext && opened.uidValidity !== undefined ? { validity: String(opened.uidValidity), next: opened.uidNext } : undefined;
+  // Nothing was added since the last sync: no UID at or past the old UIDNEXT exists yet.
+  if (mark && since && since.validity === mark.validity && mark.next <= since.next) return mark;
+  if (!opened.exists) return mark;
   const first = Math.max(1, opened.exists - limit + 1);
   // Headers and sizes first. They are small, so the stream never waits on our work.
   const fetched: FetchMessageObject[] = [];
@@ -207,6 +231,7 @@ async function fetchRecent(client: ImapFlow, path: string, mailbox: string, limi
     }
     into.push(...parsed);
   }
+  return mark;
 }
 
 /** Groups messages so each download stays under both the count and the byte budget. */
