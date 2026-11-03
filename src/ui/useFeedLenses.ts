@@ -35,6 +35,8 @@ export interface FeedLenses {
   revert: (id: string, version: number) => Promise<void>;
   /** The last save to the account, so a failure is said out loud instead of looking saved. */
   saveStatus?: LensSaveStatus;
+  /** Reads the saved lenses again after something else changed them (Open Media AI, ADR 0028), and shows the lens named show in the Feed. */
+  reload: (show?: string) => Promise<void>;
 }
 
 export type LensSaveStatus = { lensId: string; state: 'saving' } | { lensId: string; state: 'saved'; version: number } | { lensId: string; state: 'failed'; message: string } | { lensId: string; state: 'device' };
@@ -88,6 +90,15 @@ export function useFeedLenses(viewerId?: string, fallback: 'relevant' | 'raw' = 
       if (active) setFollowed(new Set(follows.following.filter((card) => !card.status || card.status === 'accepted').map((card) => card.id)));
     }).catch(() => undefined);
     return () => { active = false; };
+  }, [viewerId]);
+
+  const reload = useCallback(async (show?: string) => {
+    if (!viewerId) return;
+    const mine = await loadMyLenses().catch(() => []);
+    if (!mine.length) return;
+    sharedIds.current = new Set(mine.filter((item) => item.visibility === 'public').map((item) => item.lens.id));
+    setSaved((existing) => mergeLenses(existing, mine.map((item) => item.lens)));
+    if (show && mine.some((item) => item.lens.id === show)) setActiveId(show);
   }, [viewerId]);
 
   const [saveStatus, setSaveStatus] = useState<LensSaveStatus>();
@@ -150,7 +161,7 @@ export function useFeedLenses(viewerId?: string, fallback: 'relevant' | 'raw' = 
   const lenses = useMemo(() => [...builtInLenses, ...saved], [saved]);
   const tuneBase = useMemo(() => (lens.builtIn ? saved.find((item) => item.id === ownCopyId(lens)) ?? lens : lens), [lens, saved]);
   const context = useMemo<LensContext>(() => ({ followedAuthorIds: followed, interests }), [followed, interests]);
-  return { lens, lenses, context, interests, choose: setActiveId, apply, remove, share, addInterests, tuneBase, history, revert, saveStatus };
+  return { lens, lenses, context, interests, choose: setActiveId, apply, remove, share, addInterests, tuneBase, history, revert, saveStatus, reload };
 }
 
 function validLenses(values: unknown): FeedLens[] {

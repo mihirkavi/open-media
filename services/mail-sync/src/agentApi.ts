@@ -54,7 +54,8 @@ import { authenticate } from './session.js';
 import { confirmEvidence, MarketplaceEnv, MarketplaceError, marketplaceConfigured, readEvidence, serviceRpc } from './marketplace.js';
 import { verifyWebBotAuth } from './webBotAuth.js';
 import { runTranslate, TranslateEnv } from './translate.js';
-import { AiChatEnv, AiRecord, AiSettings, AiStore, chat as aiChat, NewAiRecord, ProviderId } from './aiChat.js';
+import { agrees, AiChatEnv, AiRecord, AiSettings, AiStore, AiToolkit, AppAction, chat as aiChat, NewAiRecord, ProviderId } from './aiChat.js';
+import { tool as aiTool, type ToolSet } from 'ai';
 import { reportReasons } from '../../../src/domain/listingSafety';
 import { discloseLegalName, handleVerificationWebhook, startVerification, VerificationEnv, VerificationError, verificationConfigured } from './verification.js';
 
@@ -792,6 +793,7 @@ export class Account {
     const record = (row: Record<string, unknown>): AiRecord => ({ id: String(row.id), role: row.role as AiRecord['role'], body: String(row.body), source: row.source as AiRecord['source'], provider: (row.provider as string | null) ?? undefined, model: (row.model as string | null) ?? undefined, meta: (row.meta as Record<string, unknown> | null) ?? undefined, createdAt: String(row.created_at) });
     const columns = 'id,role,body,source,provider,model,meta,created_at';
     return {
+      toolkit: (latest) => assistantToolkit(this.env, this.origin, this, latest),
       history: async (limit) => (await this.rest<Record<string, unknown>[]>('GET', `/rest/v1/ai_messages?select=${columns}&order=created_at.desc&limit=${limit}`)).map(record).reverse(),
       append: async (records: NewAiRecord[]) => (await this.rest<Record<string, unknown>[]>('POST', `/rest/v1/ai_messages?select=${columns}`, records.map((item) => ({ role: item.role, body: item.body, source: item.source, provider: item.provider ?? null, model: item.model ?? null, meta: item.meta ?? {} })), 'return=representation')).map(record),
       keys: async () => (await this.rest<{ provider: ProviderId; ciphertext: string; hint: string }[]>('GET', '/rest/v1/ai_provider_keys?select=provider,ciphertext,hint&order=created_at.asc')),
@@ -1535,6 +1537,93 @@ export function llmsTxt(origin: string): string {
  * The tool names each server really registers, read by registering them on a stand-in server, so
  * the server card and docs can never fall behind the tools themselves.
  */
+/** What Open Media AI may read for the person (ADR 0028). */
+const assistantReads = ['about_open_media', 'find_setting', 'list_feed_lenses', 'get_feed_lens', 'draft_feed_lens', 'list_my_feed_lenses', 'get_my_feed_lens_history', 'get_me', 'get_profile_fields', 'get_professional_profile', 'list_web_feeds', 'preview_web_feed', 'list_my_follows', 'list_mailboxes', 'list_chat_networks', 'cross_posting_status'];
+/** What it may change, each only after the person says yes. Publishing, sending, paying, deleting and passwords stay with the person. */
+const assistantChanges = ['tune_feed_lens', 'revert_feed_lens', 'install_feed_lens', 'follow_web_feed', 'unfollow_web_feed', 'follow', 'unfollow', 'set_profile_fields', 'set_professional_profile', 'set_my_privacy', 'set_read_receipts'];
+const settingsSections = ['appearance', 'feed', 'language', 'messages', 'email', 'chat-networks', 'cross-posting', 'privacy', 'data', 'profile', 'about'] as const;
+
+/**
+ * Open Media AI's tools for one message: the same tools agents use, run as the person, plus two
+ * that act on their device. Changes go ahead only when the model says the person confirmed and
+ * their latest message really is a yes, so text in a post or tool result can never approve one.
+ */
+export function assistantToolkit(env: AgentEnv, origin: string, account: Account, latest: string): AiToolkit {
+  const captured = new Map<string, { description: string; schema: z.ZodObject<z.ZodRawShape>; run: (args: Record<string, unknown>) => Promise<unknown> }>();
+  const recorder = {
+    registerTool: (name: string, config: { description: string; inputSchema: z.ZodObject<z.ZodRawShape> }, run: (args: Record<string, unknown>) => Promise<unknown>) => { captured.set(name, { description: config.description, schema: config.inputSchema, run }); },
+    registerResource: () => undefined, registerPrompt: () => undefined,
+  } as unknown as McpServer;
+  registerPublicTools(recorder, env, origin);
+  registerAccountTools(recorder, account);
+  const actions: AppAction[] = [];
+  const used: string[] = [];
+  const output = (value: unknown) => {
+    const content = (value as { content?: { type: string; text?: string }[] })?.content ?? [];
+    return content.map((item) => item.text ?? '').join('\n').slice(0, 6000);
+  };
+  // A preview in words, without the manifest and code, so the model repeats words and not data.
+  const brief = (text: string) => {
+    try {
+      const value = JSON.parse(text) as Record<string, unknown>;
+      const keep = ['name', 'understood', 'notUnderstood', 'changes', 'changed', 'summary'].filter((key) => value[key] !== undefined);
+      return keep.map((key) => `${key}: ${Array.isArray(value[key]) ? (value[key] as unknown[]).join('; ') : String(value[key])}`).join('\n').slice(0, 1200) || text.slice(0, 1200);
+    } catch { return text.slice(0, 1200); }
+  };
+  const tools: ToolSet = {};
+  const kit = { actions, used } as AiToolkit;
+  for (const name of assistantReads) {
+    const found = captured.get(name);
+    if (found) tools[name] = aiTool({ description: found.description.slice(0, 500), inputSchema: found.schema, execute: async (args: Record<string, unknown>) => { used.push(name); return output(await found.run(args)); } });
+  }
+  for (const name of assistantChanges) {
+    const found = captured.get(name);
+    if (!found) continue;
+    tools[name] = aiTool({
+      description: `${found.description.slice(0, 450)} Changes the person's account: first ask, then call with confirmed: true only after they say yes.`,
+      inputSchema: found.schema.extend({ confirmed: z.boolean().optional().describe('true only when the person said yes to this exact change in their latest message') }),
+      execute: async ({ confirmed, ...args }: Record<string, unknown>) => {
+        if (confirmed !== true || !agrees(latest)) {
+          // Remembered, so the person's yes carries out exactly this change and nothing else.
+          kit.pending = { name, args };
+          const preview = name === 'tune_feed_lens' ? brief(output(await found.run({ ...args, save: false }))) : '';
+          return `Not changed yet.${preview ? ` Preview of the change: ${preview}` : ''} Tell the person exactly what will change and ask them to say yes.`;
+        }
+        used.push(name);
+        return output(await found.run(args));
+      },
+    });
+  }
+  tools.change_app_setting = aiTool({
+    description: 'Change a setting on the person’s device, at once, when they ask: appearance (system, light or dark), translate_automatically (true or false), or feed (raw, relevant, work, or the id of one of their lenses).',
+    inputSchema: z.object({ setting: z.enum(['appearance', 'translate_automatically', 'feed']), value: z.string().max(80) }),
+    execute: async ({ setting, value }: { setting: string; value: string }) => {
+      const text = value.trim().toLowerCase();
+      if (setting === 'appearance' && ['system', 'light', 'dark'].includes(text)) actions.push({ type: 'appearance', value: text as 'system' | 'light' | 'dark' });
+      else if (setting === 'translate_automatically' && /^(true|false|on|off|yes|no)$/.test(text)) actions.push({ type: 'translate', value: /^(true|on|yes)$/.test(text) });
+      else if (setting === 'feed' && /^[a-z0-9-]{2,80}$/.test(text)) actions.push({ type: 'feed', value: text });
+      else return `“${value}” isn’t a value for ${setting}.`;
+      used.push('change_app_setting');
+      return `Done: ${setting} is now ${value} on this device.`;
+    },
+  });
+  tools.open_settings = aiTool({
+    description: 'Take the person to a part of Settings when they want to set something up themselves: email (connect a mailbox), chat-networks (WhatsApp, Signal and others), cross-posting, privacy, feed (their algorithm), language, appearance, messages, data, profile or about.',
+    inputSchema: z.object({ section: z.enum(settingsSections) }),
+    execute: async ({ section }: { section: string }) => { actions.push({ type: 'open', value: section }); used.push('open_settings'); return `Opening Settings → ${section} for the person now.`; },
+  });
+  Object.assign(kit, {
+    tools,
+    run: async (name: string, args: Record<string, unknown>) => {
+      const found = assistantChanges.includes(name) ? captured.get(name) : undefined;
+      if (!found) throw new AgentError(400, 'bad_request', 'That change isn’t available.');
+      used.push(name);
+      return output(await found.run(args));
+    },
+  });
+  return kit;
+}
+
 export function registeredTools(kind: 'public' | 'account'): string[] {
   const names: string[] = [];
   const recorder = { registerTool: (name: string) => { names.push(name); }, registerResource: () => undefined, registerPrompt: () => undefined } as unknown as McpServer;

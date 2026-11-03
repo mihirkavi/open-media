@@ -6,6 +6,13 @@ import { Conversation, Message, Person } from './models';
  */
 
 export const aiConversationId = 'open-media-ai';
+
+/** Something Open Media AI did on the person's device, applied by the app (ADR 0028). */
+export type AiAction =
+  | { type: 'appearance'; value: 'system' | 'light' | 'dark' }
+  | { type: 'translate'; value: boolean }
+  | { type: 'feed'; value: string }
+  | { type: 'open'; value: string };
 export const aiPersonId = 'open-media-ai';
 
 export interface AiRecord {
@@ -38,7 +45,7 @@ export function aiByline(record: Pick<AiRecord, 'role' | 'source' | 'provider' |
   return from ? `${label} · ${from} ${String(record.meta?.reason ?? 'didn’t answer')}` : label;
 }
 
-const welcome = 'Ask me anything. I’m one chat for every AI you use. A free model answers by default. To use your own ChatGPT, Claude, Gemini or OpenRouter account, paste its API key here, then say “use Claude” or start a message with “@gpt”. Your AI searches are saved here too.';
+const welcome = 'Hi! I’m Open Media AI. Ask me anything, or ask me to do things for you: “set my theme to dark”, “less Hive and more videos in my feed”, “help me connect my email”, or “give me a tour”. I’m one chat for every AI you use: a free model answers by default, and you can paste an API key from ChatGPT, Claude, Gemini or OpenRouter to use your own. Your AI searches are saved here too.';
 
 /** The AI conversation, built from its saved messages. A new one opens with a short welcome. */
 export function aiConversation(records: AiRecord[], currentUserId: string): Conversation {

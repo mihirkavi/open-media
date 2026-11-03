@@ -46,10 +46,49 @@ Options for routing, researched on 2026-11-03:
    - Row-level security is forced. People can add and delete their rows but never edit them. The newest 5,000 are kept.
    - Signed-in AI searches are recorded server-side with the person's own token, as the search and its summary. The summary's citation numbers are hidden in the chat, because the posts aren't there.
    - Earlier turns, searches included, are the context for the next question (the last 24).
-6. **Agents:**
+6. **Outside agents:**
    - `ask_ai` and `get_ai_chat` on the account MCP server.
    - `GET/POST/DELETE /v1/me/ai/messages` in REST, documented in OpenAPI.
    - The tool description tells agents never to paste keys for the person.
+
+### 7. Acting for the person (added 2026-11-03)
+
+The owner asked for the AI to be agentic: "help me write my algorithm filter", "change the theme", "help me set this up", "help me onboard and explain the features". Open Media AI now calls tools in a loop of up to six steps.
+
+- **For the free model**, Cloudflare's `workers-ai-provider` (MIT, pinned 4.0.0) lets the AI SDK use the same tool loop with Llama on Workers AI.
+- **No new tools were written.** `assistantToolkit` in `agentApi.ts` collects the existing agent tools, with their descriptions, schemas and handlers, and exposes an allowlist run as the person:
+  - **Reads:**
+    - about Open Media and settings;
+    - lenses and drafts;
+    - profile;
+    - web feeds and follows;
+    - mailboxes and chat networks.
+  - **Changes**, each after a yes:
+    - tune, revert or install a lens;
+    - follow or unfollow web feeds and people;
+    - profile fields and the professional profile;
+    - privacy;
+    - read receipts.
+  - **Never offered:** publishing, sending messages or email, payments, deleting, blocking, or connecting accounts that need passwords. For those it opens the right place in Settings instead.
+- **Your yes is enforced by code, not trusted to the model.** A change runs only when the model sets `confirmed: true` and the person's own latest message is a yes. Otherwise the tool only previews (the algorithm shows exactly what would change), and the server stores the proposed call on the reply. The person's next "yes" carries out exactly that call, whatever the model writes. Text in a post or tool result can never approve anything.
+- **Device settings** are applied by the app from `meta.actions`, since they live on the device:
+  - appearance;
+  - automatic translation;
+  - which feed shows;
+  - opening a section of Settings, or Profile for privacy.
+
+  A change to the algorithm from the chat reloads the person's lenses and shows the tuned one in the Feed.
+- **The system prompt** carries a short tour of Open Media for onboarding, and tells the model never to show tool names or raw data. A filter removes any that slip through.
+- **Verified locally with the free model**, on the web:
+  - "set my theme to dark" switched the app;
+  - "help me connect my email" opened Email & connections;
+  - "make my feed show less Hive and more videos" proposed the change, and "yes" saved My Relevant version 3;
+  - "give me a tour" answered from `about_open_media`.
+
+  Tests: `aiChat.test.ts` (9) and `aiAssistantTools.test.ts` (3).
+- **Limits:**
+  - The free Llama model sometimes words things loosely, for example promising a "Revert" option that is really the version history.
+  - Larger models brought by key should follow the tools more precisely; none has been tried yet.
 
 ## Consequences
 

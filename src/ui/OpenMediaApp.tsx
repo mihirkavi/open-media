@@ -52,8 +52,9 @@ import { PeopleProvider, PersonTarget, useContactsStore } from "./people";
 import { PersonProfile } from "./PersonProfile";
 import { encounterForConversation, ownEmails } from "../domain/people";
 import { mergeByContact, recipientSuggestions } from "../domain/contactMerge";
-import { AiRecord, aiConversation, isAiConversation } from "../domain/aiChat";
+import { AiAction, AiRecord, aiConversation, isAiConversation } from "../domain/aiChat";
 import { loadAiMessages, onAiChatChanged, sendAiMessage } from "../connectors/aiChatConnector";
+import { setTranslationPreferences } from "../data/translationService";
 import { loadPublicPerson } from "../data/peopleService";
 
 export type PrimaryDestination = "feed" | "clips" | "messages";
@@ -107,7 +108,7 @@ export function OpenMediaApp({
   messageMode?: MessageMode;
 }) {
   const { width } = useWindowDimensions();
-  const { colors } = useOpenMediaTheme();
+  const { colors, setAppearance } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const compact = width < 760;
   const initialDestination: Destination =
@@ -286,6 +287,9 @@ export function OpenMediaApp({
   }, [refreshBridged]);
   // Open Media AI (ADR 0028): one AI conversation, refreshed when an AI search adds to it.
   const [aiRecords, setAiRecords] = useState<AiRecord[] | null>(null);
+  // What Open Media AI did on this device (theme, translation, feed) or where it is taking the person.
+  const [aiActions, setAiActions] = useState<AiAction[]>([]);
+  const [settingsFocus, setSettingsFocus] = useState<{ section: string; at: number }>();
   const refreshAi = useCallback(async () => {
     if (messageMode !== "open_media" || !currentUserId) return;
     try {
@@ -304,6 +308,9 @@ export function OpenMediaApp({
       if (isAiConversation({ id: conversationId })) {
         const added = await sendAiMessage(body);
         setAiRecords((current) => [...(current ?? []), ...added]);
+        setAiActions(added.flatMap((record) => (Array.isArray(record.meta?.actions) ? (record.meta.actions as AiAction[]) : [])));
+        // A change to the algorithm made from the chat shows in the Feed at once.
+        if (added.some((record) => Array.isArray(record.meta?.used) && (record.meta.used as string[]).some((name) => /feed_lens$/.test(name)))) lenses.reload(lenses.tuneBase.id);
         return;
       }
       const email = mailConversations.find(
@@ -338,7 +345,7 @@ export function OpenMediaApp({
       else await sendOpenMediaMessage(conversationId, currentUserId, body, replyTo?.id);
       await refreshMessages();
     },
-    [bridgedConversations, currentUserId, mailConversations, messageMode, refreshBridged, refreshMail, refreshMessages],
+    [bridgedConversations, currentUserId, lenses, mailConversations, messageMode, refreshBridged, refreshMail, refreshMessages],
   );
   // A new email written like a message: the first line becomes the subject.
   const sendNewEmail = useCallback(
@@ -488,6 +495,28 @@ export function OpenMediaApp({
     writeDestinationToURL(next);
   };
 
+  useEffect(() => {
+    if (!aiActions.length) return;
+    for (const action of aiActions) {
+      if (action.type === "appearance") setAppearance(action.value);
+      else if (action.type === "translate") setTranslationPreferences({ auto: action.value });
+      else if (action.type === "feed") {
+        const wanted = action.value.replace(/-/g, " ");
+        const lens = lenses.lenses.find((item) => item.id === action.value || item.name.toLowerCase() === wanted);
+        if (lens) lenses.choose(lens.id);
+      } else if (action.type === "open") {
+        // Privacy and who can message you live on Profile; everything else in Settings.
+        if (action.value === "privacy" || action.value === "messages") navigate("profile");
+        else {
+          setSettingsFocus({ section: action.value, at: Date.now() });
+          navigate("settings");
+        }
+      }
+    }
+    setAiActions([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiActions]);
+
   return (
     <PeopleProvider value={people}>
     <View style={[styles.app, compact && styles.appCompact]}>
@@ -586,6 +615,7 @@ export function OpenMediaApp({
         ) : null}
         {!person && destination === "settings" ? (
           <OpenMediaSettings
+            focus={settingsFocus}
             lenses={lenses}
             signedIn={Boolean(currentUserId)}
             posts={feed.posts}

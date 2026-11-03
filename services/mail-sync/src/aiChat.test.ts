@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import test from 'node:test';
 
-import { AiRecord, AiSettings, AiStore, builtInModel, chat, chooseRoute, conversationFor, findKeys, intentOf, NewAiRecord, recordSearch, Route, StoredKey, withoutKeys } from './aiChat.js';
+import { agrees, AiRecord, AiSettings, AiStore, AiToolkit, builtInModel, chat, chooseRoute, conversationFor, findKeys, intentOf, NewAiRecord, recordSearch, Route, StoredKey, withoutKeys, withoutToolTalk } from './aiChat.js';
 
 // Made-up keys in each provider's shape; none is real.
 const fake = {
@@ -113,4 +113,47 @@ test('AI searches join the conversation the model sees, and are saved with the p
   assert.equal(sent?.url, 'https://db.test/rest/v1/ai_messages');
   assert.equal((sent?.init?.headers as Record<string, string>).authorization, 'Bearer person-token');
   assert.deepEqual(JSON.parse(String(sent?.init?.body)).map((row: { source: string }) => row.source), ['search', 'search']);
+});
+
+test('a yes is a yes, and tool talk never reaches the person', () => {
+  for (const yes of ['yes', 'Yes please', 'ok', 'sure, go ahead', 'do it', 'Sounds good']) assert.equal(agrees(yes), true, yes);
+  for (const no of ['no', 'not yet', 'what would change?', 'yesterday was fun', 'okayish idea, but no']) assert.equal(agrees(no), false, no);
+  assert.equal(withoutToolTalk('Done, your feed has less Hive.\nI used the function `tune_feed_lens` with {"key":"relevant"}.'), 'Done, your feed has less Hive.');
+  assert.equal(withoutToolTalk('Here is the preview:\n{"id":"my-relevant","manifest":{}}\nSave it?'), 'Save it?');
+  assert.equal(withoutToolTalk('Opened Settings using the `open_settings` function.'), 'Opened Settings.');
+});
+
+test('a proposed change waits for the person, and their yes carries out exactly that change', async () => {
+  const memory = memoryStore();
+  const ran: string[] = [];
+  let latestSeen = '';
+  memory.store.toolkit = (latest) => {
+    latestSeen = latest;
+    const kit: AiToolkit = { tools: {}, actions: [], used: [], run: async (name, args) => { ran.push(`${name}:${JSON.stringify(args)}`); kit.used.push(name); return '{"understood":["Much less Hive"]}'; } };
+    return kit;
+  };
+  // The model proposes (the toolkit records what it would do) and asks.
+  const proposing = async () => { memory.store.toolkit!('x'); return 'I’ll make Hive much less common. Shall I?'; };
+  const wrapped = memory.store.toolkit;
+  memory.store.toolkit = (latest) => { const kit = wrapped(latest); kit.pending = { name: 'tune_feed_lens', args: { key: 'relevant', request: 'less hive' } }; return kit; };
+  const [, proposal] = await chat({ text: 'less hive please' }, memory.store, env, proposing as never);
+  assert.deepEqual(proposal.meta?.pending, { name: 'tune_feed_lens', args: { key: 'relevant', request: 'less hive' } });
+  assert.deepEqual(ran, [], 'nothing changes before the yes');
+
+  memory.store.toolkit = wrapped;
+  const [, done] = await chat({ text: 'yes' }, memory.store, env, (async () => 'Done: Hive is now much less common.') as never);
+  assert.deepEqual(ran, ['tune_feed_lens:{"key":"relevant","request":"less hive"}']);
+  assert.equal(latestSeen, 'yes');
+  assert.deepEqual(done.meta?.used, ['tune_feed_lens']);
+
+  // A second yes has nothing left to approve, so nothing runs again.
+  await chat({ text: 'yes' }, memory.store, env, (async () => 'Anything else?') as never);
+  assert.equal(ran.length, 1);
+});
+
+test('app actions travel with the answer', async () => {
+  const memory = memoryStore();
+  memory.store.toolkit = () => ({ tools: {}, actions: [{ type: 'appearance', value: 'dark' }], used: ['change_app_setting'], run: async () => '' });
+  const [, reply] = await chat({ text: 'set my theme to dark' }, memory.store, env, (async () => 'Your theme is now dark.') as never);
+  assert.deepEqual(reply.meta, { actions: [{ type: 'appearance', value: 'dark' }], used: ['change_app_setting'] });
 });
