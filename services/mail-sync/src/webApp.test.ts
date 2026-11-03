@@ -42,3 +42,30 @@ test('openmedia.site/@handle opens the app on that profile, and /handle redirect
   assert.equal(await ask('https://openmedia.site/@mihirkavishwar/resume'), undefined, 'the resume page comes from the Worker');
   assert.equal(await ask('https://openmedia.site/mihirkavishwar', { accept: 'application/json' }), undefined, 'only browsers are redirected');
 });
+
+test('the homepage HTML carries readable text, JSON-LD and Link headers for agents that do not run JavaScript', async () => {
+  const shell = '<!DOCTYPE html><html lang="en"><head><title>Open Media</title></head><body><noscript>You need to enable JavaScript to run this app.</noscript><div id="root"></div><script src="/_expo/static/js/web/index.js" defer></script></body></html>';
+  const site = { ...env, ASSETS: { fetch: async () => new Response(shell, { headers: { 'content-type': 'text/html', etag: '"1"' } }) } };
+  const response = (await handleWebAppRequest(new Request('https://openmedia.site/', { headers: html }), site))!;
+  const page = await response.text();
+  const link = response.headers.get('link') ?? '';
+  for (const rel of ['sitemap', 'alternate', 'service-desc', 'api-catalog']) assert.ok(link.includes(`rel="${rel}"`), rel);
+  assert.ok(link.includes('<https://openmedia.site/v1/openapi.json>'));
+  assert.equal(response.headers.get('etag'), null, 'the changed page is not the build file');
+  const jsonLd = JSON.parse(page.match(/<script type="application\/ld\+json">(.*?)<\/script>/s)![1]) as { '@graph': { '@type': string; sameAs?: string[] }[] };
+  const types = jsonLd['@graph'].map((item) => item['@type']);
+  for (const type of ['Organization', 'WebSite', 'SoftwareApplication']) assert.ok(types.includes(type), type);
+  assert.ok(jsonLd['@graph'].find((item) => item['@type'] === 'Organization')!.sameAs!.includes('https://github.com/mihirkavi/open-media'));
+  // The readable text lives inside the app's root element, which React replaces when the app starts.
+  const root = page.slice(page.indexOf('<div id="root">'), page.indexOf('<script src="/_expo'));
+  const text = root.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  assert.ok(text.length > 500, `only ${text.length} characters`);
+  const headings = [...root.matchAll(/<h([1-6])>/g)].map((match) => Number(match[1]));
+  assert.equal(headings.filter((level) => level === 1).length, 1);
+  headings.forEach((level, index) => assert.ok(index === 0 || level <= headings[index - 1] + 1, 'headings never skip a level'));
+  assert.ok(page.includes('<link rel="canonical" href="https://openmedia.site/">') && page.includes('og:image'));
+  assert.ok(page.includes('href="https://openmedia.site/docs"'), 'the homepage links the API docs');
+  // The sign-in callback and profiles get the build file untouched.
+  assert.equal(await (await handleWebAppRequest(new Request('https://openmedia.site/auth?code=1', { headers: html }), site))!.text(), shell);
+  assert.equal((await handleWebAppRequest(new Request('https://openmedia.site/@someone', { headers: html }), site))!.headers.get('link'), null);
+});

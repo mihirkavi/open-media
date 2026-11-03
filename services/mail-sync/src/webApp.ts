@@ -5,9 +5,11 @@
  * On a web-app host, a browser opening `/` or the sign-in callback `/auth` gets the app; the app's
  * own files (`/_expo/…`, `/assets/…`, the favicon) come from the build. Everything else, and every
  * request on other hosts (api.openmedia.site, workers.dev), reaches the API and agent site as
- * before. Agents asking for Markdown or `?mode=agent` still get the agent site at `/`.
+ * before. Agents asking for Markdown or `?mode=agent` still get the agent site at `/`. The
+ * homepage's HTML also carries the agent site's text, metadata and JSON-LD for crawlers that
+ * don't run JavaScript, with RFC 8288 Link headers to the discovery documents.
  */
-import { isSitePath, prefersMarkdown } from './agentSite.js';
+import { homeLinkHeader, isSitePath, prefersMarkdown, withAgentHomepage } from './agentSite.js';
 
 export interface WebAppEnv {
   ASSETS?: { fetch: (request: Request) => Promise<Response> };
@@ -38,5 +40,11 @@ export async function handleWebAppRequest(request: Request, env: WebAppEnv): Pro
   if (!appPages.has(url.pathname) && !profile) return undefined;
   if (!browser || prefersMarkdown(request) || url.searchParams.has('mode')) return undefined;
   // The build's index.html is served at "/"; the app reads /auth's query itself.
-  return env.ASSETS.fetch(new Request(new URL('/', url), request));
+  const app = await env.ASSETS.fetch(new Request(new URL('/', url), request));
+  if (url.pathname === '/auth' || profile || !app.ok || !(app.headers.get('content-type') ?? '').includes('text/html')) return app;
+  const headers = new Headers(app.headers);
+  for (const name of ['content-length', 'etag', 'last-modified']) headers.delete(name);
+  headers.set('link', homeLinkHeader(url.origin));
+  headers.set('vary', 'Accept, User-Agent');
+  return new Response(request.method === 'HEAD' ? null : withAgentHomepage(await app.text(), url.origin), { status: app.status, headers });
 }

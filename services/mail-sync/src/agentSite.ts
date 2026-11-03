@@ -744,6 +744,51 @@ ${markdownToHtml(page.body(origin))}
 </html>`;
 }
 
+/**
+ * The web app's own index.html on openmedia.site, with the homepage's text, metadata and JSON-LD
+ * added so crawlers and agents that don't run JavaScript can read it. The text sits inside the
+ * app's root element, which React empties when the app starts; it stays transparent for its
+ * first few seconds, so people whose browser runs the app never see it.
+ */
+export function withAgentHomepage(appHtml: string, origin: string): string {
+  const home = pages[0];
+  const canonical = `${origin}/`;
+  const head = `<meta name="description" content="${home.description.replace(/"/g, '&quot;')}">
+<link rel="canonical" href="${canonical}">
+<link rel="alternate" type="text/markdown" href="${md(origin, '/')}">
+<link rel="describedby" href="${origin}/llms.txt">
+<link rel="service-desc" type="application/vnd.oai.openapi+json;version=3.1" href="${origin}/v1/openapi.json">
+<link rel="service-doc" href="${origin}/docs">
+<link rel="api-catalog" href="${origin}/.well-known/api-catalog">
+<link rel="ard" href="${origin}/.well-known/ard.json">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="Open Media">
+<meta property="og:title" content="${home.title}">
+<meta property="og:description" content="${home.description.replace(/"/g, '&quot;')}">
+<meta property="og:url" content="${canonical}">
+<meta property="og:image" content="${coverUrl}">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">${JSON.stringify(jsonLd(origin, home)).replace(/</g, '\\u003c')}</script>
+<style>
+@keyframes om-static-show{to{opacity:1}}
+#om-static{opacity:0;animation:om-static-show .2s 4s forwards;overflow-y:auto;width:100%;box-sizing:border-box;padding:0 20px 40px;font:16px/1.6 -apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif}
+#om-static>*{max-width:760px;margin-left:auto;margin-right:auto}
+</style>
+`;
+  const body = `<div id="om-static">
+${markdownToHtml(home.body(origin))}
+<p>For AI agents: start at <a href="${origin}/llms.txt">llms.txt</a>, the <a href="${origin}/agents">agent guide</a>, the <a href="${origin}/docs">API documentation</a> or the MCP server at <code>${origin}/open/mcp</code>. Open source under the MIT licence: <a href="${sourceRepository}">${sourceRepository}</a>.</p>
+</div>`;
+  return appHtml
+    .replace(/<\/head>/i, `${head}</head>`)
+    .replace(/<div id="root"><\/div>/, `<div id="root">${body}</div>`);
+}
+
+/** RFC 8288 Link header for the homepage on any host. */
+export function homeLinkHeader(origin: string): string {
+  return linkHeader(origin, '/');
+}
+
 // ─── Discovery documents ─────────────────────────────────────────────────────
 
 function reverseHost(origin: string): string {
