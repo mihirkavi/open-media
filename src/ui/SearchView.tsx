@@ -105,13 +105,15 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
   const showCited = (postId: string) => {
     const post = postViews.current.get(postId);
     if (!post || !header.current) return;
-    // Measured when tapped, and once more after scrolling, since images above can still be loading.
+    // Measured when tapped, and again after scrolling and once images above have had time to load,
+    // so the outlined post settles with room below the search field instead of under it.
     const align = (animated: boolean) => header.current?.measureInWindow((_x, headerTop, _width, headerHeight) => post.measureInWindow((_left, top) => {
-      const offset = top - (headerTop + headerHeight) - 12;
+      const offset = top - (headerTop + headerHeight) - 20;
       if (animated || Math.abs(offset) > 4) scroller.current?.scrollTo({ y: Math.max(0, scrolled.current + offset), animated });
     }));
     align(true);
     setTimeout(() => align(false), 700);
+    setTimeout(() => align(false), 1600);
     setSpotlight(postId);
   };
 

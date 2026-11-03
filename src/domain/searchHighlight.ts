@@ -29,7 +29,22 @@ export function splitHighlights(text: string, terms: string[]): TextSegment[] {
     at = start + found[0].length;
   }
   if (at < text.length) segments.push({ text: text.slice(at), match: false });
-  return segments;
+  return joinAdjacent(segments);
+}
+
+/** Marked words with only spaces between them (“Claude Code”) become one mark instead of two. */
+function joinAdjacent(segments: TextSegment[]): TextSegment[] {
+  const joined: TextSegment[] = [];
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    const last = joined[joined.length - 1];
+    const next = segments[index + 1];
+    if (last?.match && !segment.match && /^[ \t]+$/.test(segment.text) && next?.match) {
+      last.text += segment.text + next.text;
+      index += 1;
+    } else joined.push({ ...segment });
+  }
+  return joined;
 }
 
 /**

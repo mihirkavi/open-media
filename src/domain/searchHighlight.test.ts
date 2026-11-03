@@ -15,7 +15,10 @@ test('search words are marked wherever the search matched them, ignoring case', 
 test('text without matches, or a search without words, stays one plain piece', () => {
   assert.deepEqual(splitHighlights('Hello there', ['dinner']), [{ text: 'Hello there', match: false }]);
   assert.deepEqual(splitHighlights('Hello there', []), [{ text: 'Hello there', match: false }]);
-  assert.deepEqual(splitHighlights('a+b (c)', highlightTerms(['+b', '(c)'])), [{ text: 'a', match: false }, { text: '+b', match: true }, { text: ' ', match: false }, { text: '(c)', match: true }]);
+  assert.deepEqual(splitHighlights('a+b (c)', highlightTerms(['+b', '(c)'])), [{ text: 'a', match: false }, { text: '+b (c)', match: true }]);
+  // Neighbouring marks with only spaces between them read as one mark; a line break keeps them apart.
+  assert.deepEqual(splitHighlights('Love Claude Code!', ['claude', 'code']), [{ text: 'Love ', match: false }, { text: 'Claude Code', match: true }, { text: '!', match: false }]);
+  assert.deepEqual(splitHighlights('Claude\nCode', ['claude', 'code']), [{ text: 'Claude', match: true }, { text: '\n', match: false }, { text: 'Code', match: true }]);
 });
 
 test('a long text is cut around its first match, on word boundaries', () => {

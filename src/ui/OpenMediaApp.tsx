@@ -410,6 +410,7 @@ export function OpenMediaApp({
       {!compact ? (
         <DesktopRail
           destination={destination}
+          avatarUrl={profile.avatarUrl}
           onNavigate={navigate}
           onCompose={startPost}
         />
@@ -418,6 +419,7 @@ export function OpenMediaApp({
         {compact ? (
           <Header
             destination={destination}
+            avatarUrl={profile.avatarUrl}
             back={Boolean(person)}
             onNavigate={navigate}
             onBack={person ? closePerson : () => navigate(lastPrimary)}
@@ -519,10 +521,13 @@ export function OpenMediaApp({
 
 function DesktopRail({
   destination,
+  avatarUrl,
   onNavigate,
   onCompose,
 }: {
   destination: Destination;
+  /** The person's profile picture, shown in place of the Profile icon once they add one. */
+  avatarUrl?: string;
   onNavigate: (value: Destination) => void;
   onCompose: () => void;
 }) {
@@ -571,6 +576,7 @@ function DesktopRail({
           id="profile"
           label="Profile"
           icon="person-outline"
+          avatarUrl={avatarUrl}
           active={destination === "profile"}
           onPress={() => onNavigate("profile")}
         />
@@ -589,6 +595,7 @@ function DesktopRail({
 function NavButton({
   label,
   icon,
+  avatarUrl,
   hint,
   active,
   onPress,
@@ -596,6 +603,8 @@ function NavButton({
   id: string;
   label: string;
   icon: keyof typeof Ionicons.glyphMap;
+  /** A picture drawn in the icon's place, ringed when the item is active. */
+  avatarUrl?: string;
   /** A keyboard shortcut, shown as a key on the right. */
   hint?: string;
   active: boolean;
@@ -610,11 +619,17 @@ function NavButton({
       onPress={onPress}
       style={[styles.nav, active && styles.navActive]}
     >
-      <Ionicons
-        name={icon}
-        size={21}
-        color={active ? colors.text : colors.textSecondary}
-      />
+      {avatarUrl ? (
+        <View style={[styles.navAvatarRing, active && styles.navAvatarRingActive]}>
+          <Image source={{ uri: avatarUrl }} style={styles.navAvatar} accessibilityIgnoresInvertColors />
+        </View>
+      ) : (
+        <Ionicons
+          name={icon}
+          size={21}
+          color={active ? colors.text : colors.textSecondary}
+        />
+      )}
       <Text style={[styles.navText, active && styles.navTextActive]}>
         {label}
       </Text>
@@ -625,11 +640,13 @@ function NavButton({
 
 function Header({
   destination,
+  avatarUrl,
   back,
   onNavigate,
   onBack,
 }: {
   destination: Destination;
+  avatarUrl?: string;
   back?: boolean;
   onNavigate: (value: Destination) => void;
   onBack: () => void;
@@ -655,11 +672,25 @@ function Header({
               label="Search"
               onPress={() => onNavigate("search")}
             />
-            <IconButton
-              icon="person-circle-outline"
-              label="Profile"
-              onPress={() => onNavigate("profile")}
-            />
+            {avatarUrl ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Profile"
+                hitSlop={8}
+                onPress={() => onNavigate("profile")}
+                style={styles.iconButton}
+              >
+                <View style={styles.navAvatarRing}>
+                  <Image source={{ uri: avatarUrl }} style={styles.headerAvatar} accessibilityIgnoresInvertColors />
+                </View>
+              </Pressable>
+            ) : (
+              <IconButton
+                icon="person-circle-outline"
+                label="Profile"
+                onPress={() => onNavigate("profile")}
+              />
+            )}
           </>
         )}
       </View>
@@ -790,6 +821,11 @@ function createStyles(colors: ThemeColors) {
       borderRadius: 12,
     },
     navActive: { backgroundColor: colors.chrome },
+    // A hairline ring keeps light and dark pictures from melting into the rail; it darkens when active.
+    navAvatarRing: { padding: 1.5, borderRadius: 999, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
+    navAvatarRingActive: { borderWidth: 1.5, borderColor: colors.text, padding: 1 },
+    navAvatar: { width: 20, height: 20, borderRadius: 10, backgroundColor: colors.chrome },
+    headerAvatar: { width: 26, height: 26, borderRadius: 13, backgroundColor: colors.chrome },
     navText: { color: colors.textSecondary, fontSize: 15, fontWeight: "500" },
     navTextActive: { color: colors.text, fontWeight: "700" },
     navHint: { marginLeft: "auto", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, color: colors.textTertiary, fontSize: 11, fontWeight: "600" },
