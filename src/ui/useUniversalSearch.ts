@@ -12,7 +12,8 @@ import { SettingIndexEntry, searchSettings } from '../domain/settings';
 export interface SourceSearchState { id: NetworkId; status: 'searching' | 'done' | 'failed' | 'skipped'; count: number; method: string }
 export type AiSummary =
   | { status: 'idle' | 'loading' | 'unavailable' }
-  | { status: 'done'; answer: string; citations: string[]; basedOn: number }
+  /** `sent` is the posts sent, in order: the answer cites them by number. */
+  | { status: 'done'; answer: string; sent: string[] }
   | { status: 'failed'; message: string };
 
 const debounceMs = 450;
@@ -88,11 +89,11 @@ export function useUniversalSearch(query: string, loadedPosts: SocialPost[], con
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ query: search.raw, posts: picked.map((post) => ({ id: post.id, source: sourceName(post.provenance.connectorId), author: post.author.handle, text: [post.title, post.body].filter(Boolean).join(' — ') })) }),
       });
-      const body = await response.json().catch(() => ({})) as { answer?: string; citations?: string[]; error?: string };
+      const body = await response.json().catch(() => ({})) as { answer?: string; error?: string };
       if (current !== generation.current) return;
       if (response.status === 503) setAi({ status: 'unavailable' });
       else if (!response.ok || !body.answer) setAi({ status: 'failed', message: body.error ?? 'The AI summary isn’t available right now.' });
-      else setAi({ status: 'done', answer: body.answer, citations: body.citations ?? [], basedOn: picked.length });
+      else setAi({ status: 'done', answer: body.answer, sent: picked.map((post) => post.id) });
     } catch {
       if (current === generation.current) setAi({ status: 'failed', message: 'The AI summary isn’t available right now.' });
     }

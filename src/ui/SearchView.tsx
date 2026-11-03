@@ -1,9 +1,10 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Keyboard, Platform, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Image, Keyboard, Platform, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from './Text';
 
+import { citedAnswer } from '../domain/aiCitations';
 import { LensVersion, searchSharedLenses, StoredLens } from '../data/lensService';
 import { loadProfessionalProfile, saveProfessionalProfile } from '../data/openMediaService';
 import { builtInLensFor, lensFromRequest, lensSummary, looksLikeLensRequest, looksLikeTuneRequest, ownCopyId, relevantLens, tuneLens } from '../domain/feedLenses';
@@ -17,6 +18,7 @@ import { highlightTerms, snippetAround } from '../domain/searchHighlight';
 import { conversationTitle } from '../domain/selectors';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
+import { AiMark } from './AiMark';
 import { FeedViewer, PostCard } from './OpenMediaFeed';
 import { Highlighted, SearchHighlight } from './RichText';
 import type { FeedLenses } from './useFeedLenses';
@@ -69,7 +71,7 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
     ...search.messages.map((conversation) => ({ key: conversation.id, section: 'Messages and email', icon: (conversation.email ? 'mail-outline' : 'chatbubble-outline') as keyof typeof Ionicons.glyphMap, title: conversationTitle(conversation), subtitle: matchingLine(conversation), run: () => onOpenConversation ? onOpenConversation(conversation.id) : onNavigate?.('messages') })),
   ].map((item) => ({ ...item, run: remember(item.run) })) : [
     ...recent.list.map((item) => ({ key: `recent-${item}`, section: 'Recent', icon: 'time-outline' as const, title: item, run: () => setQuery(item) })),
-    ...suggestions.filter((item) => !recent.list.includes(item)).map((item) => ({ key: item, section: 'Try', icon: 'sparkles-outline' as const, title: item, run: () => setQuery(item) })),
+    ...suggestions.filter((item) => !recent.list.includes(item)).map((item) => ({ key: item, section: 'Try', icon: 'search-outline' as const, title: item, run: () => setQuery(item) })),
   ]);
 
   // With a keyboard the first result is the top hit: ↑ and ↓ move, Return opens it. Esc clears the
@@ -91,9 +93,30 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
     return all;
   }, []);
   const sources = search.sources.filter((source) => source.status !== 'skipped');
+  const cited = useMemo(() => (search.ai.status === 'done' ? citedAnswer(search.ai.answer, search.ai.sent) : undefined), [search.ai]);
 
-  return <SearchHighlight.Provider value={hasQuery ? terms : []}><ScrollView style={styles.screen} contentContainerStyle={styles.content} stickyHeaderIndices={[0]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
-    <View style={styles.header}>
+  // A citation scrolls to its post in the results below and outlines it for a moment.
+  const scroller = useRef<ScrollView>(null);
+  const header = useRef<View>(null);
+  const scrolled = useRef(0);
+  const postViews = useRef(new Map<string, View>());
+  const [spotlight, setSpotlight] = useState<string>();
+  useEffect(() => { if (!spotlight) return; const timer = setTimeout(() => setSpotlight(undefined), 2400); return () => clearTimeout(timer); }, [spotlight]);
+  const showCited = (postId: string) => {
+    const post = postViews.current.get(postId);
+    if (!post || !header.current) return;
+    // Measured when tapped, and once more after scrolling, since images above can still be loading.
+    const align = (animated: boolean) => header.current?.measureInWindow((_x, headerTop, _width, headerHeight) => post.measureInWindow((_left, top) => {
+      const offset = top - (headerTop + headerHeight) - 12;
+      if (animated || Math.abs(offset) > 4) scroller.current?.scrollTo({ y: Math.max(0, scrolled.current + offset), animated });
+    }));
+    align(true);
+    setTimeout(() => align(false), 700);
+    setSpotlight(postId);
+  };
+
+  return <SearchHighlight.Provider value={hasQuery ? terms : []}><ScrollView ref={scroller} onScroll={(event) => { scrolled.current = event.nativeEvent.contentOffset.y; }} scrollEventThrottle={32} style={styles.screen} contentContainerStyle={styles.content} stickyHeaderIndices={[0]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag">
+    <View ref={header} style={styles.header}>
       <View style={styles.fieldRow}>
         {onClose ? <Pressable accessibilityRole="button" accessibilityLabel="Close search" onPress={onClose} style={styles.close}><Ionicons name="chevron-back" size={22} color={colors.text} /></Pressable> : null}
         <View style={[styles.field, focused && styles.fieldFocused]}>
@@ -107,13 +130,22 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
     {hasQuery && search.parsed.understood.length ? <Text style={styles.hint}>Understood: {search.parsed.understood.join(' · ')}{search.parsed.text ? ` · “${search.parsed.text}”` : ''}</Text> : null}
 
     {search.ai.status === 'loading' || search.ai.status === 'done' || search.ai.status === 'failed' ? <View accessibilityLiveRegion="polite" style={styles.ai}>
-      <View style={styles.aiHeader}><Ionicons name="sparkles-outline" size={16} color={colors.text} /><Text style={styles.aiTitle}>AI summary</Text></View>
-      {search.ai.status === 'loading' ? <View style={styles.aiRow}><ActivityIndicator color={colors.text} /><Text style={styles.aiText}>Summarizing public posts…</Text></View> : null}
-      {search.ai.status === 'failed' ? <Text style={styles.note}>{search.ai.message}</Text> : null}
-      {search.ai.status === 'done' ? <>
-        <Text selectable style={styles.aiText}>{search.ai.answer}</Text>
-        {search.ai.citations.length ? <Text style={styles.note}>Sources: {search.ai.citations.map((id, index) => { const post = byId.get(id); return post ? `${post.author.handle} on ${sourceName(post.provenance.connectorId)}` : `post ${index + 1}`; }).join(' · ')}</Text> : null}
-        <Text style={styles.note}>Written by AI from {search.ai.basedOn} public posts below; it can be wrong. Only your search and those public posts were sent.</Text>
+      <View style={styles.aiHeader}><AiMark size={15} color={colors.text} /><Text style={styles.aiTitle}>AI summary</Text>{search.ai.status === 'loading' ? <ActivityIndicator size="small" color={colors.textTertiary} style={styles.aiSpinner} /> : null}</View>
+      {search.ai.status === 'loading' ? <Text style={styles.aiWaiting}>Reading the public posts below…</Text> : null}
+      {search.ai.status === 'failed' ? <Text style={styles.aiWaiting}>{search.ai.message}</Text> : null}
+      {search.ai.status === 'done' && cited ? <>
+        <Text selectable style={styles.aiText}>{cited.pieces.map((piece, index) => 'text' in piece
+          ? piece.text
+          : <Text key={index}>{' '}<Text accessibilityRole="link" accessibilityLabel={`Source ${piece.cite}: ${byId.get(piece.postId)?.author.handle ?? 'post'}`} onPress={() => showCited(piece.postId)} suppressHighlighting style={[styles.cite, spotlight === piece.postId && styles.citeActive]}>{piece.cite}</Text></Text>)}</Text>
+        {cited.sources.length ? <View style={styles.citeSources}>
+          {cited.sources.map((postId, index) => { const post = byId.get(postId); return post ? <Pressable key={postId} accessibilityRole="link" accessibilityLabel={`Source ${index + 1}: ${post.author.handle} on ${sourceName(post.provenance.connectorId)}. Show the post`} onPress={() => showCited(postId)} style={({ pressed, hovered }: { pressed: boolean; hovered?: boolean }) => [styles.source, (hovered || spotlight === postId) && styles.sourceActive, pressed && styles.rowPressed]}>
+            <Text style={styles.sourceNumber}>{index + 1}</Text>
+            {post.author.avatarUrl ? <Image source={{ uri: post.author.avatarUrl }} style={styles.sourceAvatar} accessibilityIgnoresInvertColors /> : <View style={styles.sourceAvatar}><Text style={styles.sourceInitials}>{post.author.initials.slice(0, 1)}</Text></View>}
+            <Text numberOfLines={1} style={styles.sourceHandle}>{post.author.handle}</Text>
+            <Text style={styles.sourceNetwork}>{sourceName(post.provenance.connectorId)}</Text>
+          </Pressable> : null; })}
+        </View> : null}
+        <Text style={styles.aiDisclosure}>Written by AI from {search.ai.sent.length} public posts below, so it can be wrong. Only your search and those posts were sent.</Text>
       </> : null}
     </View> : null}
 
@@ -130,7 +162,10 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
       <Text style={styles.note}>{sources.map((source) => `${networks[source.id].displayName} ${source.status === 'searching' ? '…' : source.status === 'failed' ? 'unavailable' : source.count}`).join('  ·  ')}</Text>
       {sources.filter((source) => source.status === 'done' && /only/.test(source.method)).map((source) => <Text key={source.id} style={styles.note}>{networks[source.id].displayName}: {source.method}</Text>)}
     </View> : null}
-    {search.posts.map((post) => <PostCard key={post.id} post={post} mode="raw" viewer={viewer} />)}
+    {search.posts.map((post) => <View key={post.id} ref={(view) => { if (view) postViews.current.set(post.id, view); else postViews.current.delete(post.id); }}>
+      <PostCard post={post} mode="raw" viewer={viewer} />
+      {spotlight === post.id ? <View pointerEvents="none" style={styles.spotlight} /> : null}
+    </View>)}
     {hasQuery && search.searching && !search.posts.length ? <View style={styles.status}><ActivityIndicator color={colors.text} /></View> : null}
     {nothing ? <View style={styles.status}><Ionicons name="search-outline" size={26} color={colors.textTertiary} /><Text style={styles.empty}>No results for “{search.parsed.raw}”. Try fewer or different words.</Text></View> : null}
   </ScrollView></SearchHighlight.Provider>;
@@ -337,11 +372,25 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   footnote: { marginTop: 10, marginHorizontal: 10, color: colors.textTertiary, fontSize: 12, lineHeight: 17 },
   hint: { marginTop: 4, marginHorizontal: 6, color: colors.textTertiary, fontSize: 12, lineHeight: 17 },
   note: { color: colors.textTertiary, fontSize: 12, lineHeight: 17 },
-  ai: { marginTop: 14, gap: 8, padding: 16, borderRadius: 20, backgroundColor: colors.chrome },
-  aiHeader: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  aiTitle: { color: colors.text, fontSize: 13, fontWeight: '700' },
-  aiRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  aiText: { color: colors.text, fontSize: 15, lineHeight: 22 },
+  ai: { marginTop: 14, gap: 12, paddingHorizontal: 18, paddingTop: 16, paddingBottom: 14, borderRadius: 20, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, backgroundColor: colors.surfaceAlt },
+  aiHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  aiTitle: { color: colors.text, fontSize: 13, fontWeight: '600', letterSpacing: 0.1 },
+  aiSpinner: { marginLeft: 2, transform: [{ scale: 0.75 }] },
+  aiWaiting: { color: colors.textSecondary, fontSize: 15, lineHeight: 22 },
+  aiText: { color: colors.text, fontSize: 16, lineHeight: 25, letterSpacing: -0.1 },
+  // Inline citation: a small number in a soft rounded tile (the tile is drawn on the web; phones show the shaded number).
+  cite: { color: colors.text, backgroundColor: colors.bubble, fontSize: 11, lineHeight: 17, fontWeight: '600', fontVariant: ['tabular-nums'], ...(Platform.OS === 'web' ? { display: 'inline-block', minWidth: 18, paddingHorizontal: 5, borderRadius: 6, textAlign: 'center', verticalAlign: 'middle', transform: [{ translateY: -1 }], cursor: 'pointer' } : {}) } as object,
+  citeActive: { color: colors.surface, backgroundColor: colors.text },
+  citeSources: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  source: { maxWidth: '100%', flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 4, paddingRight: 10, paddingVertical: 4, borderRadius: 999, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, backgroundColor: colors.surface },
+  sourceActive: { borderColor: colors.textTertiary, backgroundColor: colors.chrome },
+  sourceNumber: { minWidth: 16, color: colors.textTertiary, fontSize: 11, fontWeight: '600', textAlign: 'center', fontVariant: ['tabular-nums'] },
+  sourceAvatar: { width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.chrome },
+  sourceInitials: { color: colors.textSecondary, fontSize: 9, fontWeight: '700' },
+  sourceHandle: { flexShrink: 1, color: colors.text, fontSize: 12, fontWeight: '600' },
+  sourceNetwork: { color: colors.textTertiary, fontSize: 12 },
+  aiDisclosure: { color: colors.textTertiary, fontSize: 11, lineHeight: 15, opacity: 0.85 },
+  spotlight: { position: 'absolute', top: 4, bottom: 4, left: -10, right: -10, borderRadius: 18, borderWidth: 1.5, borderColor: colors.text },
   panel: { marginTop: 14, padding: 6, gap: 4, borderRadius: 20, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, backgroundColor: colors.surfaceAlt },
   group: { gap: 2 },
   groupLabel: { paddingHorizontal: 10, paddingTop: 8, paddingBottom: 4, color: colors.textTertiary, fontSize: 12, fontWeight: '600' },

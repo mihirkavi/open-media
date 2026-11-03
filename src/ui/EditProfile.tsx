@@ -194,7 +194,7 @@ export function EditProfile({ profile, onClose, onSaved }: { profile: OpenMediaP
       </View>
 
       <View style={styles.importCard}>
-        <View style={styles.importIcon}><Ionicons name="sparkles-outline" size={17} color={colors.text} /></View>
+        <View style={styles.importIcon}><Ionicons name="document-text-outline" size={17} color={colors.text} /></View>
         <View style={styles.grow}>
           <Text style={styles.importTitle}>Fill this in for you</Text>
           <Text style={styles.footnote}>From your LinkedIn PDF or data export, or from your website. You choose what to keep.</Text>
