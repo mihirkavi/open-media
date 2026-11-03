@@ -52,6 +52,8 @@ import { PeopleProvider, PersonTarget, useContactsStore } from "./people";
 import { PersonProfile } from "./PersonProfile";
 import { encounterForConversation, ownEmails } from "../domain/people";
 import { mergeByContact, recipientSuggestions } from "../domain/contactMerge";
+import { AiRecord, aiConversation, isAiConversation } from "../domain/aiChat";
+import { loadAiMessages, onAiChatChanged, sendAiMessage } from "../connectors/aiChatConnector";
 import { loadPublicPerson } from "../data/peopleService";
 
 export type PrimaryDestination = "feed" | "clips" | "messages";
@@ -282,8 +284,28 @@ export function OpenMediaApp({
     const timer = setInterval(refreshBridged, 5000);
     return () => clearInterval(timer);
   }, [refreshBridged]);
+  // Open Media AI (ADR 0028): one AI conversation, refreshed when an AI search adds to it.
+  const [aiRecords, setAiRecords] = useState<AiRecord[] | null>(null);
+  const refreshAi = useCallback(async () => {
+    if (messageMode !== "open_media" || !currentUserId) return;
+    try {
+      setAiRecords(await loadAiMessages());
+    } catch {
+      // This server has no AI chat yet: Messages simply doesn't show one.
+      setAiRecords(null);
+    }
+  }, [currentUserId, messageMode]);
+  useEffect(() => {
+    refreshAi();
+    return onAiChatChanged(refreshAi);
+  }, [refreshAi]);
   const sendMessage = useCallback(
     async (conversationId: string, body: string, replyTo?: Message) => {
+      if (isAiConversation({ id: conversationId })) {
+        const added = await sendAiMessage(body);
+        setAiRecords((current) => [...(current ?? []), ...added]);
+        return;
+      }
       const email = mailConversations.find(
         (conversation) => conversation.id === conversationId,
       )?.email;
@@ -389,8 +411,13 @@ export function OpenMediaApp({
   useEffect(() => setOwnAddresses(ownKey ? ownKey.split(",") : []), [ownKey]);
   // One conversation per person (ADR 0023): chats and email from a contact's identities join up.
   const personConversations = useMemo(
-    () => (messageMode === "open_media" ? mergeByContact(conversations, contacts.cards, profile.displayName) : conversations),
-    [contacts.cards, conversations, messageMode, profile.displayName],
+    () => {
+      if (messageMode !== "open_media") return conversations;
+      const people = mergeByContact(conversations, contacts.cards, profile.displayName);
+      // The AI chat always comes first.
+      return aiRecords ? [aiConversation(aiRecords, currentUserId), ...people] : people;
+    },
+    [aiRecords, contacts.cards, conversations, currentUserId, messageMode, profile.displayName],
   );
   // The To field offers saved contacts under their names, then everyone you have emailed.
   const recipientContacts = useMemo(() => recipientSuggestions(emailContacts, contacts.cards, profile.displayName), [contacts.cards, emailContacts, profile.displayName]);

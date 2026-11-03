@@ -1,4 +1,4 @@
-export type MessageSource = 'open_media' | 'matrix' | 'gmail' | 'icloud' | 'imap' | 'instagram' | 'linkedin' | 'snapchat' | 'sms' | BridgedNetwork;
+export type MessageSource = 'open_media' | 'ai' | 'matrix' | 'gmail' | 'icloud' | 'imap' | 'instagram' | 'linkedin' | 'snapchat' | 'sms' | BridgedNetwork;
 
 /** Networks reached through Open Media's chat bridges (ADR 0011). */
 export type BridgedNetwork = 'whatsapp' | 'telegram' | 'signal' | 'gmessages' | 'gvoice' | 'instagram' | 'messenger' | 'linkedin' | 'twitter' | 'bluesky' | 'slack' | 'discord';
@@ -83,6 +83,8 @@ export interface Message {
   /** For a message you sent: when it reached everyone else's app, and when everyone read it (ADR 0026). */
   deliveredAt?: string;
   readAt?: string;
+  /** Present on Open Media AI messages (ADR 0028): which model answered, and whether it was an AI search. */
+  ai?: { byline?: string; search?: boolean; citations?: string[] };
 }
 
 export interface Conversation {

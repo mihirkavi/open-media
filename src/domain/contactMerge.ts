@@ -15,6 +15,7 @@ export { fullerName } from './people';
 /** True when this conversation can take a reply from here. */
 export function canReply(conversation: Conversation): boolean {
   return conversation.sourceSummary.includes('open_media')
+    || conversation.sourceSummary.includes('ai')
     || conversation.sourceSummary.includes('matrix')
     || Boolean(bridgedSourceOf(conversation))
     || Boolean(conversation.email?.canSend);

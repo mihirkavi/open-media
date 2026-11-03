@@ -21,6 +21,11 @@ import { SourceMarker, sourceLabel } from "./SourceMarker";
 import type { MessageMode } from "./OpenMediaApp";
 import { TranslationNote, useTranslation } from "./useTranslation";
 import { VerifiedTick, verifiedBlue } from "./VerifiedTick";
+import { aiPersonId, isAiConversation, maskKeys } from "../domain/aiChat";
+import { parseMarkdown } from "../domain/markdown";
+import { MarkdownBody } from "./MarkdownBody";
+import { AiMark } from "./AiMark";
+import { AiThinking } from "./AiThinking";
 
 interface Props {
   conversations: Conversation[];
@@ -260,7 +265,7 @@ export function OpenMediaMessages({
                     {conversation.unreadCount ? (
                       <View style={styles.unread} />
                     ) : null}
-                    <Text numberOfLines={1} style={styles.rowTime}>{formatListTime(new Date(conversation.lastMessageAt))}</Text>
+                    {conversation.messages[0]?.id === "ai:welcome" ? null : <Text numberOfLines={1} style={styles.rowTime}>{formatListTime(new Date(conversation.lastMessageAt))}</Text>}
                   </View>
                   {conversation.channels ? (
                     <View style={styles.previewLine}>
@@ -528,6 +533,13 @@ function MessageThread({
     deliver(item);
   };
   const waiting = pending.filter((item) => item.threadId === conversation.id);
+  // A message you just sent (and Open Media AI's drawing while it answers) scroll into view at once.
+  useEffect(() => {
+    if (!waiting.length) return;
+    const timer = setTimeout(() => threadScroll.current?.scrollToEnd({ animated: !reduceMotion }), 60);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waiting.length]);
   // Only messages that arrive while the thread is open move in; the history is already there.
   const reduceMotion = useReducedMotion();
   const openedWith = useRef(new Set(conversation.messages.map((message) => message.id))).current;
@@ -573,6 +585,8 @@ function MessageThread({
               ? channelsMeta(channels)
               : blocked
               ? "Blocked · messaging paused"
+              : isAiConversation(conversation)
+              ? "Every AI you use, in one chat · private to you"
               : bridged
               ? `${bridgedName} · through Open Media’s chat bridge`
               : throughMatrix
@@ -630,7 +644,7 @@ function MessageThread({
                 ) : null}
                 <ReplyableBubble
                   outbound={item.message.direction === "outbound"}
-                  enabled={canSend}
+                  enabled={canSend && !item.message.ai}
                   onReply={() => startReply(item.message)}
                   style={[
                     styles.bubble,
@@ -671,6 +685,12 @@ function MessageThread({
                   )}
                 </ReplyableBubble>
                 <MessageMedia message={item.message} />
+                {item.message.ai?.byline ? (
+                  <View style={[styles.aiByline, item.message.direction === "outbound" && styles.outboundWrap]}>
+                    {item.message.ai.search ? <Ionicons name="search" size={11} color={colors.textTertiary} /> : <AiMark size={11} color={colors.textTertiary} />}
+                    <Text numberOfLines={2} style={styles.aiBylineText}>{item.message.ai.byline}</Text>
+                  </View>
+                ) : null}
                 {/* Receipts under your messages: a tick per group, and words under the latest one. */}
                 {item.message.direction === "outbound" && (item.groupEnd || item.message.id === lastOutboundId) ? (
                   <ReceiptLine message={item.message} withLabel={item.message.id === lastOutboundId} />
@@ -685,14 +705,14 @@ function MessageThread({
           ).concat(
             waiting.map((item) => (
               <Appear key={item.id} animate={!reduceMotion} style={[styles.messageWrap, styles.outboundWrap, styles.groupStart]}>
-                <View style={[styles.bubble, styles.outboundBubble, styles.outboundTail, item.failed ? styles.failedBubble : styles.sendingBubble]}>
+                <View style={[styles.bubble, styles.outboundBubble, styles.outboundTail, item.failed ? styles.failedBubble : !isAiConversation(conversation) && styles.sendingBubble]}>
                   {item.replyTo ? (
                     <View style={[styles.quote, styles.quoteOutbound]}>
                       <Text style={[styles.quoteName, styles.quoteNameOutbound]}>{senderLabel(item.replyTo)}</Text>
                       <Text numberOfLines={2} style={[styles.quoteText, styles.quoteTextOutbound]}>{quoteText(item.replyTo)}</Text>
                     </View>
                   ) : null}
-                  <Text style={[styles.message, styles.outboundMessage]}>{item.body}</Text>
+                  <Text style={[styles.message, styles.outboundMessage]}>{isAiConversation(conversation) ? maskKeys(item.body) : item.body}</Text>
                 </View>
                 {item.failed ? (
                   <Pressable accessibilityRole="button" accessibilityHint={item.failed} onPress={() => deliver(item)} style={styles.deliveryLine}>
@@ -700,10 +720,19 @@ function MessageThread({
                     <Text accessibilityLiveRegion="assertive" style={styles.deliveryFailed}>Not sent. Tap to try again.</Text>
                   </Pressable>
                 ) : (
-                  <Text style={styles.deliveryStatus}>Sending…</Text>
+                  <Text style={styles.deliveryStatus}>{isAiConversation(conversation) ? "Sent" : "Sending…"}</Text>
                 )}
               </Appear>
             )),
+          ).concat(
+            // While Open Media AI works on an answer, its own drawing waits in its place.
+            isAiConversation(conversation) && waiting.some((item) => !item.failed) ? [
+              <Appear key="ai-thinking" animate={!reduceMotion} style={[styles.messageWrap, styles.groupStart]}>
+                <View accessibilityLabel="Open Media AI is writing" accessibilityLiveRegion="polite" style={[styles.bubble, styles.inboundTail, styles.aiThinkingBubble]}>
+                  <AiThinking color={colors.text} />
+                </View>
+              </Appear>,
+            ] : [],
           )
         ) : (
           <View style={styles.threadEmpty}>
@@ -1158,6 +1187,7 @@ function NewMessagePanel({
 /** One face for a chat with one person; two overlapping faces for a group, like iMessage. */
 function ConversationAvatar({ people, size }: { people: Person[]; size: number }) {
   const { colors } = useOpenMediaTheme();
+  if (people[0]?.id === aiPersonId) return <AiAvatar size={size} />;
   if (people.length < 2) return <Avatar initials={people[0]?.initials ?? "OM"} imageUrls={people[0]?.avatarUrls} size={size} />;
   const small = Math.round(size * 0.66);
   return (
@@ -1168,6 +1198,16 @@ function ConversationAvatar({ people, size }: { people: Person[]; size: number }
       <View style={{ position: "absolute", right: 0, bottom: 0, borderRadius: small / 2 + 2, borderWidth: 2, borderColor: colors.surface }}>
         <Avatar initials={people[1].initials} imageUrls={people[1].avatarUrls} size={small - 2} />
       </View>
+    </View>
+  );
+}
+
+/** Open Media AI's picture: the AI mark from AI search, in the text colour's circle. */
+function AiAvatar({ size }: { size: number }) {
+  const { colors } = useOpenMediaTheme();
+  return (
+    <View accessibilityRole="image" accessibilityLabel="Open Media AI" style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: colors.text, alignItems: "center", justifyContent: "center" }}>
+      <AiMark size={Math.round(size * 0.5)} color={colors.surface} />
     </View>
   );
 }
@@ -1444,6 +1484,17 @@ function formatBytes(bytes: number): string {
 
 /** A chat message; one from someone else is shown in the reader's language, never stored (ADR 0022). */
 function MessageText({ message, style }: { message: Message; style: StyleProp<TextStyle> }) {
+  if (message.ai) return <AiText message={message} style={style} />;
+  return <PersonText message={message} style={style} />;
+}
+
+/** Open Media AI writes Markdown; what you sent stays as you wrote it. */
+function AiText({ message, style }: { message: Message; style: StyleProp<TextStyle> }) {
+  const blocks = useMemo(() => (message.direction === "inbound" ? parseMarkdown(message.body) : null), [message.body, message.direction]);
+  return blocks ? <MarkdownBody blocks={blocks} source="open_media" style={style} collapsed={false} /> : <Text style={style}>{message.body}</Text>;
+}
+
+function PersonText({ message, style }: { message: Message; style: StyleProp<TextStyle> }) {
   const translation = useTranslation(message.id, message.direction === "outbound" ? [] : [message.body], "private");
   return (
     <>
@@ -1750,6 +1801,9 @@ function createStyles(colors: ThemeColors) {
     outboundTail: { borderBottomRightRadius: 6 },
     bubbleSubject: { marginBottom: 3, color: colors.text, fontSize: 15, lineHeight: 21, fontWeight: "700" },
     bubbleSource: { marginTop: 4, marginHorizontal: 6, alignSelf: "flex-start" },
+    aiByline: { marginTop: 4, marginHorizontal: 6, flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start", maxWidth: "80%" },
+    aiBylineText: { fontSize: 11, fontWeight: "600", color: colors.textTertiary },
+    aiThinkingBubble: { paddingVertical: 10, paddingHorizontal: 14 },
     previewLine: { flexDirection: "row", alignItems: "flex-start", gap: 5 },
     previewShrink: { flex: 1 },
     channelBar: { paddingHorizontal: 18, paddingTop: 6, minHeight: 30, justifyContent: "center" },
@@ -2003,6 +2057,8 @@ function createStyles(colors: ThemeColors) {
 
 /** The person a one-to-one thread is with, for opening their profile; groups open the first member. */
 function threadTarget(conversation: Conversation, person?: Person): PersonTarget {
+  // Open Media AI has no profile to open.
+  if (isAiConversation(conversation)) return { ref: { kind: "network", network: "open-media-ai", handle: "" } as unknown as PersonTarget["ref"], name: conversationTitle(conversation) };
   const encounter = encounterForConversation(conversation);
   return { ref: encounter?.ref ?? { kind: 'open_media', handle: person?.identities.find((identity) => identity.source === 'open_media')?.value.replace(/^@/, '') ?? '' }, name: conversationTitle(conversation), avatarUrl: person?.avatarUrls?.[0] };
 }

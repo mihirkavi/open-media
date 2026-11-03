@@ -135,6 +135,7 @@ One inbox, organised by person rather than by app. Everything here needs the per
 3. Reply: draft the exact text, show it, and send only after the person agrees, with \`send_message\`, \`send_email\` or \`send_bridged_message\` on the channel they last used unless they say otherwise.
 4. Mark read only when the person has actually seen it: \`mark_conversation_read\`.
 5. Read receipts are reciprocal: \`set_read_receipts\` false hides theirs and others'. Confirm before changing it. Delivered always shows; email only ever says Sent, because email has no reliable read signal and Open Media never uses tracking pixels.
+6. Open Media AI is the first conversation in their Messages: one chat for every AI model they use, with their AI searches in it. \`get_ai_chat\` reads it and \`ask_ai\` adds a message (the free built-in model answers unless they saved a key or the text names a model, such as "@claude …"). Never paste API keys for the person; they paste their own in the app.
 
 ## Rules
 

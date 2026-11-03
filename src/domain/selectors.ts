@@ -37,7 +37,8 @@ export function filterConversations(
         .toLocaleLowerCase();
       return searchable.includes(normalizedQuery);
     })
-    .sort((a, b) => Date.parse(b.lastMessageAt) - Date.parse(a.lastMessageAt));
+    // Newest first, with the Open Media AI chat pinned on top (ADR 0028).
+    .sort((a, b) => Number(b.sourceSummary.includes('ai')) - Number(a.sourceSummary.includes('ai')) || Date.parse(b.lastMessageAt) - Date.parse(a.lastMessageAt));
 }
 
 export function conversationTitle(conversation: Conversation): string {

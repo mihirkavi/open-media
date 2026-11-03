@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { networkSearches } from '../connectors/networkSearch';
+import { aiChatHeaders, notifyAiChatChanged } from '../connectors/aiChatConnector';
 import { loadUpcomingEvents } from '../data/eventsService';
 import { Conversation } from '../domain/models';
 import { NetworkId, sourceName } from '../domain/networkPosts';
@@ -86,10 +87,12 @@ export function useUniversalSearch(query: string, loadedPosts: SocialPost[], con
     setAi({ status: 'loading' });
     try {
       const response = await fetch(`${api}/v1/search/assist`, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
+        // Signed in, the search and its summary are also saved to the AI chat in Messages (ADR 0028).
+        method: 'POST', headers: { 'content-type': 'application/json', ...(await aiChatHeaders()) },
         body: JSON.stringify({ query: search.raw, posts: picked.map((post) => ({ id: post.id, source: sourceName(post.provenance.connectorId), author: post.author.handle, text: [post.title, post.body].filter(Boolean).join(' — ') })) }),
       });
-      const body = await response.json().catch(() => ({})) as { answer?: string; error?: string };
+      const body = await response.json().catch(() => ({})) as { answer?: string; error?: string; recorded?: boolean };
+      if (body.recorded) notifyAiChatChanged();
       if (current !== generation.current) return;
       if (response.status === 503) setAi({ status: 'unavailable' });
       else if (!response.ok || !body.answer) setAi({ status: 'failed', message: body.error ?? 'The AI summary isn’t available right now.' });

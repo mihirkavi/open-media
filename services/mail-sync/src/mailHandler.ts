@@ -17,6 +17,7 @@ import { handleAgentRequest, isAgentPath } from './agentApi.js';
 import { handlePublicApiRequest, isPublicApiPath } from './publicApi.js';
 import { authenticate } from './session.js';
 import { runSearchAssist, SearchAssistEnv } from './searchAssist.js';
+import { recordSearch } from './aiChat.js';
 import { runTranslate, TranslateEnv } from './translate.js';
 import { syncPop3, testPop3 } from './pop3.js';
 import { sendSmtp, SmtpConnection, testSmtp } from './smtp.js';
@@ -113,7 +114,11 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
       const limiter = env.PUBLIC_API_RATE_LIMITER;
       if (limiter && !(await limiter.limit({ key: `assist:${request.headers.get('cf-connecting-ip') ?? 'local'}` })).success) return rateLimited(headers);
       if (!env.AI) return json(503, { error: 'AI summaries aren’t available on this server.' }, headers);
-      return json(200, await runSearchAssist(await readJSON(request), env), headers);
+      const result = await runSearchAssist(await readJSON(request), env);
+      // Signed in, the search and its summary also go into the person's AI chat (ADR 0028).
+      const bearer = request.headers.get('authorization')?.match(/^Bearer (\S+)$/)?.[1];
+      const recorded = bearer ? await recordSearch(env, bearer, result).then(() => true, () => false) : false;
+      return json(200, { ...result, recorded }, headers);
     }
 
     // Automatic translation (ADR 0022). Public text is cached by its hash; private text (messages,

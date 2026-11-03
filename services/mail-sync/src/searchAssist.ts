@@ -13,7 +13,7 @@ const maxPosts = 20;
 const maxSnippet = 400;
 
 export interface AssistPost { id: string; source: string; author: string; text: string }
-export interface AssistResult { answer: string; citations: string[]; model: string }
+export interface AssistResult { query: string; answer: string; citations: string[]; model: string }
 
 export function parseAssistRequest(value: unknown): { query: string; posts: AssistPost[] } {
   const body = value as { query?: unknown; posts?: unknown } | null;
@@ -52,5 +52,5 @@ export async function runSearchAssist(input: unknown, env: SearchAssistEnv): Pro
   const output = await env.AI.run(searchAssistModel, { messages: assistPrompt(query, posts), max_tokens: 220, temperature: 0.2 }) as { response?: unknown };
   const answer = typeof output.response === 'string' ? output.response.trim().slice(0, 1200) : '';
   if (!answer) throw new UserFacingError('The AI summary didn’t come back. Try again.');
-  return { answer, citations: citationsFrom(answer, posts), model: searchAssistModel };
+  return { query, answer, citations: citationsFrom(answer, posts), model: searchAssistModel };
 }

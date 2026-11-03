@@ -9,6 +9,7 @@ import { useOpenMediaTheme } from '../themeContext';
 
 const sourceDetails: Record<MessageSource, { icon: keyof typeof Ionicons.glyphMap; label: string }> = {
   open_media: { icon: 'chatbubble-ellipses-outline', label: 'Open Media' },
+  ai: { icon: 'ellipse-outline', label: 'Open Media AI' },
   matrix: { icon: 'git-network-outline', label: 'Matrix' },
   gmail: { icon: 'mail-outline', label: 'Gmail' },
   icloud: { icon: 'mail-outline', label: 'iCloud Mail' },

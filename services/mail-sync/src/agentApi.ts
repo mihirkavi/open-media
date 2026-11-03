@@ -54,10 +54,11 @@ import { authenticate } from './session.js';
 import { confirmEvidence, MarketplaceEnv, MarketplaceError, marketplaceConfigured, readEvidence, serviceRpc } from './marketplace.js';
 import { verifyWebBotAuth } from './webBotAuth.js';
 import { runTranslate, TranslateEnv } from './translate.js';
+import { AiChatEnv, AiRecord, AiSettings, AiStore, chat as aiChat, NewAiRecord, ProviderId } from './aiChat.js';
 import { reportReasons } from '../../../src/domain/listingSafety';
 import { discloseLegalName, handleVerificationWebhook, startVerification, VerificationEnv, VerificationError, verificationConfigured } from './verification.js';
 
-export type AgentEnv = { WEB_APP_HOSTS?: string; PROFILE_IMPORT_ALLOW_LOCAL?: string } & PublicApiEnv & BridgesEnv & ContactsEnv & VerificationEnv & PublicEventsEnv & PaymentsEnv & AgentAuthEnv & MarketplaceEnv & TranslateEnv;
+export type AgentEnv = { WEB_APP_HOSTS?: string; PROFILE_IMPORT_ALLOW_LOCAL?: string } & PublicApiEnv & BridgesEnv & ContactsEnv & VerificationEnv & PublicEventsEnv & PaymentsEnv & AgentAuthEnv & MarketplaceEnv & TranslateEnv & AiChatEnv;
 
 const version = '1.0.0';
 const sources = ['open-media', 'farcaster', 'lens', 'hive', 'deso'] as const;
@@ -768,6 +769,42 @@ export class Account {
     catch (error) { throw error instanceof UserFacingError ? new AgentError(400, 'bad_request', error.message) : error; }
   }
 
+  /** The person's AI chat (ADR 0028), oldest first, including recorded AI searches. */
+  async aiMessages(limit = 200) {
+    const rows = await this.aiStore().history(Math.min(Math.max(Math.trunc(limit) || 200, 1), 500));
+    return { messages: rows };
+  }
+
+  /** One message in the AI chat: a question, a pasted key, or “use Claude”. Returns what was added. */
+  async askAi(body: unknown) {
+    if (!(await withinLimit(this.env.PUBLIC_API_RATE_LIMITER, `ai:${this.userId}`))) throw new AgentError(429, 'rate_limited', 'Too many AI messages in a short time. Wait a minute and try again.');
+    try { return { messages: await aiChat(body, this.aiStore(), this.env) }; }
+    catch (error) { throw error instanceof UserFacingError ? new AgentError(400, 'bad_request', error.message) : error; }
+  }
+
+  /** Clears the AI chat. Saved keys and the chosen model stay. */
+  async clearAi() {
+    await this.rest('DELETE', `/rest/v1/ai_messages?user_id=eq.${this.userId}`);
+    return { cleared: true };
+  }
+
+  private aiStore(): AiStore {
+    const record = (row: Record<string, unknown>): AiRecord => ({ id: String(row.id), role: row.role as AiRecord['role'], body: String(row.body), source: row.source as AiRecord['source'], provider: (row.provider as string | null) ?? undefined, model: (row.model as string | null) ?? undefined, meta: (row.meta as Record<string, unknown> | null) ?? undefined, createdAt: String(row.created_at) });
+    const columns = 'id,role,body,source,provider,model,meta,created_at';
+    return {
+      history: async (limit) => (await this.rest<Record<string, unknown>[]>('GET', `/rest/v1/ai_messages?select=${columns}&order=created_at.desc&limit=${limit}`)).map(record).reverse(),
+      append: async (records: NewAiRecord[]) => (await this.rest<Record<string, unknown>[]>('POST', `/rest/v1/ai_messages?select=${columns}`, records.map((item) => ({ role: item.role, body: item.body, source: item.source, provider: item.provider ?? null, model: item.model ?? null, meta: item.meta ?? {} })), 'return=representation')).map(record),
+      keys: async () => (await this.rest<{ provider: ProviderId; ciphertext: string; hint: string }[]>('GET', '/rest/v1/ai_provider_keys?select=provider,ciphertext,hint&order=created_at.asc')),
+      saveKey: async (key) => { await this.rest('POST', '/rest/v1/ai_provider_keys?on_conflict=user_id,provider', { user_id: this.userId, provider: key.provider, ciphertext: key.ciphertext, hint: key.hint, created_at: new Date().toISOString() }, 'resolution=merge-duplicates,return=minimal'); },
+      deleteKey: async (provider) => { await this.rest('DELETE', `/rest/v1/ai_provider_keys?provider=eq.${encodeURIComponent(provider)}`); },
+      settings: async () => {
+        const [row] = await this.rest<{ provider: ProviderId | null; model: string | null }[]>('GET', '/rest/v1/ai_settings?select=provider,model');
+        return { provider: row?.provider ?? undefined, model: row?.model ?? undefined } satisfies AiSettings;
+      },
+      saveSettings: async (settings) => { await this.rest('POST', '/rest/v1/ai_settings?on_conflict=user_id', { user_id: this.userId, provider: settings.provider ?? null, model: settings.model ?? null, updated_at: new Date().toISOString() }, 'resolution=merge-duplicates,return=minimal'); },
+    };
+  }
+
   /** A message to apply with, built from the tailored profile. Nothing is sent. */
   async draftApplication(body: Record<string, unknown>) {
     await this.careerLimit();
@@ -1333,6 +1370,8 @@ function registerPublicTools(server: McpServer, env: AgentEnv, origin: string) {
 }
 
 function registerAccountTools(server: McpServer, account: Account) {
+  tool(server, 'ask_ai', { title: 'Ask Open Media AI', description: 'Send one message to the person’s Open Media AI chat, the single conversation in Messages where all their AI models answer. The free built-in model (Llama) answers unless they saved their own key or the text names a model (“@claude …”, “use GPT”). The exchange is saved in their AI chat. Never paste keys on the person’s behalf.', input: { text: z.string().min(1).max(8000) }, readOnly: false }, (args) => account.askAi({ text: args.text }));
+  tool(server, 'get_ai_chat', { title: 'Read my AI chat', description: 'The person’s Open Media AI chat, oldest first, including their AI searches and which model answered each message.', input: { limit: z.number().int().min(1).max(500).optional() }, readOnly: true }, (args) => account.aiMessages(Number(args.limit ?? 100)));
   tool(server, 'get_me', { title: 'My profile', description: 'The signed-in person’s Open Media profile.', input: {}, readOnly: true, view: appViewUri }, () => account.me());
   tool(server, 'publish_post', { title: 'Publish a post', description: 'Publish a public Open Media post as the person. Public posts can be read by anyone. Confirm the exact text with the person first.', input: { text: z.string().min(1).max(maxPostLength) }, readOnly: false }, (args) => account.publish(args.text));
   tool(server, 'delete_post', { title: 'Delete a post', description: 'Delete one of the person’s own posts. Copies others already read cannot be recalled.', input: { id: z.string() }, readOnly: false }, (args) => account.deletePost(String(args.id)));
@@ -1623,6 +1662,11 @@ function baseOpenApi(origin: string) {
       },
       '/v1/me/professional/import': { post: { summary: 'Fill the profile from LinkedIn’s profile PDF (linkedInPdf, base64), its text (linkedInPdfText), LinkedIn data-export CSVs (linkedInFiles) or a JSON Resume (jsonResume). Returns proposals, one per field with its source; saved only with save: true, and then only the ids in accept, merged into the profile.', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { linkedInPdf: { type: 'string', description: 'Base64 of the PDF from LinkedIn: your profile → Resources → Save to PDF (up to 2 MB)' }, linkedInPdfText: { type: 'string', maxLength: 100000 }, linkedInFiles: { type: 'object', additionalProperties: { type: 'string' }, description: 'Profile.csv, Positions.csv, Education.csv, Skills.csv, Languages.csv' }, jsonResume: { type: 'object' }, save: { type: 'boolean' }, accept: { type: 'array', items: { type: 'string' }, description: 'Proposal ids to save; all when left out' } } } } } }, responses: { 200: ok('Proposals, or what was saved'), 400: error, 401: error, 413: error } } },
       '/v1/me/professional/portfolio': { post: { summary: 'Fill the profile from the person’s own website, after they agreed (consent: true): proposals from /resume.json, JSON-LD Person, h-card, Open Graph and page text, each with its source. Obeys robots.txt; public https only; at most four pages. Saved only with save: true and the ids in accept.', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['url', 'consent'], properties: { url: { type: 'string', format: 'uri', maxLength: 300 }, consent: { type: 'boolean', description: 'true only after the person agreed that this site, theirs, may be read' }, save: { type: 'boolean' }, accept: { type: 'array', items: { type: 'string' } } } } } } }, responses: { 200: ok('Proposals, or what was saved'), 400: error, 401: error, 403: error, 429: error } } },
+      '/v1/me/ai/messages': {
+        get: { summary: 'Your Open Media AI chat, oldest first, including your AI searches (private to you)', security: bearer, parameters: [{ name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 500 } }], responses: { 200: ok('{ messages: [{ id, role, body, source: chat|search, provider, model, createdAt }] }'), 401: error } },
+        post: { summary: 'Send one message to Open Media AI. The free built-in model answers unless you saved your own key (paste it as the message) or name a model (“@claude …”, “use GPT”). Keys are encrypted and never returned', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['text'], properties: { text: { type: 'string', maxLength: 8000 } } } } } }, responses: { 200: ok('The messages added: yours (keys hidden) and the answer'), 400: error, 401: error, 429: error } },
+        delete: { summary: 'Clear your AI chat. Saved keys and the chosen model stay', security: bearer, responses: { 200: ok('{ cleared: true }'), 401: error } },
+      },
       '/v1/me/career/tailor': { post: { summary: 'Draft your profile and a cover note for one job, from your own profile only; nothing is saved', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { postId: { type: 'string', format: 'uuid' }, title: { type: 'string' }, description: { type: 'string' }, employer: { type: 'string' } } } } } }, responses: { 200: ok('Draft, with anything removed listed'), 400: error, 401: error, 429: error } } },
       '/v1/me/career/application': { post: { summary: 'Draft the message to apply for a job with; nothing is sent', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { postId: { type: 'string', format: 'uuid' }, title: { type: 'string' }, description: { type: 'string' }, employer: { type: 'string' } } } } } }, responses: { 200: ok('Message draft'), 400: error, 401: error, 429: error } } },
       '/v1/me/listings': { post: { summary: 'Offer a product, service, event or job as a public post (live at once, checked in the background)', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['kind', 'title'], properties: { kind: { type: 'string', enum: ['product', 'service', 'event', 'job'] }, title: { type: 'string', maxLength: 120 }, price: { type: 'string', description: 'e.g. "25.50"; "0" for free; omit for ask-for-price. Jobs: pay or a range like "80000-120000"' }, employmentType: { type: 'string', enum: ['full_time', 'part_time', 'contract', 'internship', 'freelance'], description: 'Jobs only' }, applyUrl: { type: 'string', format: 'uri', description: 'Jobs only: the employer’s https application page' }, currency: { type: 'string', pattern: '^[A-Z]{3}$' }, location: { type: 'string', maxLength: 120 }, remote: { type: 'boolean', description: 'Remote service, ships, or online event' }, startsAt: { type: 'string', format: 'date-time', description: 'Events only' }, when: { type: 'string', description: 'Events only, instead of startsAt: "Nov 12 7pm"' }, timezone: { type: 'string', description: 'Events: IANA time zone' }, text: { type: 'string' } } } } } }, responses: { 201: ok('The post with its listing'), 400: error, 401: error, 429: error } } },
@@ -1961,6 +2005,9 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     if (request.method === 'POST' && path === '/v1/me/web-feeds/opml') return json(await account.importOpml(body), 0);
     if (request.method === 'GET' && path === '/v1/me/web-feeds/opml') return new Response(await account.exportOpml(), { headers: { ...publicHeaders, 'content-type': 'text/x-opml; charset=utf-8', 'content-disposition': 'attachment; filename="open-media-feeds.opml"', 'cache-control': 'no-store' } });
     if (request.method === 'POST' && path === '/v1/me/career/tailor') return json(await account.tailor(body), 0);
+    if (request.method === 'GET' && path === '/v1/me/ai/messages') return json(await account.aiMessages(Number(url.searchParams.get('limit') ?? 200)), 0);
+    if (request.method === 'POST' && path === '/v1/me/ai/messages') return json(await account.askAi(body), 0);
+    if (request.method === 'DELETE' && path === '/v1/me/ai/messages') return json(await account.clearAi(), 0);
     if (request.method === 'POST' && path === '/v1/me/career/application') return json(await account.draftApplication(body), 0);
     const listingMatch = path.match(/^\/v1\/me\/listings\/([^/]+)$/);
     if (request.method === 'PATCH' && listingMatch) return json(await account.updateListing(decodeURIComponent(listingMatch[1]), body) as object, 0);
