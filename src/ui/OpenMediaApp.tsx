@@ -48,7 +48,7 @@ import {
 } from "./OpenMediaUtilities";
 import { PeopleProvider, PersonTarget, useContactsStore } from "./people";
 import { PersonProfile } from "./PersonProfile";
-import { encounterForConversation } from "../domain/people";
+import { encounterForConversation, ownEmails } from "../domain/people";
 import { mergeByContact, recipientSuggestions } from "../domain/contactMerge";
 import { loadPublicPerson } from "../data/peopleService";
 
@@ -136,9 +136,19 @@ export function OpenMediaApp({
     },
     [feed.removePost],
   );
-  const [mailConversations, setMailConversations] = useState<
-    Conversation[]
-  >([]);
+  // Stored mail, turned into conversations below once the viewer's own addresses are known.
+  const [mailStore, setMailStore] = useState<{ stored: Awaited<ReturnType<typeof listStoredMail>>; sending: Set<string> }>({ stored: [], sending: new Set() });
+  // Addresses on the viewer's own contact card (ADR 0023), kept in sync with their contacts below.
+  const [ownAddresses, setOwnAddresses] = useState<string[]>([]);
+  const mailConversations = useMemo(
+    () =>
+      normalizeStoredEmail(mailStore.stored, { iconService: apiConfigured() ? getAPIURL() : undefined, alsoMine: ownAddresses }).map((conversation) =>
+        conversation.email
+          ? { ...conversation, email: { ...conversation.email, canSend: mailStore.sending.has(conversation.email.accountId) } }
+          : conversation,
+      ),
+    [mailStore, ownAddresses],
+  );
   const [nativeConversations, setNativeConversations] = useState<
     Conversation[]
   >([]);
@@ -171,13 +181,7 @@ export function OpenMediaApp({
         accounts.filter((account) => account.canSend).map((account) => account.id),
       );
       setSendingMailboxes(accounts.filter((account) => account.canSend).map((account) => ({ id: account.id, email: account.email })));
-      setMailConversations(
-        normalizeStoredEmail(stored, { iconService: apiConfigured() ? getAPIURL() : undefined }).map((conversation) =>
-          conversation.email
-            ? { ...conversation, email: { ...conversation.email, canSend: sending.has(conversation.email.accountId) } }
-            : conversation,
-        ),
-      );
+      setMailStore({ stored, sending });
     } catch {
       // Email is additive; Open Media chats still load if mail storage is unavailable.
     }
@@ -298,7 +302,8 @@ export function OpenMediaApp({
   const emailContacts = useMemo(
     () => {
       const seen = new Map<string, Person>();
-      for (const conversation of mailConversations) for (const person of conversation.participants) {
+      // Notes to yourself aren't someone you emailed; your own addresses come from your card instead.
+      for (const conversation of mailConversations) for (const person of conversation.email?.toSelf ? [] : conversation.participants) {
         const address = person.identities.find((identity) => identity.kind === "email")?.value;
         if (address && !seen.has(address)) seen.set(address, person);
       }
@@ -349,13 +354,15 @@ export function OpenMediaApp({
     [conversations],
   );
   const contacts = useContactsStore(messageMode === "open_media" && apiConfigured(), encounters);
+  const ownKey = ownEmails(contacts.cards).join(",");
+  useEffect(() => setOwnAddresses(ownKey ? ownKey.split(",") : []), [ownKey]);
   // One conversation per person (ADR 0023): chats and email from a contact's identities join up.
   const personConversations = useMemo(
-    () => (messageMode === "open_media" ? mergeByContact(conversations, contacts.cards) : conversations),
-    [contacts.cards, conversations, messageMode],
+    () => (messageMode === "open_media" ? mergeByContact(conversations, contacts.cards, profile.displayName) : conversations),
+    [contacts.cards, conversations, messageMode, profile.displayName],
   );
   // The To field offers saved contacts under their names, then everyone you have emailed.
-  const recipientContacts = useMemo(() => recipientSuggestions(emailContacts, contacts.cards), [contacts.cards, emailContacts]);
+  const recipientContacts = useMemo(() => recipientSuggestions(emailContacts, contacts.cards, profile.displayName), [contacts.cards, emailContacts, profile.displayName]);
   const openPerson = useCallback((target: PersonTarget) => {
     setPerson(target);
     if (Platform.OS !== "web" || typeof window === "undefined") return;
@@ -388,10 +395,11 @@ export function OpenMediaApp({
   const people = useMemo(() => ({
     open: openPerson,
     contacts: messageMode === "open_media" ? contacts : undefined,
+    me: { id: currentUserId, handle: profile.handle, name: profile.displayName },
     message: messageMode === "open_media" ? (handle: string) => { messagePerson(handle).catch(() => undefined); } : undefined,
     search: (query: string) => { setPerson(undefined); setSearchQuery(query); navigate("search"); },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [openPerson, contacts, messageMode]);
+  }), [openPerson, contacts, messageMode, currentUserId, profile.handle, profile.displayName]);
 
   // ⌘K (Ctrl+K elsewhere) opens universal search from anywhere on the web, as in most apps.
   useEffect(() => {

@@ -117,6 +117,8 @@ export interface EmailThreadInfo {
   canSend?: boolean;
   /** Everyone else in a group email (sender, To and Cc); replies go to all of them. */
   recipients?: string[];
+  /** Only mail between your own addresses: a note to yourself (ADR 0023). */
+  toSelf?: boolean;
 }
 
 export interface DraftMessage {

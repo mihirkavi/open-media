@@ -51,6 +51,11 @@ export interface ContactCard {
   emails: string[];
   /** Handles on other networks (ADR 0023). Absent on cards saved before contacts were editable. */
   handles?: ContactHandle[];
+  /**
+   * The viewer's own card ("My Card", ADR 0023): their other addresses, numbers and accounts. Its
+   * name always comes from their profile; it never stands for anyone else.
+   */
+  self?: boolean;
   notes: string;
   links: ContactLink[];
   /** Identities the viewer said are not this person; never suggested or linked again. */
@@ -135,7 +140,8 @@ export function reconcile(cards: ContactCard[], encounters: Encounter[], now = n
   for (const encounter of encounters) {
     const key = refKey(encounter.ref);
     if (next.some((card) => card.links.some((link) => refKey(link.ref) === key) || (!card.rejected.includes(key) && holdsHandle(card, encounter.ref, { phones: false })))) continue;
-    const eligible = next.filter((card) => !card.rejected.includes(key));
+    if (isMine(next, encounter.ref)) continue;
+    const eligible = next.filter((card) => !card.self && !card.rejected.includes(key));
     const emails = emailsOf(encounter);
     const phones = phonesOf(encounter);
     const byIdentifier = eligible.flatMap((card) => {
@@ -217,11 +223,39 @@ export function holdsRef(card: ContactCard, ref: IdentityRef): boolean {
  * as an email, phone or handle. When two cards hold it, neither is chosen (ADR 0023).
  */
 export function cardFor(cards: ContactCard[], ref: IdentityRef): ContactCard | undefined {
+  if (isMine(cards, ref)) return undefined;
+  const others = cards.filter((card) => !card.self);
   const key = refKey(ref);
-  const linked = cards.find((card) => card.links.some((link) => refKey(link.ref) === key));
+  const linked = others.find((card) => card.links.some((link) => refKey(link.ref) === key));
   if (linked) return linked;
-  const holding = cards.filter((card) => holdsRef(card, ref));
+  const holding = others.filter((card) => holdsRef(card, ref));
   return holding.length === 1 ? holding[0] : undefined;
+}
+
+/** The viewer's own card, if they made one. */
+export function selfCard(cards: ContactCard[]): ContactCard | undefined {
+  return cards.find((card) => card.self);
+}
+
+/**
+ * True when this identity is the viewer's own: on their own card, as a link, email, number or
+ * handle. Their own identities are never matched to anyone else, merged or suggested as a contact.
+ */
+export function isMine(cards: ContactCard[], ref: IdentityRef): boolean {
+  const mine = selfCard(cards);
+  if (!mine) return false;
+  const key = refKey(ref);
+  return mine.links.some((link) => refKey(link.ref) === key) || holdsRef(mine, ref);
+}
+
+/** The viewer's own email addresses from their card, so mail from them reads as sent by the viewer. */
+export function ownEmails(cards: ContactCard[]): string[] {
+  return (selfCard(cards)?.emails ?? []).map(normalizeEmail).filter(Boolean);
+}
+
+/** How the viewer's own card is shown: their profile name with "(Me)", as in Apple Contacts. */
+export function selfLabel(profileName: string): string {
+  return `${profileName.trim() || 'Me'} (Me)`;
 }
 
 const openNetworks: ReadonlySet<HandleNetwork> = new Set(['farcaster', 'lens', 'hive', 'deso']);

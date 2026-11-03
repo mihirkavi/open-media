@@ -48,6 +48,15 @@ The owner saw saved addresses still showing as raw addresses in Messages. Four c
 
 The new message **To** field now offers every email on your contacts under the contact's name, then the people you have emailed (renamed when saved), each address once. Open Media people in its results also show under the saved name, and names match without accents.
 
+### Your own card (2026-11-03)
+
+Like "My Card" in Apple Contacts, a person can keep a contact card for themselves: an ordinary encrypted card with `self: true` (at most one). No database change.
+
+- **Where:** on your own profile, the "Only you see this" box offers **Add my other addresses**, then shows them with Edit; the editor is the same one, with the name taken from your profile ("Sam Rivera (Me)") instead of a name field. In Profile → Your contacts, **Name (Me)** is pinned first, opens your profile, and is not counted as a contact.
+- **What it does:** mail from any address on your card counts as sent by you (`normalizeStoredEmail`'s `alsoMine`), so your other address never appears as a separate person. Your identities (on your card as an email, number, handle or link) are never matched to another contact, merged into anyone's conversation, auto-linked or suggested (`isMine`; `cardFor` and `reconcile` skip them). A one-to-one chat with one of your own accounts shows as "Name (Me)". The To field lists your own addresses last, as "Name (Me)".
+- **Conflicts:** your own card wins: an identifier on your card and on someone else's is treated as yours.
+- **Privacy:** the card is private like every contact card; nothing on it is shown to others unless it is already a public profile field.
+
 ### One conversation per person
 
 `mergeByContact` (`src/domain/contactMerge.ts`) runs after every source loads:

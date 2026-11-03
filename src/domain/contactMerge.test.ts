@@ -6,7 +6,7 @@ import { mapBridgeSnapshot } from './bridgedChats';
 import { applyDraft, canReply, channelOf, contactForConversation, defaultChannel, draftOf, draftProblems, fullerName, mergeByContact, recipientSuggestions, sharedWith } from './contactMerge';
 import { normalizeStoredEmail } from './emailNormalization';
 import { Conversation } from './models';
-import { cardFor, cardRefs, ContactCard, refKey, unlink } from './people';
+import { cardFor, cardRefs, ContactCard, isMine, reconcile, refKey, unlink } from './people';
 
 const now = '2026-11-02T12:00:00.000Z';
 const card = (overrides: Partial<ContactCard> = {}): ContactCard => ({
@@ -210,4 +210,50 @@ test('the To field offers saved contacts by name, then people you emailed, each 
     ['news@shop.example.com', 'Shop'],
   ]);
   assert.deepEqual(suggestions[2].avatarUrls, ['https://example.com/p.png'], 'the picture from mail stays');
+});
+
+// Your own card ("My Card", ADR 0023).
+
+const myCard = (overrides: Partial<ContactCard> = {}): ContactCard => card({ id: 'me', self: true, name: 'Sam Rivera', emails: ['sam.personal@example.com'], phones: ['+1 555 010 9999'], handles: [{ network: 'open_media', handle: 'samr' }], ...overrides });
+
+test('mail from one of your own addresses is yours: sent by you, not a separate person', () => {
+  const messages = [
+    mail({ sourceMessageId: '<o1@x>', from: 'priya.shah@example.com', to: ['me@example.com'], sentAt: '2026-11-01T09:00:00Z' }),
+    mail({ sourceMessageId: '<o2@x>', from: 'Sam <sam.personal@example.com>', to: ['priya.shah@example.com'], sentAt: '2026-11-01T10:00:00Z', text: 'Reply from my other address' }),
+  ];
+  assert.equal(normalizeStoredEmail(messages).length, 2, 'without your card, your other address looks like another person');
+  const [thread, ...rest] = normalizeStoredEmail(messages, { alsoMine: ['sam.personal@example.com'] });
+  assert.equal(rest.length, 0);
+  assert.deepEqual(thread.messages.map((message) => message.direction), ['inbound', 'outbound']);
+});
+
+test('your own identities never match, merge into or get suggested for anyone else', () => {
+  const [chat] = whatsapp('15550109999', 'Sam', 1);
+  const priya = card({ phones: ['+1 555 010 9999'] });
+  assert.equal(contactForConversation([priya], chat)?.id, 'c1', 'without your card the number would join Priya');
+  assert.equal(contactForConversation([priya, myCard()], chat), undefined);
+  const [shown] = mergeByContact([chat], [priya, myCard()], 'Sam Rivera');
+  assert.equal(shown.participants[0].name, 'Sam Rivera (Me)', 'a chat with yourself is you');
+  assert.equal(cardFor([myCard()], { kind: 'open_media', handle: 'samr' }), undefined, 'your own card is never “a contact” for your identities');
+  assert.ok(isMine([myCard()], { kind: 'email', address: 'Sam.Personal+lists@example.com' }));
+  const { cards, suggestions } = reconcile([myCard({ name: 'Sam Rivera' }), card({ id: 'c2', name: 'Sam Rivera' })], [{ ref: { kind: 'email', address: 'sam.personal@example.com' }, name: 'Sam Rivera' }], now);
+  assert.equal(suggestions.length, 0);
+  assert.ok(cards.every((item) => item.links.length === 0));
+});
+
+test('the To field lists your own addresses last, as “Name (Me)”', () => {
+  const emailed = [{ address: 'sam.personal@example.com', name: 'Sam', initials: 'S', avatarUrls: [] }, { address: 'dev@example.com', name: 'Dev', initials: 'D', avatarUrls: [] }];
+  assert.deepEqual(recipientSuggestions(emailed, [myCard()], 'Sam Rivera').map((item) => [item.address, item.name]), [
+    ['dev@example.com', 'Dev'],
+    ['sam.personal@example.com', 'Sam Rivera (Me)'],
+  ]);
+});
+
+test('mail between your own addresses is a note to yourself, shown as “Name (Me)”', () => {
+  const [note] = normalizeStoredEmail([mail({ from: 'Sam <sam.personal@example.com>', to: ['me@example.com'], text: 'Book the gym' })], { alsoMine: ['sam.personal@example.com'] });
+  assert.equal(note.email?.address, 'me@example.com');
+  assert.equal(note.messages[0].direction, 'outbound');
+  assert.equal(note.email?.toSelf, true);
+  const [shown] = mergeByContact([note], [myCard()], 'Sam Rivera');
+  assert.equal(shown.participants[0].name, 'Sam Rivera (Me)');
 });

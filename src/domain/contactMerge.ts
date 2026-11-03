@@ -1,7 +1,7 @@
 import { normalizeEmail, normalizePhone } from './contactCleaning';
 import { bridgedSourceOf } from './bridgedChats';
 import { Conversation, MessageSource, Person } from './models';
-import { cardFor, ContactCard, contactLabel, contactName, ContactHandle, encounterForConversation, HandleNetwork, normalizeHandle, refForParticipant, sameEmail, samePhone } from './people';
+import { cardFor, ContactCard, contactLabel, contactName, ContactHandle, encounterForConversation, HandleNetwork, normalizeHandle, isMine, refForParticipant, sameEmail, samePhone, selfCard, selfLabel } from './people';
 
 export { fullerName } from './people';
 
@@ -83,11 +83,13 @@ function titleFor(names: string[]): string {
  * name); a contact with several gets one conversation, `contact:<id>`, holding all of their
  * messages in time order, with the originals as its channels. Groups are never merged.
  */
-export function mergeByContact(conversations: Conversation[], cards: ContactCard[]): Conversation[] {
-  if (!cards.length) return conversations;
+export function mergeByContact(conversations: Conversation[], cards: ContactCard[], profileName = ''): Conversation[] {
   const byCard = new Map<string, { card: ContactCard; members: Conversation[] }>();
   const out: (Conversation | string)[] = [];
   for (const conversation of conversations) {
+    // A chat with one of your own accounts (a "message yourself" chat) is you, never another person.
+    const encounter = conversation.participants.length === 1 && !conversation.groupTitle ? encounterForConversation(conversation) : undefined;
+    if (conversation.email?.toSelf || (encounter && isMine(cards, encounter.ref))) { out.push(asMe(conversation, profileName)); continue; }
     const card = contactForConversation(cards, conversation);
     if (!card) { out.push(withContactNames(conversation, cards)); continue; }
     const group = byCard.get(card.id);
@@ -99,6 +101,11 @@ export function mergeByContact(conversations: Conversation[], cards: ContactCard
     const { card, members } = byCard.get(item)!;
     return members.length === 1 ? named(members[0], card) : merged(card, members);
   }).sort((a, b) => Date.parse(b.lastMessageAt) - Date.parse(a.lastMessageAt));
+}
+
+function asMe(conversation: Conversation, profileName: string): Conversation {
+  const name = selfLabel(profileName);
+  return { ...conversation, participants: conversation.participants.map((person) => ({ ...person, name, initials: initialsOf(profileName || 'Me') })) };
 }
 
 function named(conversation: Conversation, card: ContactCard): Conversation {
@@ -232,9 +239,10 @@ export interface RecipientSuggestion { address: string; name: string; initials: 
 /**
  * Who the To field offers: every email address on the viewer's contacts, under the contact's
  * name, then the people they have emailed with. Someone in both appears once, under the contact's
- * name and with their picture from mail. A contact with no name is offered by address.
+ * name and with their picture from mail. A contact with no name is offered by address. The
+ * viewer's own other addresses come last, as "Name (Me)", for writing to themselves.
  */
-export function recipientSuggestions(emailed: RecipientSuggestion[], cards: ContactCard[]): RecipientSuggestion[] {
+export function recipientSuggestions(emailed: RecipientSuggestion[], cards: ContactCard[], profileName = ''): RecipientSuggestion[] {
   const out: RecipientSuggestion[] = [];
   const seen = new Set<string>();
   const add = (item: RecipientSuggestion) => {
@@ -243,7 +251,8 @@ export function recipientSuggestions(emailed: RecipientSuggestion[], cards: Cont
     seen.add(address);
     out.push({ ...item, address });
   };
-  const named = [...cards].filter((card) => card.emails.length).sort((a, b) => contactLabel(a).localeCompare(contactLabel(b)));
+  const mine = selfCard(cards);
+  const named = [...cards].filter((card) => !card.self && card.emails.length).sort((a, b) => contactLabel(a).localeCompare(contactLabel(b)));
   for (const card of named) {
     const name = contactName(card);
     for (const address of card.emails) {
@@ -252,9 +261,13 @@ export function recipientSuggestions(emailed: RecipientSuggestion[], cards: Cont
       add({ address, name: shown, initials: initialsOf(shown), avatarUrls: known?.avatarUrls ?? [] });
     }
   }
+  const own = new Set((mine?.emails ?? []).map(normalizeEmail));
   for (const item of emailed) {
+    if (own.has(normalizeEmail(item.address))) continue;
     const name = contactName(cardFor(cards, { kind: 'email', address: item.address }));
     add(name ? { ...item, name, initials: initialsOf(name) } : item);
   }
+  const me = selfLabel(profileName);
+  for (const address of mine?.emails ?? []) add({ address, name: me, initials: initialsOf(profileName || 'Me'), avatarUrls: [] });
   return out;
 }

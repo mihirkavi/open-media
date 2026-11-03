@@ -5,7 +5,7 @@ import { Loader } from './Loader';
 
 import { applyDraft, ContactDraft, draftOf, draftProblems, sharedWith } from '../domain/contactMerge';
 import { networks } from '../domain/networkPosts';
-import { ContactCard, contactName, HandleNetwork, phoneNetworks } from '../domain/people';
+import { ContactCard, contactName, HandleNetwork, phoneNetworks, selfLabel } from '../domain/people';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { sourceLabel } from './SourceMarker';
@@ -55,11 +55,11 @@ function draftFrom(name: string, notes: string, entries: Entry[]): ContactDraft 
   };
 }
 
-export function ContactEditor({ card, cards, onSave, onCancel, onDelete }: { card: ContactCard; cards: ContactCard[]; onSave: (card: ContactCard) => Promise<void>; onCancel: () => void; onDelete?: () => Promise<void> }) {
+export function ContactEditor({ card, cards, selfName, onSave, onCancel, onDelete }: { card: ContactCard; cards: ContactCard[]; /** Set for the viewer's own card: its name comes from their profile. */ selfName?: string; onSave: (card: ContactCard) => Promise<void>; onCancel: () => void; onDelete?: () => Promise<void> }) {
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const initial = useMemo(() => draftOf(card), [card]);
-  const [name, setName] = useState(initial.name);
+  const [name, setName] = useState(selfName ?? initial.name);
   const [notes, setNotes] = useState(initial.notes);
   const [entries, setEntries] = useState<Entry[]>(() => entriesOf(initial));
   const [showMore, setShowMore] = useState(false);
@@ -90,7 +90,10 @@ export function ContactEditor({ card, cards, onSave, onCancel, onDelete }: { car
   };
 
   return <View style={styles.editor}>
-    <TextInput
+    {selfName !== undefined ? <View>
+      <Text style={styles.selfName}>{selfLabel(selfName)}</Text>
+      <Text style={styles.hint}>Your name comes from your profile. Everything here stays private to you.</Text>
+    </View> : <TextInput
       accessibilityLabel="Name"
       autoFocus={!contactName(card)}
       value={name}
@@ -98,7 +101,7 @@ export function ContactEditor({ card, cards, onSave, onCancel, onDelete }: { car
       placeholder="Name"
       placeholderTextColor={colors.textTertiary}
       style={styles.name}
-    />
+    />}
     <View style={styles.entries}>
       {entries.map((entry) => <View key={entry.id} style={styles.entry}>
         <Text numberOfLines={1} style={styles.entryKind}>{kindLabel(entry.kind)}</Text>
@@ -161,6 +164,7 @@ function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
     editor: { gap: 14 },
     name: { minHeight: 44, paddingVertical: 6, color: colors.text, fontSize: 20, fontWeight: '600', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, outlineStyle: 'none' } as object,
+    selfName: { color: colors.text, fontSize: 20, fontWeight: '600', marginBottom: 4 },
     entries: { gap: 2 },
     entry: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
     entryKind: { width: 92, color: colors.textTertiary, fontSize: 13 },

@@ -23,23 +23,28 @@ export function correspondentKey(address: string, verified = false): { key: stri
  * mail, and one group per set of people when an email includes several (To and
  * Cc), with both directions in order.
  */
-export function normalizeStoredEmail(messages: StoredMailMessage[], { iconService }: { iconService?: string } = {}): Conversation[] {
+export function normalizeStoredEmail(messages: StoredMailMessage[], { iconService, alsoMine = [] }: { iconService?: string; alsoMine?: string[] } = {}): Conversation[] {
+  // Your own other addresses (from your own contact card, ADR 0023) are you, not someone you write to.
   const own = ownAddresses(messages);
+  for (const address of alsoMine) if (address.trim()) own.add(address.trim().toLowerCase());
   const names = knownNames(messages);
-  const groups = new Map<string, { key: string; company?: string; people: string[]; items: Array<StoredMailMessage & { address: string }> }>();
+  const groups = new Map<string, { key: string; company?: string; people: string[]; toSelf: boolean; items: Array<StoredMailMessage & { address: string }> }>();
   for (const message of messages) {
     const outbound = own.has(extractEmail(message.from));
     const people = othersIn(message, own);
     // A group is everyone else on the email; a direct chat is the one other person (or company).
     const group = people.length > 1;
-    const address = (outbound ? people[0] : extractEmail(message.from) || message.from) || (outbound ? 'unknown-recipient' : 'unknown-sender');
+    // Mail only between your own addresses is a note to yourself, kept under the address it went to.
+    const toSelf = outbound && !people.length ? [...message.to, message.from].map(extractEmail).find(Boolean) : undefined;
+    const address = (outbound ? people[0] ?? toSelf : extractEmail(message.from) || message.from) || (outbound ? 'unknown-recipient' : 'unknown-sender');
     const { key, company } = group ? { key: groupKey(people), company: undefined } : correspondentKey(address, Boolean(message.senderVerified));
-    const entry = groups.get(key) ?? { key, company, people: group ? people : [], items: [] };
+    const entry = groups.get(key) ?? { key, company, people: group ? people : [], toSelf: true, items: [] };
+    entry.toSelf &&= Boolean(toSelf);
     entry.items.push({ ...message, address });
     groups.set(key, entry);
   }
 
-  return [...groups.values()].map(({ key, company, people, items }) => {
+  return [...groups.values()].map(({ key, company, people, toSelf, items }) => {
     const unique = [...new Map(items.map((item) => [`${item.accountId}:${item.sourceMessageId}`, item])).values()];
     const ordered = unique.sort((a, b) => Date.parse(a.sentAt) - Date.parse(b.sentAt));
     const isOutbound = (item: StoredMailMessage) => own.has(extractEmail(item.from));
@@ -93,6 +98,7 @@ export function normalizeStoredEmail(messages: StoredMailMessage[], { iconServic
       email: {
         accountId: replyTarget.accountId, accountEmail: replyTarget.accountEmail, address: replyTarget.address, latestSubject: replyTarget.subject, latestMessageId: replyTarget.sourceMessageId,
         ...(people.length ? { recipients: people } : {}),
+        ...(toSelf ? { toSelf: true } : {}),
       },
       messages: linkReplies(ordered.map((message) => {
         const outbound = isOutbound(message);

@@ -5,7 +5,7 @@ import { Loader } from './Loader';
 
 import { FollowStatus, followPerson, loadPublicPerson, loadTimeline, PublicPerson, sourcesFor, TimelineSource, unfollowPerson } from '../data/peopleService';
 import { networks } from '../domain/networkPosts';
-import { cardFor, ContactCard, confirmLink, contactLabel, contactName, IdentityRef, linkedIdentities, phoneNetworks, refKey, shownName } from '../domain/people';
+import { cardFor, ContactCard, confirmLink, contactLabel, contactName, IdentityRef, isMine, linkedIdentities, phoneNetworks, refKey, selfCard, selfLabel, shownName } from '../domain/people';
 import { SocialPost } from '../domain/posts';
 import { fieldDefinition, fieldDisplay, fieldHref, publicProfileUrl } from '../domain/profileFields';
 import { ThemeColors } from '../theme';
@@ -41,7 +41,10 @@ export function PersonProfile({ target, viewerId, onBack, onMessage }: { target:
   const [contactQuery, setContactQuery] = useState('');
 
   const handle = target.ref.kind === 'open_media' || target.ref.kind === 'network' ? target.ref.handle.replace(/^@/, '') : undefined;
-  const card = contacts ? cardFor(contacts.cards, target.ref) : undefined;
+  // Your own profile, or one of your own addresses or accounts: it shows your own card (ADR 0023).
+  const me = people?.me;
+  const mine = Boolean(contacts && isMine(contacts.cards, target.ref)) || Boolean(me && target.ref.kind === 'open_media' && target.ref.handle.replace(/^@/, '').toLowerCase() === me.handle.toLowerCase());
+  const card = contacts ? (mine ? selfCard(contacts.cards) : cardFor(contacts.cards, target.ref)) : undefined;
   const refs = contacts ? linkedIdentities(contacts.cards, target.ref) : [target.ref];
   const omHandle = (refs.find((ref) => ref.kind === 'open_media') as Extract<IdentityRef, { kind: 'open_media' }> | undefined)?.handle;
 
@@ -67,8 +70,8 @@ export function PersonProfile({ target, viewerId, onBack, onMessage }: { target:
   const names = shownName({ declaredName: person?.displayName ?? (target.ref.kind === 'network' ? target.name : undefined), handle: person?.handle ?? handle }, card);
   const publicName = target.ref.kind === 'email' || target.ref.kind === 'phone' || target.ref.kind === 'bridge' ? (target.name ?? names.name) : names.name;
   // The name the viewer saved comes first, wherever they saved one (ADR 0023); the public name follows it.
-  const name = contactName(card) || publicName;
-  const alsoKnownAs = card && publicName && publicName.replace(/^@/, '').toLowerCase() !== name.toLowerCase() && !publicName.startsWith('@') ? publicName : undefined;
+  const name = mine && me ? (target.ref.kind === 'open_media' ? person?.displayName || me.name : selfLabel(me.name)) : contactName(card) || publicName;
+  const alsoKnownAs = !mine && card && publicName && publicName.replace(/^@/, '').toLowerCase() !== name.toLowerCase() && !publicName.startsWith('@') ? publicName : undefined;
   const avatar = person?.avatarUrl ?? target.avatarUrl;
   const where = target.ref.kind === 'network' ? networks[target.ref.network].displayName : target.ref.kind === 'open_media' ? 'Open Media' : undefined;
   const sourceLabel = (source: TimelineSource) => source.kind === 'open_media' ? 'Open Media' : networks[source.network].displayName;
@@ -76,7 +79,7 @@ export function PersonProfile({ target, viewerId, onBack, onMessage }: { target:
   const filters = ['all', ...new Set(sources.map((source) => source.kind === 'open_media' ? 'open-media' : source.network))];
   const suggestions = contacts?.suggestions.filter((item) => refKey(item.ref) === refKey(target.ref)) ?? [];
   const external = target.ref.kind === 'network' ? posts?.find((post) => post.provenance.canonicalURL)?.provenance.canonicalURL : undefined;
-  const self = Boolean(viewerId && person?.id === viewerId);
+  const self = Boolean(viewerId && person?.id === viewerId) || mine;
   const locked = Boolean(person && !person.canView);
 
   const toggleFollow = async () => {
@@ -126,20 +129,25 @@ export function PersonProfile({ target, viewerId, onBack, onMessage }: { target:
       {person?.linkedAccounts.length ? <Text style={styles.small}>Also on {person.linkedAccounts.map((account) => `${networks[account.network]?.displayName ?? account.network} @${account.handle}`).join(' · ')} <Text style={styles.faint}>(listed by {person.handle})</Text></Text> : null}
     </View>
 
-    {contacts && (card || suggestions.length || !self) ? <View style={styles.private}>
+    {contacts ? <View style={styles.private}>
       <View style={styles.privateTitleRow}>
         <Ionicons name="lock-closed-outline" size={14} color={colors.textSecondary} /><Text style={[styles.privateTitle, styles.grow]}>Only you see this</Text>
-        {card && !editing ? <Pressable accessibilityRole="button" accessibilityLabel={`Edit ${contactLabel(card)}`} onPress={() => setEditing(true)} hitSlop={8} style={styles.edit}><Ionicons name="create-outline" size={14} color={colors.text} /><Text style={styles.editText}>Edit</Text></Pressable> : null}
+        {card && !editing ? <Pressable accessibilityRole="button" accessibilityLabel={card.self ? 'Edit my card' : `Edit ${contactLabel(card)}`} onPress={() => setEditing(true)} hitSlop={8} style={styles.edit}><Ionicons name="create-outline" size={14} color={colors.text} /><Text style={styles.editText}>Edit</Text></Pressable> : null}
       </View>
+      {self && !card ? <>
+        <Text style={styles.selfIntro}>Add your other email addresses, phone numbers and accounts. Mail and chats from any of them are recognised as you, never as someone else, and you appear as {selfLabel(me?.name ?? '')} in your contacts.</Text>
+        <Pressable accessibilityRole="button" disabled={Boolean(busy) || !me} onPress={() => me && act('me', async () => { await contacts.save(newSelfCard(me)); setEditing(true); })} style={styles.addContact}><Ionicons name="person-circle-outline" size={16} color={colors.text} /><Text style={styles.buttonText}>Add my other addresses</Text></Pressable>
+      </> : null}
       {card && editing ? <ContactEditor
         key={card.id}
+        selfName={card.self ? me?.name ?? card.name : undefined}
         card={card}
         cards={contacts.cards}
         onCancel={() => setEditing(false)}
         onSave={async (next) => { await contacts.save(next); setEditing(false); }}
         onDelete={async () => { await contacts.remove(card.id); setEditing(false); }}
       /> : card ? <>
-        {!contactName(card) ? <Pressable accessibilityRole="button" onPress={() => setEditing(true)} style={styles.nameNudge}>
+        {!contactName(card) && !card.self ? <Pressable accessibilityRole="button" onPress={() => setEditing(true)} style={styles.nameNudge}>
           <Ionicons name="person-outline" size={15} color={colors.text} />
           <Text style={styles.nameNudgeText}><Text style={styles.nameNudgeStrong}>Add their name</Text> and it shows instead of the address, in Messages and everywhere else.</Text>
         </Pressable> : null}
@@ -148,14 +156,14 @@ export function PersonProfile({ target, viewerId, onBack, onMessage }: { target:
         {card.emails.map((email) => <Row key={email} label="Email" value={email} styles={styles} />)}
         {(card.handles ?? []).map((item) => <Row key={`${item.network}:${item.handle}`} label={kindLabel(item.network)} value={phoneNetworks.has(item.network) || item.network === 'telegram' && /^\d+$/.test(item.handle) ? item.handle : `@${item.handle.replace(/^@/, '')}`} styles={styles} />)}
         {card.notes ? <Row label="Notes" value={card.notes} styles={styles} /> : null}
-        {!card.phones.length && !card.emails.length && !(card.handles ?? []).length && !card.notes ? <Text style={styles.linkWhy}>Add their emails, numbers and handles, and everything they send from any of them lands in one conversation.</Text> : null}
+        {!card.phones.length && !card.emails.length && !(card.handles ?? []).length && !card.notes ? <Text style={styles.linkWhy}>{card.self ? 'Add your other emails, numbers and accounts, so mail and chats from them are recognised as you.' : 'Add their emails, numbers and handles, and everything they send from any of them lands in one conversation.'}</Text> : null}
         {card.links.length ? <Text style={styles.linkedTitle}>Linked to this contact</Text> : null}
         {card.links.map((link) => <View key={refKey(link.ref)} style={styles.linkRow}>
           <View style={styles.linkCopy}><Text style={styles.linkName}>{describe(link.ref)}</Text><Text style={styles.linkWhy}>{link.method === 'auto' ? `Linked automatically: ${link.evidence}` : 'You linked this'}</Text></View>
           <Pressable accessibilityRole="button" accessibilityLabel={`Unlink ${describe(link.ref)}`} disabled={Boolean(busy)} onPress={() => act('undo', () => contacts.undo(card.id, link.ref))} style={styles.chip}><Text style={styles.chipText}>{link.method === 'auto' ? 'Undo' : 'Unlink'}</Text></Pressable>
         </View>)}
       </> : null}
-      {suggestions.map((suggestion) => {
+      {self ? null : suggestions.map((suggestion) => {
         const suggested = contacts.cards.find((item) => item.id === suggestion.cardId);
         return suggested ? <View key={suggestion.cardId} style={styles.linkRow}>
           <View style={styles.linkCopy}><Text style={styles.linkName}>Is this {contactLabel(suggested)} from your contacts?</Text><Text style={styles.linkWhy}>{suggestion.reason}</Text></View>
@@ -171,7 +179,7 @@ export function PersonProfile({ target, viewerId, onBack, onMessage }: { target:
         {pickingContact ? <View style={styles.picker}>
           <TextInput autoFocus accessibilityLabel="Find a contact" value={contactQuery} onChangeText={setContactQuery} placeholder="Find a contact" placeholderTextColor={colors.textTertiary} style={styles.pickerInput} />
           {contacts.cards
-            .filter((item) => !contactQuery.trim() || [item.name, ...item.emails, ...item.phones].join(' ').toLowerCase().includes(contactQuery.trim().toLowerCase()))
+            .filter((item) => !item.self && (!contactQuery.trim() || [item.name, ...item.emails, ...item.phones].join(' ').toLowerCase().includes(contactQuery.trim().toLowerCase())))
             .sort((a, b) => contactLabel(a).localeCompare(contactLabel(b))).slice(0, 6)
             .map((item) => <Pressable key={item.id} accessibilityRole="button" accessibilityLabel={`Add to ${contactLabel(item)}`} disabled={Boolean(busy)} onPress={() => act('merge', async () => { await contacts.save(confirmLink(item, target.ref)); setPickingContact(false); setContactQuery(''); })} style={({ pressed }) => [styles.pickerRow, pressed && styles.pressed]}>
               <View style={styles.pickerFace}><Text style={styles.pickerInitials}>{(contactLabel(item)[0] ?? '?').toUpperCase()}</Text></View>
@@ -212,6 +220,11 @@ function describe(ref: IdentityRef): string {
     case 'network': return `@${ref.handle} on ${networks[ref.network].displayName}`;
     case 'bridge': return `${ref.network === 'gmessages' ? 'Google Messages' : ref.network[0].toUpperCase() + ref.network.slice(1)} chat`;
   }
+}
+
+/** Your own card: it starts with your Open Media handle, and its name always follows your profile. */
+function newSelfCard(me: { handle: string; name: string }): ContactCard {
+  return { id: newId(), source: 'manual', self: true, name: me.name, nicknames: [], phones: [], emails: [], handles: [{ network: 'open_media', handle: me.handle }], notes: '', links: [], rejected: [], updatedAt: new Date().toISOString() };
 }
 
 /**
@@ -258,6 +271,7 @@ function createStyles(colors: ThemeColors) {
     private: { marginHorizontal: 16, marginBottom: 20, padding: 16, gap: 8, borderRadius: 16, backgroundColor: colors.surfaceAlt, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
     privateTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
     grow: { flex: 1 },
+    selfIntro: { color: colors.textSecondary, fontSize: 13, lineHeight: 19 },
     nameNudge: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 12, backgroundColor: colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
     nameNudgeText: { flex: 1, color: colors.textSecondary, fontSize: 13, lineHeight: 18 },
     nameNudgeStrong: { color: colors.text, fontWeight: '600' },

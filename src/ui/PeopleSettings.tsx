@@ -5,7 +5,7 @@ import { Loader } from './Loader';
 
 import { loadPublicPerson, PublicPerson, saveLinkedAccounts } from '../data/peopleService';
 import { NetworkId, networks } from '../domain/networkPosts';
-import { ContactCard, contactName, handleRef, IdentityRef } from '../domain/people';
+import { ContactCard, contactName, handleRef, IdentityRef, selfCard, selfLabel } from '../domain/people';
 import { initialsFor } from '../domain/publicPosts';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
@@ -31,7 +31,7 @@ export function PeopleSettings({ handle }: { handle: string }) {
   const [busy, setBusy] = useState('');
   const [message, setMessage] = useState('');
   const [showContacts, setShowContacts] = useState(false);
-  const sortedContacts = useMemo(() => [...(contacts?.cards ?? [])].sort((a, b) => (contactName(a) || a.emails[0] || '').localeCompare(contactName(b) || b.emails[0] || '')), [contacts?.cards]);
+  const sortedContacts = useMemo(() => [...(contacts?.cards ?? [])].filter((card) => !card.self).sort((a, b) => (contactName(a) || a.emails[0] || '').localeCompare(contactName(b) || b.emails[0] || '')), [contacts?.cards]);
 
   useEffect(() => {
     loadPublicPerson(handle).then((person) => setAccounts(person?.linkedAccounts ?? [])).catch(() => setAccounts([]));
@@ -88,11 +88,12 @@ export function PeopleSettings({ handle }: { handle: string }) {
       <Text style={styles.title}>Your contacts</Text>
       <Text style={styles.copy}>Only you can see your contacts. They are encrypted on the server and used to recognise people you already know: a saved name shows everywhere, and chats and email from any of a contact’s addresses, numbers or handles share one conversation. Open someone to edit them.</Text>
       <View style={styles.card}>
-        <Pressable accessibilityRole="button" accessibilityState={{ expanded: showContacts }} disabled={!contacts.cards.length} onPress={() => setShowContacts((value) => !value)} style={styles.row}>
+        <Pressable accessibilityRole="button" accessibilityState={{ expanded: showContacts }} disabled={!sortedContacts.length} onPress={() => setShowContacts((value) => !value)} style={styles.row}>
           <Ionicons name="lock-closed-outline" size={18} color={colors.text} />
-          <Text style={[styles.rowText, styles.grow]}>{contacts.ready ? `${contacts.cards.length} saved ${contacts.cards.length === 1 ? 'contact' : 'contacts'}` : 'Loading…'}{contacts.suggestions.length ? <Text style={styles.rowMeta}> · {contacts.suggestions.length} to review</Text> : null}</Text>
-          {contacts.cards.length ? <Ionicons name={showContacts ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textTertiary} /> : null}
+          <Text style={[styles.rowText, styles.grow]}>{contacts.ready ? `${sortedContacts.length} saved ${sortedContacts.length === 1 ? 'contact' : 'contacts'}` : 'Loading…'}{contacts.suggestions.length ? <Text style={styles.rowMeta}> · {contacts.suggestions.length} to review</Text> : null}</Text>
+          {sortedContacts.length ? <Ionicons name={showContacts ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textTertiary} /> : null}
         </Pressable>
+        <MeRow name={people?.me?.name ?? ''} card={selfCard(contacts.cards)} onOpen={() => people?.open({ ref: { kind: 'open_media', handle } })} styles={styles} colors={colors} />
         {showContacts ? sortedContacts.map((card) => <ContactRow key={card.id} card={card} onOpen={(target) => people?.open(target)} styles={styles} colors={colors} />) : null}
         <ContactImport contacts={contacts} />
       </View>
@@ -108,6 +109,19 @@ function contactTarget(card: ContactCard): { ref: IdentityRef; name?: string } |
   const handle = card.handles?.find((item) => item.handle.trim());
   const ref: IdentityRef | undefined = linked?.ref ?? (card.emails[0] ? { kind: 'email', address: card.emails[0] } : card.phones[0] ? { kind: 'phone', number: card.phones[0] } : handle ? handleRef(handle) : undefined);
   return ref ? { ref, name: contactName(card) || undefined } : undefined;
+}
+
+/** Your own card, pinned first, as "Name (Me)" (ADR 0023). It opens your profile, where you edit it. */
+function MeRow({ name, card, onOpen, styles, colors }: { name: string; card?: ContactCard; onOpen: () => void; styles: ReturnType<typeof createStyles>; colors: ThemeColors }) {
+  const extra = card ? card.emails.length + card.phones.length + (card.handles ?? []).filter((item) => item.network !== 'open_media').length : 0;
+  return <Pressable accessibilityRole="link" accessibilityLabel={`${selfLabel(name)}, your card`} onPress={onOpen} style={({ pressed }) => [styles.row, styles.contactRow, pressed && styles.pressed]}>
+    <View style={[styles.initials, styles.meInitials]}><Text style={[styles.initialsText, styles.meInitialsText]}>{initialsFor(name || 'Me')}</Text></View>
+    <View style={styles.grow}>
+      <Text numberOfLines={1} style={styles.contactName}>{name || 'Me'}<Text style={styles.rowMeta}> (Me)</Text></Text>
+      <Text numberOfLines={1} style={styles.rowMeta}>{extra ? `${extra} other ${extra === 1 ? 'address or account' : 'addresses and accounts'}` : 'Add your other emails, numbers and accounts'}</Text>
+    </View>
+    <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
+  </Pressable>;
 }
 
 function ContactRow({ card, onOpen, styles, colors }: { card: ContactCard; onOpen: (target: { ref: IdentityRef; name?: string }) => void; styles: ReturnType<typeof createStyles>; colors: ThemeColors }) {
@@ -138,6 +152,8 @@ function createStyles(colors: ThemeColors) {
     contactRow: { minHeight: 60, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
     pressed: { opacity: 0.6 },
     initials: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.chrome },
+    meInitials: { backgroundColor: colors.text },
+    meInitialsText: { color: colors.surface },
     initialsText: { color: colors.text, fontSize: 12, fontWeight: '700' },
     contactName: { color: colors.text, fontSize: 15, fontWeight: '600' },
     grow: { flex: 1 },

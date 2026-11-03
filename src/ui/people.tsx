@@ -37,6 +37,8 @@ export interface ContactsState {
 interface PeopleValue {
   open: (target: PersonTarget) => void;
   contacts?: ContactsState;
+  /** The signed-in person, for their own card ("Name (Me)", ADR 0023). */
+  me?: { id: string; handle: string; name: string };
   /** Opens a conversation with an Open Media handle, when the viewer can message. */
   message?: (handle: string) => void;
   /** Opens Search with a query, for example a #hashtag tapped in a post. */
