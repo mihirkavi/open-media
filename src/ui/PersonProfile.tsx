@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Image, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Image, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Loader } from './Loader';
 
 import { FollowStatus, followPerson, loadPublicPerson, loadTimeline, PublicPerson, sourcesFor, TimelineSource, unfollowPerson } from '../data/peopleService';
 import { networks } from '../domain/networkPosts';
@@ -176,7 +177,7 @@ export function PersonProfile({ target, viewerId, onBack, onMessage }: { target:
           <Pressable accessibilityRole="button" onPress={() => { setPickingContact(false); setContactQuery(''); }} style={styles.pickerCancel}><Text style={styles.quietText}>Cancel</Text></Pressable>
         </View> : null}
       </> : null}
-      {busy ? <ActivityIndicator color={colors.text} /> : null}
+      {busy ? <Loader color={colors.text} /> : null}
     </View> : null}
 
     {locked ? <View style={styles.lockedBox}>
@@ -190,7 +191,7 @@ export function PersonProfile({ target, viewerId, onBack, onMessage }: { target:
         {filters.map((item) => <Pressable key={item} accessibilityRole="tab" accessibilityState={{ selected: filter === item }} onPress={() => setFilter(item)} style={[styles.filter, filter === item && styles.filterActive]}><Text style={[styles.filterText, filter === item && styles.filterTextActive]}>{item === 'all' ? 'All' : item === 'open-media' ? 'Open Media' : networks[item as keyof typeof networks].displayName}</Text></Pressable>)}
       </ScrollView> : null}
       {failed.length ? <Text style={styles.small}>{failed.map(sourceLabel).join(', ')} {failed.length === 1 ? 'isn’t' : 'aren’t'} loading right now.</Text> : null}
-      {posts === undefined ? <ActivityIndicator style={styles.loading} color={colors.text} /> : visible.length === 0 ? <Text style={styles.empty}>{sources.length ? 'No public posts to show.' : 'This person has no public posts here.'}</Text> : visible.map((post) => <PostCard key={post.id} post={post} mode="raw" viewer={viewerId ? { id: viewerId, initials: '' } : undefined} />)}
+      {posts === undefined ? <Loader style={styles.loading} color={colors.text} /> : visible.length === 0 ? <Text style={styles.empty}>{sources.length ? 'No public posts to show.' : 'This person has no public posts here.'}</Text> : visible.map((post) => <PostCard key={post.id} post={post} mode="raw" viewer={viewerId ? { id: viewerId, initials: '' } : undefined} />)}
     </View>}
   </ScrollView>;
 }

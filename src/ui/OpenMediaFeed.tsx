@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Image, KeyboardAvoidingView, Linking, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Image, KeyboardAvoidingView, Linking, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Loader } from './Loader';
 import { EventMeta, ListingCard, ListingFields, PaidPostBlock, PaidPostFields, PaidPostInput } from './ListingCards';
 import { PaymentSheet, PaymentTarget } from './PaymentSheet';
 import { PersonLink, targetForPost, usePeople, useSavedName } from './people';
@@ -105,7 +106,7 @@ export function FeedView({ lens, lenses, onLensChange, lensContext, posts, loadi
     {showComposer ? <Composer viewer={viewer} open={composing} onOpenChange={onComposingChange} onPublished={onPublished} /> : null}
     {!error && unreachable.length ? <View style={styles.sourceNotice}><Text accessibilityLiveRegion="polite" style={styles.sourceNoticeText}>{unreachable.map((item) => sourceName(item.id)).join(', ')} {unreachable.length === 1 ? 'isn’t' : 'aren’t'} loading right now. Everything else is up to date.</Text><Pressable accessibilityRole="button" onPress={onRetry} style={styles.sourceNoticeButton}><Text style={styles.statusButtonText}>Retry</Text></Pressable></View> : null}
     {ordered.map((post) => <PostCard key={post.id} post={post} mode={lens} lensContext={lensContext} viewer={viewer} onDelete={onDeletePost} onReport={onReportPost} />)}
-    {loading || loadingMore ? <View style={styles.status}><ActivityIndicator color={colors.text} /></View> : null}
+    {loading || loadingMore ? <View style={styles.status}><Loader color={colors.text} /></View> : null}
     {!loading && error ? <View style={styles.status}><Text accessibilityLiveRegion="assertive" style={styles.statusText}>{error}</Text><Pressable accessibilityRole="button" onPress={onRetry} style={styles.statusButton}><Text style={styles.statusButtonText}>Try again</Text></Pressable></View> : null}
     {!loading && !loadingMore && !error && !ordered.length ? <View style={styles.status}><Ionicons name="newspaper-outline" size={26} color={colors.textSecondary} /><Text style={styles.emptyTitle}>{posts.length ? `Nothing here fits ${lens.name}` : 'No public posts yet'}</Text><Text style={styles.statusText}>{posts.length ? `${lens.name} keeps only posts that match its rules. Choose Relevant or Raw to see everything, or older posts may fit.` : viewer ? 'Be the first to share something.' : 'Sign in to share the first one.'}</Text></View> : null}
     {canLoadMore ? <Pressable accessibilityRole="button" onPress={onLoadMore} style={[styles.statusButton, styles.loadMore]}><Text style={styles.statusButtonText}>Load older posts</Text></Pressable> : null}
@@ -274,7 +275,7 @@ function Composer({ viewer, open, onOpenChange, onPublished }: { viewer: FeedVie
         <Ionicons name={showDestinations ? 'chevron-up' : 'chevron-down'} size={14} color={colors.textTertiary} />
       </Pressable>
       <Pressable accessibilityRole="button" disabled={busy && stage !== 'uploading'} onPress={cancel} style={styles.composerCancel}><Text style={styles.composerCancelText}>{stage === 'uploading' ? 'Stop upload' : 'Cancel'}</Text></Pressable>
-      <Pressable accessibilityRole="button" disabled={!ready} onPress={publish} style={[styles.composerPost, !ready && styles.composerPostDisabled]}>{busy ? <ActivityIndicator color={colors.surface} /> : <Text style={styles.composerPostText}>Post</Text>}</Pressable>
+      <Pressable accessibilityRole="button" disabled={!ready} onPress={publish} style={[styles.composerPost, !ready && styles.composerPostDisabled]}>{busy ? <Loader color={colors.surface} /> : <Text style={styles.composerPostText}>Post</Text>}</Pressable>
     </View>
     <Text style={styles.composerPublic}>Public · anyone can read it{video ? ' and watch the video' : ''}, here and on every network it goes to · Videos up to {formatDuration(maxVideoSeconds)} and {formatBytes(maxVideoBytes)}</Text>
   </View>;
@@ -353,7 +354,7 @@ function PostMenu({ own, listing, onDelete, onReport, onTip, tipTo }: { own: boo
   const run = async (action: () => Promise<void>, done: string) => { setBusy(true); setNotice(''); try { await action(); setNotice(done); } catch (reason) { setNotice(reason instanceof Error ? reason.message : 'That didn’t work. Try again.'); } finally { setBusy(false); } };
   return <View style={styles.menu}>
     {onTip && !busy && !notice ? <Pressable accessibilityRole="button" onPress={onTip} style={styles.menuItem}><Ionicons name="heart-outline" size={16} color={colors.text} /><Text style={styles.menuLabel}>{`Tip ${tipTo ?? 'the creator'}`}</Text></Pressable> : null}
-    {busy ? <ActivityIndicator color={colors.text} /> : notice ? <Text accessibilityLiveRegion="polite" style={styles.menuNotice}>{notice}</Text> : own
+    {busy ? <Loader color={colors.text} /> : notice ? <Text accessibilityLiveRegion="polite" style={styles.menuNotice}>{notice}</Text> : own
       ? confirming
         ? <><Text style={styles.menuLabel}>Delete this post permanently? It disappears for everyone, including the public API.</Text><View style={styles.menuRow}><Pressable accessibilityRole="button" onPress={() => run(onDelete, 'Post deleted.')} style={[styles.menuChip, styles.menuChipDanger]}><Text style={styles.menuDanger}>Delete</Text></Pressable><Pressable accessibilityRole="button" onPress={() => setConfirming(false)} style={styles.menuChip}><Text style={styles.menuText}>Cancel</Text></Pressable></View></>
         : <Pressable accessibilityRole="button" onPress={() => setConfirming(true)} style={styles.menuItem}><Ionicons name="trash-outline" size={16} color={colors.danger} /><Text style={styles.menuDanger}>Delete post</Text></Pressable>

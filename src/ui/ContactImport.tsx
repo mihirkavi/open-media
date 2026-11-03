@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Loader } from './Loader';
 
 import { canPickContacts, pickContacts } from '../contacts/contactPicker';
 import { pickContactsFiles } from '../data/contactImportFiles';
@@ -99,7 +100,7 @@ export function ContactImport({ contacts }: { contacts: ContactsState }) {
       <View style={styles.reviewActions}>
         <Pressable accessibilityRole="button" disabled={Boolean(busy)} onPress={() => setReview(undefined)} style={styles.secondary}><Text style={styles.secondaryText}>Cancel</Text></Pressable>
         <Pressable accessibilityRole="button" disabled={Boolean(busy) || !plan.changed.length} onPress={confirm} style={[styles.primary, !plan.changed.length && styles.disabled]}>
-          {busy === 'save' ? <ActivityIndicator color={colors.surface} /> : <Text style={styles.primaryText}>{plan.changed.length ? `Import ${plan.added + plan.updated}` : 'Nothing to add'}</Text>}
+          {busy === 'save' ? <Loader color={colors.surface} /> : <Text style={styles.primaryText}>{plan.changed.length ? `Import ${plan.added + plan.updated}` : 'Nothing to add'}</Text>}
         </Pressable>
       </View>
     </View>;
@@ -122,7 +123,7 @@ export function ContactImport({ contacts }: { contacts: ContactsState }) {
 
 function Source({ icon, title, detail, busy, onPress, styles, colors }: { icon: keyof typeof Ionicons.glyphMap; title: string; detail: string; busy: boolean; onPress: () => void; styles: ReturnType<typeof createStyles>; colors: ThemeColors }) {
   return <Pressable accessibilityRole="button" accessibilityHint={detail} disabled={busy} onPress={onPress} style={({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) => [styles.source, (hovered || pressed) && styles.sourceHover]}>
-    <View style={styles.sourceIcon}>{busy ? <ActivityIndicator color={colors.text} /> : <Ionicons name={icon} size={18} color={colors.text} />}</View>
+    <View style={styles.sourceIcon}>{busy ? <Loader color={colors.text} /> : <Ionicons name={icon} size={18} color={colors.text} />}</View>
     <View style={styles.grow}>
       <Text style={styles.sourceTitle}>{title}</Text>
       <Text style={styles.sourceDetail}>{detail}</Text>

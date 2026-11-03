@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { Loader } from './Loader';
 
 import { applyDraft, ContactDraft, draftOf, draftProblems, sharedWith } from '../domain/contactMerge';
 import { networks } from '../domain/networkPosts';
@@ -149,7 +150,7 @@ export function ContactEditor({ card, cards, onSave, onCancel, onDelete }: { car
         : <Pressable accessibilityRole="button" disabled={busy} onPress={() => setConfirmDelete(true)} style={styles.delete}><Text style={styles.deleteText}>Delete</Text></Pressable>
         : null}
       <View style={styles.spacer} />
-      {busy ? <ActivityIndicator color={colors.text} /> : null}
+      {busy ? <Loader color={colors.text} /> : null}
       <Pressable accessibilityRole="button" disabled={busy} onPress={onCancel} style={styles.cancel}><Text style={styles.cancelText}>Cancel</Text></Pressable>
       <Pressable accessibilityRole="button" disabled={busy} onPress={save} style={styles.save}><Text style={styles.saveText}>Save</Text></Pressable>
     </View>

@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Loader } from './Loader';
 
 import { loadPublicPerson, PublicPerson, saveLinkedAccounts } from '../data/peopleService';
 import { NetworkId, networks } from '../domain/networkPosts';
@@ -60,7 +61,7 @@ export function PeopleSettings({ handle }: { handle: string }) {
     <Text style={styles.title}>Your accounts elsewhere</Text>
     <Text style={styles.copy}>Shown on your public profile, so people see your posts from these networks in one timeline. Anyone can see this list.</Text>
     <View style={styles.card}>
-      {accounts === undefined ? <ActivityIndicator style={styles.loading} color={colors.text} /> : accounts.map((account) => (
+      {accounts === undefined ? <Loader style={styles.loading} color={colors.text} /> : accounts.map((account) => (
         <View key={`${account.network}:${account.handle}`} style={[styles.row, styles.divider]}>
           <Text style={styles.rowText}>@{account.handle}<Text style={styles.rowMeta}> on {networks[account.network]?.displayName ?? account.network}</Text></Text>
           <Pressable accessibilityRole="button" accessibilityLabel={`Remove @${account.handle}`} disabled={Boolean(busy)} onPress={() => saveAccounts(accounts.filter((item) => item !== account))} style={styles.small}><Text style={styles.smallText}>Remove</Text></Pressable>
@@ -77,7 +78,7 @@ export function PeopleSettings({ handle }: { handle: string }) {
         <View style={styles.inputRow}>
           <TextInput accessibilityLabel={`Your ${networks[network].displayName} username`} value={draft} onChangeText={setDraft} onSubmitEditing={add} autoCapitalize="none" autoCorrect={false} placeholder="username" placeholderTextColor={colors.textTertiary} style={styles.input} />
           <Pressable accessibilityRole="button" disabled={!draft.trim() || Boolean(busy)} onPress={add} style={[styles.add, (!draft.trim() || busy) && styles.disabled]}>
-            {busy === 'accounts' ? <ActivityIndicator color={colors.surface} /> : <Text style={styles.addText}>Add</Text>}
+            {busy === 'accounts' ? <Loader color={colors.surface} /> : <Text style={styles.addText}>Add</Text>}
           </Pressable>
         </View>
       </View>

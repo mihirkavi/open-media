@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { AccessibilityInfo, ActivityIndicator, Animated, Easing, Image, Keyboard, Linking, Modal, Platform, Pressable, ScrollView, StyleProp, StyleSheet, TextStyle, View, useWindowDimensions } from "react-native";
+import { AccessibilityInfo, Animated, Easing, Image, Keyboard, Linking, Modal, Platform, Pressable, ScrollView, StyleProp, StyleSheet, TextStyle, View, useWindowDimensions } from "react-native";
+import { Loader } from "./Loader";
 import { PersonLink, PersonTarget } from "./people";
 import { Text, TextInput } from "./Text";
 
@@ -192,7 +193,7 @@ export function OpenMediaMessages({
         </ScrollView>
         {loading ? (
           <View style={styles.center}>
-            <ActivityIndicator color={colors.text} />
+            <Loader color={colors.text} />
             <Text style={styles.statusText}>Loading conversations…</Text>
           </View>
         ) : error ? (
@@ -1078,7 +1079,7 @@ function NewMessagePanel({
                 </Pressable>
               ))
             : null}
-          {busy ? <ActivityIndicator style={{ margin: 18 }} color={colors.textTertiary} /> : null}
+          {busy ? <Loader style={{ margin: 18 }} color={colors.textTertiary} /> : null}
         </ScrollView>
       ) : (
         <View style={styles.newMessageSpace}>
@@ -1112,7 +1113,7 @@ function NewMessagePanel({
               style={[styles.composerInput, { height: inputHeight }]}
             />
             {sending ? (
-              <View style={styles.send}><ActivityIndicator size="small" color={colors.surface} /></View>
+              <View style={styles.send}><Loader size="small" color={colors.surface} /></View>
             ) : (
               <SendButton ready={Boolean(body.trim()) && Boolean(onSendEmail) && Boolean(emailFrom)} reduceMotion={reduceMotion} onPress={send} />
             )}
@@ -1338,7 +1339,7 @@ function PhotoBubble({ attachment, url: directURL }: { attachment?: MessageAttac
           style={styles.photoImage}
         />
       ) : (
-        <ActivityIndicator color={colors.textTertiary} />
+        <Loader color={colors.textTertiary} />
       )}
     </Pressable>
   );
@@ -1364,7 +1365,7 @@ function FileChip({ attachment }: { attachment: MessageAttachment }) {
       style={styles.fileChip}
     >
       <View style={styles.fileIcon}>
-        {busy ? <ActivityIndicator size="small" color={colors.text} /> : <Ionicons name={fileIcon(attachment.contentType)} size={18} color={colors.text} />}
+        {busy ? <Loader size="small" color={colors.text} /> : <Ionicons name={fileIcon(attachment.contentType)} size={18} color={colors.text} />}
       </View>
       <View style={styles.fileCopy}>
         <Text numberOfLines={1} style={styles.fileName}>{attachment.name}</Text>
