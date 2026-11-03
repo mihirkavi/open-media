@@ -15,6 +15,7 @@ const siteLike = /^(?:(?:https?|feed):\/\/)?[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+(
  * Web feeds in Search (ADR 0024), so following needs no new button: a pasted or typed address
  * ("theverge.com", "follow https://example.com/feed"), a news outlet or place from the directory
  * ("bbc", "news india", "weather california"), "unfollow …", and "import opml" / "export opml".
+ * Signed out, only the directory's official feeds are listed, with a note to sign in.
  */
 export function useWebFeedRows(query: string, signedIn: boolean): WebFeedRow[] {
   const value = query.trim();
@@ -52,7 +53,9 @@ export function useWebFeedRows(query: string, signedIn: boolean): WebFeedRow[] {
   }, [signedIn, looksLikeSite, target]);
 
   return useMemo(() => {
-    if (!signedIn || !relevant) return [];
+    // Signed out, the official news and weather feeds are still shown, so people see what they could follow.
+    if (!signedIn) return directory.map((feed) => ({ key: `directory-${feed.url}`, title: feed.title, subtitle: `Official feed from ${officialPublisher(feed.url)?.domain ?? hostOf(feed.url)} · Sign in to follow it in your Feed`, run: async () => false }));
+    if (!relevant) return [];
     const rows: WebFeedRow[] = [];
     const followed = (url: string) => following.find((feed) => feed.url === url);
     const follow = (key: string, url: string) => async () => {

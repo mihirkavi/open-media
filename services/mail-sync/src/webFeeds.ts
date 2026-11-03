@@ -13,7 +13,7 @@
  *   for them, as feed readers do.
  */
 import { DiscoveredFeed, commonFeedPaths, discoverWebFeeds, formatNames, hostOf, maxItemAgeDays, ParsedWebFeed, parseOpml, parseWebFeed, socialPostFromFeedItem, toOpml, WebFeedError } from '../../../src/domain/webFeeds';
-import { officialPublisher } from '../../../src/domain/webFeedDirectory';
+import { directoryFeedForSite, officialPublisher } from '../../../src/domain/webFeedDirectory';
 import type { SocialPost } from '../../../src/domain/posts';
 import { isPublicHost, MarketplaceDeps } from './marketplace.js';
 import { robotsAllows } from './profileImport.js';
@@ -271,17 +271,30 @@ export async function findWebFeed(raw: unknown, deps: WebFeedDeps & { at?: numbe
     };
   };
 
+  // A listed news outlet's home page that names no feed (bbc.co.uk among them), is unreachable or
+  // asks programs not to read it still leads to the outlet's official feed.
+  const listed = async (info: { iconUrl?: string; siteUrl?: string; title?: string } = {}) => {
+    const feed = directoryFeedForSite(start.toString());
+    const entry = feed ? await tryFeed(feed.url) : undefined;
+    return feed && entry ? finish(feed.url, entry, { siteUrl: start.toString(), ...info }) : undefined;
+  };
+
   // The address itself, read as a feed; when it is a page instead, that page is kept for discovery.
   let page: Fetched | undefined;
   const direct = await readFeed(start.toString(), { ...deps, cache, at: now, onPage: (fetched) => { page = fetched; } });
   if (direct.feed) return finish(start.toString(), direct as FeedCacheEntry & { feed: ParsedWebFeed });
   page ??= await fetchChecked(start.toString(), deps, pageLimitBytes, { accept: 'text/html,application/xhtml+xml' });
+  if (!page || page.status >= 400) { const fallback = await listed(); if (fallback) return fallback; }
   if (!page) throw new WebFeedApiError(400, `${start.hostname} couldn’t be reached. Only public https sites can be followed.`);
   if (page.status >= 400) throw new WebFeedApiError(400, `${start.hostname} answered ${page.status}. Check the address.`);
   const robotsPage = await fetchChecked(new URL('/robots.txt', page.url).toString(), deps, 100_000, { accept: 'text/plain' });
   const robots = robotsPage && robotsPage.status === 200 && !/<html/i.test(robotsPage.text) ? robotsPage.text : '';
   const pageUrl = new URL(page.url);
-  if (!robotsAllows(robots, feedReaderToken, pageUrl.pathname + pageUrl.search)) throw new WebFeedApiError(403, `${pageUrl.hostname}’s robots.txt asks programs like Open Media’s not to read that page. If you know the feed’s own address, paste that instead.`);
+  if (!robotsAllows(robots, feedReaderToken, pageUrl.pathname + pageUrl.search)) {
+    const fallback = await listed();
+    if (fallback) return fallback;
+    throw new WebFeedApiError(403, `${pageUrl.hostname}’s robots.txt asks programs like Open Media’s not to read that page. If you know the feed’s own address, paste that instead.`);
+  }
   const found = discoverWebFeeds(page.text, page.url);
   const info = { iconUrl: found.iconUrl, siteUrl: page.url, title: found.title };
   for (const candidate of found.feeds.slice(0, 3)) {
@@ -296,6 +309,8 @@ export async function findWebFeed(raw: unknown, deps: WebFeedDeps & { at?: numbe
       if (entry) return finish(candidate, entry, info);
     }
   }
+  const fallback = await listed(info);
+  if (fallback) return fallback;
   throw new WebFeedApiError(404, `${pageUrl.hostname} doesn’t publish a web feed that Open Media could find. If the site has one, paste the feed’s own address.`);
 }
 

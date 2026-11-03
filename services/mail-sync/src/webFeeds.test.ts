@@ -139,6 +139,17 @@ test('robots.txt that disallows the page stops discovery; a pasted feed address 
   assert.equal(direct.title, 'BBC News');
 });
 
+test('a listed outlet’s home page that names no feed still finds its official feed', async () => {
+  const net = network({
+    'https://bbc.co.uk/': () => new Response('<html><head><title>BBC</title><link rel="icon" href="/icon-64.png" sizes="64x64"></head></html>'),
+    'https://feeds.bbci.co.uk/news/rss.xml': () => new Response(bbc),
+  });
+  const found = await findWebFeed('bbc.co.uk', { ...net, cache: memoryFeedCache(), at: t0 });
+  assert.equal(found.url, 'https://feeds.bbci.co.uk/news/rss.xml');
+  assert.equal(found.title, 'BBC News');
+  assert.equal(found.iconUrl, 'https://bbc.co.uk/icon-64.png', 'the page’s own icon is kept');
+});
+
 test('a site without a feed says so plainly', async () => {
   const net = network({ 'https://nofeed.example/': () => new Response('<html><head><title>x</title></head></html>') });
   await assert.rejects(findWebFeed('nofeed.example', { ...net, cache: memoryFeedCache(), at: t0 }), /doesn’t publish a web feed/);

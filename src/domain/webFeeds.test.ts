@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import { lensFromRequest, parseLens, runLens, tuneLens, relevantLens, explainLensPost } from './feedLenses';
-import { directoryFeeds, officialPublisher, searchWebFeedDirectory } from './webFeedDirectory';
+import { directoryFeedForSite, directoryFeeds, officialPublisher, searchWebFeedDirectory } from './webFeedDirectory';
 import { clip, discoverWebFeeds, feedDate, htmlToText, parseOpml, parseWebFeed, parseXml, socialPostFromFeedItem, toOpml, WebFeedError } from './webFeeds';
 
 // Real feeds fetched on 2026-11-02, cut to their first two items.
@@ -152,6 +152,10 @@ test('official publishers are matched by their own domains only', () => {
   assert.equal(officialPublisher('http://feeds.bbci.co.uk/news/rss.xml'), undefined);
   assert.equal(officialPublisher('https://feeds.feedburner.com/ndtvnews-top-stories'), undefined);
   for (const feed of directoryFeeds) assert.ok(officialPublisher(feed.url)?.id === feed.publisher, feed.url);
+  assert.equal(directoryFeedForSite('https://bbc.co.uk/')?.url, 'https://feeds.bbci.co.uk/news/rss.xml');
+  assert.equal(directoryFeedForSite('https://www.nytimes.com')?.publisher, 'nyt');
+  assert.equal(directoryFeedForSite('https://www.bbc.co.uk/sport'), undefined, 'other pages use discovery');
+  assert.equal(directoryFeedForSite('https://example.com/'), undefined);
 });
 
 test('the directory answers outlets, places and weather, and leaves ordinary searches alone', () => {

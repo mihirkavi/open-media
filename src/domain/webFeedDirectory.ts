@@ -150,6 +150,16 @@ export function officialPublisher(feedUrl: string): (Publisher & { domain: strin
   return undefined;
 }
 
+/**
+ * The listed feed for a listed outlet's home page ("bbc.co.uk", "https://www.nytimes.com/"), so a
+ * site whose home page names no feed still finds its official one. Other pages are left to discovery.
+ */
+export function directoryFeedForSite(siteUrl: string): DirectoryFeed | undefined {
+  const publisher = officialPublisher(siteUrl);
+  if (!publisher || new URL(siteUrl).pathname.replace(/\/+$/, '') !== '') return undefined;
+  return directoryFeeds.find((feed) => feed.publisher === publisher.id);
+}
+
 export function publisherById(id: string): Publisher | undefined {
   return publishers.find((publisher) => publisher.id === id);
 }
