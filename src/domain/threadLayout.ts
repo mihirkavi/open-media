@@ -47,8 +47,10 @@ export function layoutThread(messages: Message[], now = new Date()): ThreadItem[
 }
 
 function sameRun(first: Message, second: Message): boolean {
+  // A person's merged conversation (ADR 0023) starts a new run when the channel changes, so each run is marked with its source.
   return first.direction === second.direction
     && first.senderPersonId === second.senderPersonId
+    && first.source === second.source
     && Date.parse(second.sentAt) - Date.parse(first.sentAt) <= groupGapMs;
 }
 

@@ -29,6 +29,15 @@ export interface ContactLink {
   linkedAt: string;
 }
 
+/** Where a contact can be reached besides email and phone: an open network, Open Media or a bridged chat. */
+export type HandleNetwork = NetworkId | 'open_media' | BridgedNetwork;
+
+/** A handle the viewer saved on a contact (ADR 0023). On phone-number networks it is the number. */
+export interface ContactHandle {
+  network: HandleNetwork;
+  handle: string;
+}
+
 /** One of the viewer's own contacts. Private to its owner; stored encrypted (ADR 0013, 2.4). */
 export interface ContactCard {
   id: string;
@@ -40,6 +49,8 @@ export interface ContactCard {
   nicknames: string[];
   phones: string[];
   emails: string[];
+  /** Handles on other networks (ADR 0023). Absent on cards saved before contacts were editable. */
+  handles?: ContactHandle[];
   notes: string;
   links: ContactLink[];
   /** Identities the viewer said are not this person; never suggested or linked again. */
@@ -106,7 +117,7 @@ export function reconcile(cards: ContactCard[], encounters: Encounter[], now = n
   const suggestions: LinkSuggestion[] = [];
   for (const encounter of encounters) {
     const key = refKey(encounter.ref);
-    if (next.some((card) => card.links.some((link) => refKey(link.ref) === key))) continue;
+    if (next.some((card) => card.links.some((link) => refKey(link.ref) === key) || (!card.rejected.includes(key) && holdsHandle(card, encounter.ref, { phones: false })))) continue;
     const eligible = next.filter((card) => !card.rejected.includes(key));
     const emails = emailsOf(encounter);
     const phones = phonesOf(encounter);
@@ -154,20 +165,69 @@ export function rejectSuggestion(card: ContactCard, ref: IdentityRef, now = new 
   return { ...card, rejected: [...new Set([...card.rejected, refKey(ref)])], updatedAt: now };
 }
 
-/** The viewer's card for this identity: one it is linked to, else one that holds the same email or phone. */
+/** Networks whose chat ids are phone numbers, so a saved phone number reaches the person there too. */
+export const phoneNetworks: ReadonlySet<HandleNetwork> = new Set(['whatsapp', 'signal', 'gmessages', 'gvoice']);
+
+/** A handle as it is compared: no leading @, lower case, and phone numbers in one format. */
+export function normalizeHandle(network: HandleNetwork, value: string): string {
+  const trimmed = value.trim().replace(/^@/, '');
+  return phoneNetworks.has(network) && /^\+?[\d\s().-]{7,}$/.test(trimmed) ? normalizePhone(trimmed) : trimmed.toLowerCase();
+}
+
+/**
+ * True when a handle saved on the card is this identity. With `phones`, a number saved on the card
+ * also counts on networks whose chat ids are phone numbers.
+ */
+export function holdsHandle(card: ContactCard, ref: IdentityRef, { phones = true } = {}): boolean {
+  if (ref.kind === 'phone' || ref.kind === 'email') return false;
+  const network: HandleNetwork = ref.kind === 'open_media' ? 'open_media' : ref.network;
+  const value = normalizeHandle(network, ref.kind === 'bridge' ? ref.id : ref.handle);
+  if (!value) return false;
+  if ((card.handles ?? []).some((item) => item.network === network && (normalizeHandle(network, item.handle) === value || (phoneNetworks.has(network) && samePhone(item.handle, value))))) return true;
+  return phones && ref.kind === 'bridge' && phoneNetworks.has(network) && /^\+?\d{7,15}$/.test(value) && card.phones.some((phone) => samePhone(phone, value));
+}
+
+/** True when the card holds this identity directly: as an email, phone or handle saved on it. */
+export function holdsRef(card: ContactCard, ref: IdentityRef): boolean {
+  if (card.rejected.includes(refKey(ref))) return false;
+  if (ref.kind === 'email') return card.emails.some((email) => normalizeEmail(email) === normalizeEmail(ref.address));
+  if (ref.kind === 'phone') return card.phones.some((phone) => samePhone(phone, ref.number));
+  return holdsHandle(card, ref);
+}
+
+/**
+ * The viewer's card for this identity: the one it is linked to, else the only card that holds it
+ * as an email, phone or handle. When two cards hold it, neither is chosen (ADR 0023).
+ */
 export function cardFor(cards: ContactCard[], ref: IdentityRef): ContactCard | undefined {
   const key = refKey(ref);
   const linked = cards.find((card) => card.links.some((link) => refKey(link.ref) === key));
-  if (linked || (ref.kind !== 'email' && ref.kind !== 'phone')) return linked;
-  return cards.find((card) => !card.rejected.includes(key) && (ref.kind === 'email'
-    ? card.emails.some((email) => normalizeEmail(email) === normalizeEmail(ref.address))
-    : card.phones.some((phone) => samePhone(phone, ref.number))));
+  if (linked) return linked;
+  const holding = cards.filter((card) => holdsRef(card, ref));
+  return holding.length === 1 ? holding[0] : undefined;
 }
 
-/** All identities the viewer has linked to the same card as `ref` (including `ref`). */
+const openNetworks: ReadonlySet<HandleNetwork> = new Set(['farcaster', 'lens', 'hive', 'deso']);
+
+/** The identity a saved handle stands for. */
+export function handleRef(item: ContactHandle): IdentityRef {
+  const handle = item.handle.trim().replace(/^@/, '');
+  if (item.network === 'open_media') return { kind: 'open_media', handle };
+  if (openNetworks.has(item.network)) return { kind: 'network', network: item.network as NetworkId, handle };
+  return { kind: 'bridge', network: item.network as BridgedNetwork, id: normalizeHandle(item.network, handle) };
+}
+
+/** Every identity on a card: its links, then the handles saved on it. */
+export function cardRefs(card: ContactCard): IdentityRef[] {
+  const refs = [...card.links.map((link) => link.ref), ...(card.handles ?? []).filter((item) => item.handle.trim()).map(handleRef)];
+  const seen = new Set<string>();
+  return refs.filter((ref) => !seen.has(refKey(ref)) && Boolean(seen.add(refKey(ref))));
+}
+
+/** All identities on the same card as `ref` (including `ref`). */
 export function linkedIdentities(cards: ContactCard[], ref: IdentityRef): IdentityRef[] {
   const card = cardFor(cards, ref);
-  const refs = card ? card.links.map((link) => link.ref) : [];
+  const refs = card ? cardRefs(card) : [];
   return refs.some((item) => refKey(item) === refKey(ref)) ? refs : [ref, ...refs];
 }
 
@@ -199,6 +259,16 @@ export function importDeviceContacts(cards: ContactCard[], contacts: DeviceConta
   return [...imported, ...kept.filter((card) => !card.deviceId || !seen.has(card.deviceId))];
 }
 
+/** Picks the fullest name a platform gives: a real name before a handle, number, id or address. */
+export function fullerName(...candidates: (string | undefined)[]): string {
+  const values = candidates.map((value) => value?.trim() ?? '').filter(Boolean);
+  return values.find(looksLikeName) ?? values[0] ?? '';
+}
+
+function looksLikeName(value: string): boolean {
+  return /\p{L}/u.test(value) && !value.includes('@') && !/^\+?[\d\s().-]{5,}$/.test(value) && !/^[a-z0-9_]+_\d{5,}$/i.test(value);
+}
+
 /** Basic shape check for cards coming back from storage or an agent. */
 export function isContactCard(value: unknown): value is ContactCard {
   const card = value as ContactCard;
@@ -221,7 +291,7 @@ export function encounterForConversation(conversation: Conversation): Encounter 
   const bridged = conversation.sourceSummary.find((source): source is BridgedNetwork => (bridgedNetworks as string[]).includes(source));
   if (bridged) {
     const id = person.id.replace(/^@/, '').split(':')[0].replace(new RegExp(`^${bridged}_`), '');
-    return { ref: { kind: 'bridge', network: bridged, id }, name: person.name, phones: bridged === 'whatsapp' && /^\d{7,15}$/.test(id) ? [id] : [] };
+    return { ref: { kind: 'bridge', network: bridged, id }, name: person.name, phones: phoneNetworks.has(bridged) && /^\+?\d{7,15}$/.test(id) ? [id] : [] };
   }
   return undefined;
 }

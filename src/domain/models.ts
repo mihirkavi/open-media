@@ -96,6 +96,13 @@ export interface Conversation {
   labels: string[];
   /** Present for email conversations: which mailbox and address replies go through. */
   email?: EmailThreadInfo;
+  /** The viewer's contact this conversation belongs to (ADR 0023). */
+  contactId?: string;
+  /**
+   * For a person's merged conversation: the original chats and email threads it is made of,
+   * newest first. Replies go through one of them.
+   */
+  channels?: Conversation[];
 }
 
 export interface EmailThreadInfo {

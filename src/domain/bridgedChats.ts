@@ -1,5 +1,6 @@
 import { chatNetwork, chatNetworks } from './chatNetworks';
 import { BridgedNetwork, Conversation, Message, MessageSource, Person } from './models';
+import { fullerName } from './people';
 
 /** Bridged chats (ADR 0011) as people-first conversations. */
 
@@ -28,7 +29,8 @@ export function mapBridgeSnapshot(snapshot: BridgeSnapshot): Conversation[] {
     if (!network) return [];
     const source: MessageSource = network.id;
     const label = network.name;
-    const participants = room.members.map((member) => person(member, source, label));
+    // In a one-to-one chat the room is usually named after the person: use it when the member has no real name.
+    const participants = room.members.map((member) => person(room.members.length === 1 ? { ...member, displayName: fullerName(member.displayName, room.name) } : member, source, label));
     const recipientIds = room.members.map((member) => member.id);
     const messages = [...room.events]
       .sort((left, right) => left.timestamp - right.timestamp)

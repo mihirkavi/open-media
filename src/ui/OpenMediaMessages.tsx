@@ -10,6 +10,7 @@ import { formatEmailBody } from "../domain/emailBody";
 import { formatListTime, layoutThread } from "../domain/threadLayout";
 import { Conversation, Message, MessageAttachment, PeopleFilter, Person } from "../domain/models";
 import { encounterForConversation } from "../domain/people";
+import { canReply, channelOf, defaultChannel } from "../domain/contactMerge";
 import { conversationTitle, filterConversations } from "../domain/selectors";
 import { ThemeColors } from "../theme";
 import { useOpenMediaTheme } from "../themeContext";
@@ -79,7 +80,8 @@ export function OpenMediaMessages({
     [conversations, peopleFilter, unreadOnly, selectedId],
   );
   const selected =
-    conversations.find((conversation) => conversation.id === selectedId) ??
+    // A profile's “Message” opens a person's chat by its own id, which may now be one channel of a merged conversation.
+    conversations.find((conversation) => conversation.id === selectedId || conversation.channels?.some((channel) => channel.id === selectedId)) ??
     (!compact ? filtered[0] : undefined);
   const composing = newMessageOpen && messageMode === "open_media";
   const newMessagePanel = (
@@ -105,9 +107,7 @@ export function OpenMediaMessages({
       <MessageThread
         key={selected.id}
         conversation={selected}
-        blocked={selected.participants.some((person) =>
-          blockedUserIds.includes(person.id),
-        )}
+        blockedUserIds={blockedUserIds}
         onBack={() => setSelectedId(undefined)}
         focusOnOpen
         onSend={onSend}
@@ -240,9 +240,16 @@ export function OpenMediaMessages({
                     ) : null}
                     <Text numberOfLines={1} style={styles.rowTime}>{formatListTime(new Date(conversation.lastMessageAt))}</Text>
                   </View>
-                  <Text numberOfLines={2} style={styles.preview}>
-                    {conversation.preview}
-                  </Text>
+                  {conversation.channels ? (
+                    <View style={styles.previewLine}>
+                      <SourceMarker source={conversation.messages[conversation.messages.length - 1]?.source ?? conversation.sourceSummary[0]} />
+                      <Text numberOfLines={2} style={[styles.preview, styles.previewShrink]}>{conversation.preview}</Text>
+                    </View>
+                  ) : (
+                    <Text numberOfLines={2} style={styles.preview}>
+                      {conversation.preview}
+                    </Text>
+                  )}
                 </View>
               </Pressable>
             ))}
@@ -292,9 +299,7 @@ export function OpenMediaMessages({
             <MessageThread
               key={selected.id}
               conversation={selected}
-              blocked={selected.participants.some((person) =>
-                blockedUserIds.includes(person.id),
-              )}
+              blockedUserIds={blockedUserIds}
               focusOnOpen={selected.id === selectedId}
               onSend={onSend}
               onSetBlocked={onSetBlocked}
@@ -394,11 +399,11 @@ function SendButton({ ready, reduceMotion, onPress }: { ready: boolean; reduceMo
   );
 }
 
-interface PendingMessage { id: string; conversationId: string; body: string; replyTo?: Message; failed?: string }
+interface PendingMessage { id: string; threadId: string; conversationId: string; body: string; replyTo?: Message; failed?: string }
 
 function MessageThread({
   conversation,
-  blocked,
+  blockedUserIds,
   onBack,
   focusOnOpen,
   onSend,
@@ -406,7 +411,7 @@ function MessageThread({
   onReport,
 }: {
   conversation: Conversation;
-  blocked: boolean;
+  blockedUserIds: string[];
   onBack?: () => void;
   /** Put the cursor in the reply box when the conversation was chosen, so typing can start at once. */
   focusOnOpen?: boolean;
@@ -432,23 +437,28 @@ function MessageThread({
   const [safetyStatus, setSafetyStatus] = useState("");
   // Like iMessage, a thread opens at the newest message.
   const threadScroll = useRef<ScrollView>(null);
-  const canSend =
-    !blocked &&
-    (conversation.sourceSummary.includes("open_media") ||
-      conversation.sourceSummary.includes("matrix") ||
-      Boolean(bridgedSourceOf(conversation)) ||
-      Boolean(conversation.email?.canSend));
-  const throughMatrix = conversation.sourceSummary.includes("matrix");
+  // A person's merged conversation (ADR 0023) replies through one of its channels: by default the
+  // one they last wrote from. Everything about sending below follows that channel.
+  const [channelId, setChannelId] = useState(() => defaultChannel(conversation).id);
+  const [choosingChannel, setChoosingChannel] = useState(false);
+  const via = channelOf(conversation, channelId) ?? defaultChannel(conversation);
+  const channels = conversation.channels ?? [];
+  const blocked = via.participants.some((person) => blockedUserIds.includes(person.id));
+  const canSend = !blocked && canReply(via);
+  const throughMatrix = via.sourceSummary.includes("matrix");
   // WhatsApp and other bridged networks (ADR 0011).
-  const bridged = bridgedSourceOf(conversation);
+  const bridged = bridgedSourceOf(via);
   const bridgedName = bridged ? sourceLabel(bridged) : "";
   const otherPerson = conversation.participants[0];
+  // Blocking and reports are about the Open Media account in this channel.
+  const channelPerson = via.participants[0];
   const reportableMessage = [...conversation.messages]
     .reverse()
     .find(
       (message) =>
         message.direction === "inbound" &&
-        message.senderPersonId === otherPerson?.id,
+        (!channels.length || message.conversationId === via.id) &&
+        message.senderPersonId === channelPerson?.id,
     );
   const [replyTo, setReplyTo] = useState<Message>();
   const composerInput = useRef<TextInput>(null);
@@ -460,6 +470,8 @@ function MessageThread({
   }, [focusOnOpen, canSend]);
   const startReply = (message: Message) => {
     setReplyTo(message);
+    // Replying to a message answers it where it came from.
+    if (channelOf(conversation, message.conversationId) && message.conversationId !== via.id) setChannelId(message.conversationId);
     setTimeout(() => composerInput.current?.focus(), 0);
   };
   const byId = useMemo(() => new Map(conversation.messages.map((message) => [message.id, message])), [conversation.messages]);
@@ -478,7 +490,8 @@ function MessageThread({
   };
   const submit = () => {
     if (!body.trim()) return;
-    const item: PendingMessage = { id: `pending-${Date.now()}`, conversationId: conversation.id, body: body.trim(), replyTo };
+    // A quote only threads within its own channel.
+    const item: PendingMessage = { id: `pending-${Date.now()}`, threadId: conversation.id, conversationId: via.id, body: body.trim(), replyTo: replyTo?.conversationId === via.id || !channels.length ? replyTo : undefined };
     // The stored copy replaces this bubble in place, without moving in a second time.
     sentBodies.add(item.body);
     setBody("");
@@ -486,7 +499,7 @@ function MessageThread({
     setPending((items) => [...items, item]);
     deliver(item);
   };
-  const waiting = pending.filter((item) => item.conversationId === conversation.id);
+  const waiting = pending.filter((item) => item.threadId === conversation.id);
   // Only messages that arrive while the thread is open move in; the history is already there.
   const reduceMotion = useReducedMotion();
   const openedWith = useRef(new Set(conversation.messages.map((message) => message.id))).current;
@@ -528,7 +541,9 @@ function MessageThread({
             {otherPerson?.verified ? <VerifiedTick /> : null}
           </View>
           <Text numberOfLines={1} style={styles.threadMeta}>
-            {blocked
+            {channels.length
+              ? channelsMeta(channels)
+              : blocked
               ? "Blocked · messaging paused"
               : bridged
               ? `${bridgedName} · through Open Media’s chat bridge`
@@ -542,9 +557,9 @@ function MessageThread({
           </Text>
         </View>
         </PersonLink>
-        {otherPerson &&
+        {channelPerson &&
         !conversation.groupTitle &&
-        conversation.sourceSummary.includes("open_media") ? (
+        via.sourceSummary.includes("open_media") ? (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Conversation safety"
@@ -628,7 +643,7 @@ function MessageThread({
                   )}
                 </ReplyableBubble>
                 <MessageMedia message={item.message} />
-                {item.groupEnd && conversation.sourceSummary.length > 1 ? (
+                {item.groupEnd && (conversation.sourceSummary.length > 1 || channels.length > 1) ? (
                   <View style={[styles.bubbleSource, item.message.direction === "outbound" && styles.outboundWrap]}>
                     <SourceMarker source={item.message.source} showLabel />
                   </View>
@@ -668,6 +683,39 @@ function MessageThread({
           </View>
         )}
       </ScrollView>
+      {channels.length > 1 ? (
+        <View style={styles.channelBar}>
+          {choosingChannel ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.channelChoices}>
+              {channels.map((channel) => (
+                <Pressable
+                  key={channel.id}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: channel.id === via.id, disabled: !canReply(channel) }}
+                  accessibilityLabel={`Reply ${channelLabel(channel, true)}`}
+                  disabled={!canReply(channel)}
+                  onPress={() => { setChannelId(channel.id); setChoosingChannel(false); setReplyTo(undefined); composerInput.current?.focus(); }}
+                  style={[styles.channelChoice, channel.id === via.id && styles.channelChoiceActive, !canReply(channel) && styles.channelChoiceOff]}
+                >
+                  <SourceMarker source={channelSource(channel)} inverse={channel.id === via.id} />
+                  <Text numberOfLines={1} style={[styles.channelChoiceText, channel.id === via.id && styles.channelChoiceTextActive]}>{channelLabel(channel)}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          ) : (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Replying ${channelLabel(via, true)}. Change`}
+              onPress={() => setChoosingChannel(true)}
+              style={styles.channelCurrent}
+            >
+              <SourceMarker source={channelSource(via)} />
+              <Text numberOfLines={1} style={styles.channelCurrentText}>{channelLabel(via, true)}</Text>
+              <Ionicons name="chevron-down" size={12} color={colors.textTertiary} />
+            </Pressable>
+          )}
+        </View>
+      ) : null}
       {canSend ? (
         <View style={styles.composerWrap}>
           {replyTo ? (
@@ -697,7 +745,7 @@ function MessageThread({
               // Grows with what you type, from one line up to six.
               onContentSizeChange={(event) => Platform.OS !== "web" && fitComposer(event.nativeEvent.contentSize.height)}
               placeholder={
-                conversation.email
+                via.email
                   ? "Reply by email"
                   : bridged
                     ? `Message on ${bridgedName}`
@@ -721,7 +769,7 @@ function MessageThread({
           <Text style={styles.disabledText}>
             {blocked
               ? "Unblock this person to send or receive new messages."
-              : conversation.email
+              : via.email
                 ? "Add outgoing mail (SMTP) to this mailbox in Settings → Connections to reply from here."
                 : "This provider does not offer a working send capability yet."}
           </Text>
@@ -759,11 +807,11 @@ function MessageThread({
               accessibilityRole="button"
               disabled={busy}
               onPress={async () => {
-                if (!otherPerson) return;
+                if (!channelPerson) return;
                 setBusy(true);
                 setSafetyStatus("");
                 try {
-                  await onSetBlocked(otherPerson.id, !blocked);
+                  await onSetBlocked(channelPerson.id, !blocked);
                   setSafetyStatus(
                     blocked ? "Person unblocked." : "Person blocked.",
                   );
@@ -787,13 +835,13 @@ function MessageThread({
               accessibilityRole="button"
               disabled={busy}
               onPress={async () => {
-                if (!otherPerson) return;
+                if (!channelPerson) return;
                 setBusy(true);
                 setSafetyStatus("");
                 try {
                   await onReport(
-                    conversation.id,
-                    otherPerson.id,
+                    via.id,
+                    channelPerson.id,
                     reportableMessage?.id,
                   );
                   setSafetyStatus("Report submitted for review.");
@@ -1139,6 +1187,21 @@ function VerifiedBadge({ domain }: { domain: string }) {
 }
 
 /** "Verified sender · coursera.org · via you@…", without repeating an address that is already the title. */
+/** Where a channel of a merged conversation goes: an email address, or the network's name. */
+function channelSource(channel: Conversation) {
+  return channel.messages[channel.messages.length - 1]?.source ?? channel.sourceSummary[0];
+}
+
+function channelLabel(channel: Conversation, sentence = false): string {
+  const label = channel.email ? channel.email.address : sourceLabel(bridgedSourceOf(channel) ?? channel.sourceSummary[0]);
+  return sentence ? (channel.email ? `by email to ${label}` : `on ${label}`) : label;
+}
+
+function channelsMeta(channels: Conversation[]): string {
+  const names = [...new Set(channels.map((channel) => (channel.email ? "Email" : sourceLabel(bridgedSourceOf(channel) ?? channel.sourceSummary[0]))))];
+  return names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0] ?? "";
+}
+
 function emailMeta(conversation: Conversation, person?: Person): string {
   const email = conversation.email!;
   const who = conversation.participants.length > 1
@@ -1608,6 +1671,17 @@ function createStyles(colors: ThemeColors) {
     outboundTail: { borderBottomRightRadius: 6 },
     bubbleSubject: { marginBottom: 3, color: colors.text, fontSize: 15, lineHeight: 21, fontWeight: "700" },
     bubbleSource: { marginTop: 4, marginHorizontal: 6, alignSelf: "flex-start" },
+    previewLine: { flexDirection: "row", alignItems: "flex-start", gap: 5 },
+    previewShrink: { flex: 1 },
+    channelBar: { paddingHorizontal: 18, paddingTop: 6, minHeight: 30, justifyContent: "center" },
+    channelCurrent: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 5, minHeight: 26, paddingRight: 6, borderRadius: 13 },
+    channelCurrentText: { flexShrink: 1, color: colors.textTertiary, fontSize: 12, fontWeight: "500" },
+    channelChoices: { gap: 6, paddingRight: 8 },
+    channelChoice: { flexDirection: "row", alignItems: "center", gap: 5, minHeight: 28, paddingHorizontal: 11, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
+    channelChoiceActive: { backgroundColor: colors.text, borderColor: colors.text },
+    channelChoiceOff: { opacity: 0.45 },
+    channelChoiceText: { color: colors.textSecondary, fontSize: 12, fontWeight: "600" },
+    channelChoiceTextActive: { color: colors.surface },
     replyRow: { maxWidth: "100%", flexDirection: "row", alignItems: "center", gap: 6 },
     replyBubble: { flexShrink: 1, minWidth: 0 },
     replyRowOutbound: { flexDirection: "row-reverse" },

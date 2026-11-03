@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Image, KeyboardAvoidingView, Linking, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { EventMeta, ListingCard, ListingFields, PaidPostBlock, PaidPostFields, PaidPostInput } from './ListingCards';
 import { PaymentSheet, PaymentTarget } from './PaymentSheet';
-import { PersonLink, targetForPost, usePeople } from './people';
+import { PersonLink, targetForPost, usePeople, useSavedName } from './people';
 import { PostActions, RegisterAction } from './PostActions';
 import { MarkdownBody } from './MarkdownBody';
 import { RichText } from './RichText';
@@ -309,6 +309,8 @@ export function PostCard({ post, mode, lensContext, viewer, onDelete, onReport }
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]); const [expanded, setExpanded] = useState(false); const [menuOpen, setMenuOpen] = useState(false); const explanation = explainFeedPost(post, mode, lensContext);
   const native = post.provenance.connectorId === 'open-media';
   const own = Boolean(native && viewer && viewer.id === post.author.id);
+  // People the viewer saved show under the name they saved (ADR 0023).
+  const authorName = useSavedName(targetForPost(post).ref) ?? post.author.displayName;
   const canAct = native && (own ? Boolean(onDelete) : Boolean(viewer && onReport));
   // Events link to their official page with Register in the action row instead.
   const original = native || post.event ? undefined : safeHttpsUrl(post.provenance.canonicalURL);
@@ -328,7 +330,7 @@ export function PostCard({ post, mode, lensContext, viewer, onDelete, onReport }
   const people = usePeople();
   const translation = useTranslation(post.id, [post.title ?? '', post.body]); const [title, body] = translation.texts;
   return <View style={styles.post}>
-    <View style={styles.postHeader}><PersonLink target={targetForPost(post)} label={`Open ${post.author.displayName}’s profile`} style={styles.authorLink}><View style={styles.authorLinkInner}><Avatar initials={post.author.initials} imageUrl={post.author.avatarUrl} /><View style={styles.author}><View style={styles.nameLine}><Text numberOfLines={1} style={[styles.authorName, styles.nameShrink]}>{post.author.displayName}</Text>{post.author.verified ? <VerifiedTick size={14} /> : null}</View><Text numberOfLines={1} style={styles.meta}>{post.event ? `Upcoming event · from ${post.author.handle}` : `${post.author.handle} · ${formatRelativeTime(post.createdAt)} · ${sourceName(post.provenance.connectorId)}`}</Text></View></View></PersonLink>{canAct ? <Pressable accessibilityRole="button" accessibilityLabel="Post options" accessibilityState={{ expanded: menuOpen }} onPress={() => setMenuOpen((value) => !value)} style={styles.menuButton}><Ionicons name={menuOpen ? 'close' : 'ellipsis-horizontal'} size={18} color={colors.textSecondary} /></Pressable> : null}</View>
+    <View style={styles.postHeader}><PersonLink target={targetForPost(post)} label={`Open ${authorName}’s profile`} style={styles.authorLink}><View style={styles.authorLinkInner}><Avatar initials={post.author.initials} imageUrl={post.author.avatarUrl} /><View style={styles.author}><View style={styles.nameLine}><Text numberOfLines={1} style={[styles.authorName, styles.nameShrink]}>{authorName}</Text>{post.author.verified ? <VerifiedTick size={14} /> : null}</View><Text numberOfLines={1} style={styles.meta}>{post.event ? `Upcoming event · from ${post.author.handle}` : `${post.author.handle} · ${formatRelativeTime(post.createdAt)} · ${sourceName(post.provenance.connectorId)}`}</Text></View></View></PersonLink>{canAct ? <Pressable accessibilityRole="button" accessibilityLabel="Post options" accessibilityState={{ expanded: menuOpen }} onPress={() => setMenuOpen((value) => !value)} style={styles.menuButton}><Ionicons name={menuOpen ? 'close' : 'ellipsis-horizontal'} size={18} color={colors.textSecondary} /></Pressable> : null}</View>
     {menuOpen ? <PostMenu own={own} listing={Boolean(post.listing)} onDelete={() => onDelete!(post.id)} onReport={(reason) => onReport!(post.id, reason)} onTip={native && !own && viewer && post.author.tipsEnabled ? () => { setMenuOpen(false); setPayTarget({ kind: 'tip', postId: post.id }); } : undefined} tipTo={post.author.handle} /> : null}
     {post.event && image?.kind === 'image' && image.url ? <PostImage url={image.url} altText={image.altText} /> : null}
     {post.title ? <RichText text={title} source={post.provenance.connectorId} style={styles.postTitle} /> : null}

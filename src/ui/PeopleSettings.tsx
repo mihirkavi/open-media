@@ -4,10 +4,11 @@ import { ActivityIndicator, Platform, Pressable, StyleSheet, View } from 'react-
 
 import { loadPublicPerson, PublicPerson, saveLinkedAccounts } from '../data/peopleService';
 import { NetworkId, networks } from '../domain/networkPosts';
-import { ContactCard, IdentityRef } from '../domain/people';
+import { ContactCard, handleRef, IdentityRef } from '../domain/people';
 import { initialsFor } from '../domain/publicPosts';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
+import { ContactImport } from './ContactImport';
 import { usePeople } from './people';
 import { Text, TextInput } from './Text';
 
@@ -48,13 +49,6 @@ export function PeopleSettings({ handle }: { handle: string }) {
     if ((accounts ?? []).length >= 8) { setMessage('You can show up to 8 accounts.'); return; }
     saveAccounts([...(accounts ?? []), { network, handle: value }]);
   };
-  const importContacts = async () => {
-    if (!contacts) return;
-    setBusy('contacts'); setMessage('');
-    try { const count = await contacts.importFromDevice(); setMessage(`Imported ${count} ${count === 1 ? 'contact' : 'contacts'}.`); }
-    catch (reason) { setMessage(reason instanceof Error ? reason.message : 'Could not import your contacts.'); }
-    finally { setBusy(''); }
-  };
 
   return <>
     <Pressable accessibilityRole="link" onPress={() => people?.open({ ref: { kind: 'open_media', handle } })} style={[styles.action, styles.spaced]}>
@@ -91,19 +85,16 @@ export function PeopleSettings({ handle }: { handle: string }) {
 
     {contacts ? <>
       <Text style={styles.title}>Your contacts</Text>
-      <Text style={styles.copy}>Only you can see your contacts. They are encrypted on the server and used to recognise people you already know. Links to accounts are made only on an exact email or phone match, and you can undo any of them from the person’s profile.</Text>
+      <Text style={styles.copy}>Only you can see your contacts. They are encrypted on the server and used to recognise people you already know: a saved name shows everywhere, and chats and email from any of a contact’s addresses, numbers or handles share one conversation. Open someone to edit them.</Text>
       <View style={styles.card}>
         <Pressable accessibilityRole="button" accessibilityState={{ expanded: showContacts }} disabled={!contacts.cards.length} onPress={() => setShowContacts((value) => !value)} style={styles.row}>
           <Ionicons name="lock-closed-outline" size={18} color={colors.text} />
           <Text style={[styles.rowText, styles.grow]}>{contacts.ready ? `${contacts.cards.length} saved ${contacts.cards.length === 1 ? 'contact' : 'contacts'}` : 'Loading…'}{contacts.suggestions.length ? <Text style={styles.rowMeta}> · {contacts.suggestions.length} to review</Text> : null}</Text>
-          {Platform.OS !== 'web' ? <Pressable accessibilityRole="button" disabled={Boolean(busy)} onPress={importContacts} style={styles.small}>
-            {busy === 'contacts' ? <ActivityIndicator color={colors.text} /> : <Text style={styles.smallText}>Import from this device</Text>}
-          </Pressable> : null}
           {contacts.cards.length ? <Ionicons name={showContacts ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textTertiary} /> : null}
         </Pressable>
         {showContacts ? sortedContacts.map((card) => <ContactRow key={card.id} card={card} onOpen={(target) => people?.open(target)} styles={styles} colors={colors} />) : null}
+        <ContactImport contacts={contacts} />
       </View>
-      {Platform.OS === 'web' ? <Text style={styles.note}>Import contacts from the iPhone or Android app. You can also add someone from their profile.</Text> : null}
       {contacts.error ? <Text accessibilityRole="alert" style={styles.error}>{contacts.error}</Text> : null}
     </> : null}
     {message ? <Text accessibilityLiveRegion="polite" style={styles.note}>{message}</Text> : null}
@@ -113,7 +104,8 @@ export function PeopleSettings({ handle }: { handle: string }) {
 /** Where tapping a contact goes: their Open Media profile when linked, else their email or phone. */
 function contactTarget(card: ContactCard): { ref: IdentityRef; name: string } | undefined {
   const linked = card.links.find((link) => link.ref.kind === 'open_media') ?? card.links[0];
-  const ref: IdentityRef | undefined = linked?.ref ?? (card.emails[0] ? { kind: 'email', address: card.emails[0] } : card.phones[0] ? { kind: 'phone', number: card.phones[0] } : undefined);
+  const handle = card.handles?.find((item) => item.handle.trim());
+  const ref: IdentityRef | undefined = linked?.ref ?? (card.emails[0] ? { kind: 'email', address: card.emails[0] } : card.phones[0] ? { kind: 'phone', number: card.phones[0] } : handle ? handleRef(handle) : undefined);
   return ref ? { ref, name: card.name } : undefined;
 }
 

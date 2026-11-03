@@ -48,6 +48,7 @@ import {
 import { PeopleProvider, PersonTarget, useContactsStore } from "./people";
 import { PersonProfile } from "./PersonProfile";
 import { encounterForConversation } from "../domain/people";
+import { mergeByContact } from "../domain/contactMerge";
 import { loadPublicPerson } from "../data/peopleService";
 
 export type PrimaryDestination = "feed" | "clips" | "messages";
@@ -338,6 +339,11 @@ export function OpenMediaApp({
     [conversations],
   );
   const contacts = useContactsStore(messageMode === "open_media" && apiConfigured(), encounters);
+  // One conversation per person (ADR 0023): chats and email from a contact's identities join up.
+  const personConversations = useMemo(
+    () => (messageMode === "open_media" ? mergeByContact(conversations, contacts.cards) : conversations),
+    [contacts.cards, conversations, messageMode],
+  );
   const openPerson = useCallback((target: PersonTarget) => {
     setPerson(target);
     if (Platform.OS !== "web" || typeof window === "undefined") return;
@@ -460,7 +466,7 @@ export function OpenMediaApp({
         {!person && destination === "clips" ? <ClipsView sessionKey={currentUserId} /> : null}
         {!person && destination === "messages" ? (
           <OpenMediaMessages
-            conversations={conversations}
+            conversations={personConversations}
             loading={messagesLoading}
             error={messagesError}
             messageMode={messageMode}
@@ -481,7 +487,7 @@ export function OpenMediaApp({
           <SearchView
             initialQuery={searchQuery}
             posts={feed.posts}
-            conversations={conversations}
+            conversations={personConversations}
             viewer={viewer}
             lenses={lenses}
             onNavigate={navigate}

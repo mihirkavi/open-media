@@ -2,9 +2,9 @@ import { createContext, PropsWithChildren, useCallback, useContext, useEffect, u
 import { Image, Platform, Pressable, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
 
 import { readDeviceContacts } from '../contacts/deviceContacts';
-import { loadContactCards, loadPublicPerson, PublicPerson, saveContactCards } from '../data/peopleService';
+import { deleteContactCard, loadContactCards, loadPublicPerson, PublicPerson, saveContactCards } from '../data/peopleService';
 import { networks } from '../domain/networkPosts';
-import { ContactCard, confirmLink, Encounter, IdentityRef, importDeviceContacts, LinkSuggestion, reconcile, refKey, rejectSuggestion, unlink } from '../domain/people';
+import { cardFor, ContactCard, confirmLink, Encounter, IdentityRef, importDeviceContacts, LinkSuggestion, reconcile, refKey, rejectSuggestion, unlink } from '../domain/people';
 import { SocialPost } from '../domain/posts';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
@@ -28,6 +28,9 @@ export interface ContactsState {
   reject: (cardId: string, ref: IdentityRef) => Promise<void>;
   undo: (cardId: string, ref: IdentityRef) => Promise<void>;
   save: (card: ContactCard) => Promise<void>;
+  remove: (cardId: string) => Promise<void>;
+  /** Saves imported cards (ADR 0023) after the person reviewed them. */
+  saveMany: (cards: ContactCard[]) => Promise<void>;
   importFromDevice: () => Promise<number>;
 }
 
@@ -104,6 +107,19 @@ export function useContactsStore(enabled: boolean, encounters: Encounter[]): Con
     reject: (cardId, ref) => update(cardId, (card) => rejectSuggestion(card, ref)),
     undo: (cardId, ref) => update(cardId, (card) => unlink(card, ref)),
     save: async (card) => apply([...cardsRef.current.filter((item) => item.id !== card.id), card], [card]),
+    saveMany: async (changed) => {
+      // Saved first, so a failed upload is reported instead of showing contacts that aren't stored.
+      await saveContactCards(changed);
+      const ids = new Set(changed.map((card) => card.id));
+      cardsRef.current = [...cardsRef.current.filter((item) => !ids.has(item.id)), ...changed];
+      setCards(cardsRef.current);
+    },
+    remove: async (cardId) => {
+      await deleteContactCard(cardId);
+      cardsRef.current = cardsRef.current.filter((item) => item.id !== cardId);
+      setCards(cardsRef.current);
+      setSuggestions((current) => current.filter((item) => item.cardId !== cardId));
+    },
     importFromDevice: async () => {
       const snapshots = await readDeviceContacts();
       const next = importDeviceContacts(cardsRef.current, snapshots, newId);
@@ -111,6 +127,12 @@ export function useContactsStore(enabled: boolean, encounters: Encounter[]): Con
       return snapshots.length;
     },
   };
+}
+
+/** The name the viewer saved for this person, when they have one (ADR 0023). */
+export function useSavedName(ref: IdentityRef): string | undefined {
+  const cards = useContext(PeopleContext)?.contacts?.cards;
+  return useMemo(() => (cards?.length ? cardFor(cards, ref)?.name.trim() || undefined : undefined), [cards, refKey(ref)]);
 }
 
 export function newId(): string {
