@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, Animated, Easing, Image, Keyboard, Linking, Modal, Platform, Pressable, ScrollView, StyleProp, StyleSheet, TextStyle, View, useWindowDimensions } from "react-native";
 import { Loader } from "./Loader";
 import { PullToRefresh } from "./PullToRefresh";
-import { PersonLink, PersonTarget } from "./people";
+import { PersonLink, PersonTarget, useSavedName } from "./people";
 import { Text, TextInput } from "./Text";
 
 import { bridgedSourceOf } from "../connectors/bridgesConnector";
@@ -953,7 +953,7 @@ function NewMessagePanel({
   const chosen = new Set(recipients.map((recipient) => recipient.address));
   const lower = typed.toLowerCase();
   const contacts = typed
-    ? emailContacts.filter((contact) => !chosen.has(contact.address) && (contact.address.includes(lower) || contact.name.toLowerCase().includes(lower))).slice(0, 6)
+    ? emailContacts.filter((contact) => !chosen.has(contact.address) && (contact.address.includes(lower) || folded(contact.name).includes(folded(typed)))).slice(0, 6)
     : [];
   const typedAddress = emailPattern.test(typed) && !chosen.has(typed.toLowerCase()) && !contacts.some((contact) => contact.address === typed.toLowerCase()) ? typed.toLowerCase() : undefined;
   // A typed address you've emailed before shows that person's name.
@@ -1088,7 +1088,7 @@ function NewMessagePanel({
                 >
                   <Avatar initials={person.initials} imageUrls={person.avatarUrls} />
                   <View style={styles.rowCopy}>
-                    <Text numberOfLines={1} style={styles.rowTitle}>{person.name}</Text>
+                    <Text numberOfLines={1} style={styles.rowTitle}><SavedName handle={person.identities[0]?.value ?? ""} fallback={person.name} /></Text>
                     <Text numberOfLines={1} style={styles.preview}>{person.identities[0]?.value} · Open Media</Text>
                   </View>
                 </Pressable>
@@ -1203,6 +1203,16 @@ function VerifiedBadge({ domain }: { domain: string }) {
 }
 
 /** "Verified sender · coursera.org · via you@…", without repeating an address that is already the title. */
+/** An Open Media account under the name the viewer saved for them, if any. */
+function SavedName({ handle, fallback }: { handle: string; fallback: string }) {
+  return <>{useSavedName({ kind: "open_media", handle: handle.replace(/^@/, "") }) ?? fallback}</>;
+}
+
+/** Lower case without accents, so "lopez" finds "López". */
+function folded(value: string): string {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
 /** Where a channel of a merged conversation goes: an email address, or the network's name. */
 function channelSource(channel: Conversation) {
   return channel.messages[channel.messages.length - 1]?.source ?? channel.sourceSummary[0];

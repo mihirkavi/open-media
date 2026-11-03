@@ -37,6 +37,17 @@ An identity is an email address, a phone number, an Open Media handle, an open-n
 - Without a contact, the fullest name the platform gives is used: a bridged one-to-one chat uses the room's name when the member has none or only has a number or id (`fullerName`); email already uses the "From" display name; Open Media and the open networks use the profile's display name.
 - Search results (`src/ui/SearchView.tsx`) are not changed here; they receive the merged conversations, so message results carry contact names, but person results keep public names. (That file belonged to another session's work at the time.)
 
+### Fixes after the first release (2026-11-02)
+
+The owner saw saved addresses still showing as raw addresses in Messages. Four causes, all fixed:
+
+- **Address-only threads.** "Add to my contacts" on a thread whose sender gave no name saved the address itself as the contact's name. A new contact now starts with an empty name and the editor asks for one. A contact whose "name" is only an address or number counts as unnamed everywhere (`contactName`), and its profile says "Add their name".
+- **Aliases.** Email matching ignores case, a `+tag` after the name, and dots in Gmail names (`sameEmail`).
+- **Groups.** Group emails and group chats stay their own conversation, but each saved person in them shows under the contact's name in the title (email groups only; a bridged room keeps its own name), the sender lines and the preview.
+- **Threads with several addresses** (a company writing from two mailboxes) match a contact saved with any one of them, as long as they all point at the same contact.
+
+The new message **To** field now offers every email on your contacts under the contact's name, then the people you have emailed (renamed when saved), each address once. Open Media people in its results also show under the saved name, and names match without accents.
+
 ### One conversation per person
 
 `mergeByContact` (`src/domain/contactMerge.ts`) runs after every source loads:

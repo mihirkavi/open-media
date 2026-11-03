@@ -1,7 +1,7 @@
 import { normalizeEmail, normalizePhone } from './contactCleaning';
 import { bridgedSourceOf } from './bridgedChats';
 import { Conversation, MessageSource, Person } from './models';
-import { cardFor, ContactCard, ContactHandle, encounterForConversation, HandleNetwork, normalizeHandle, samePhone } from './people';
+import { cardFor, ContactCard, contactLabel, contactName, ContactHandle, encounterForConversation, HandleNetwork, normalizeHandle, refForParticipant, sameEmail, samePhone } from './people';
 
 export { fullerName } from './people';
 
@@ -20,11 +20,62 @@ export function canReply(conversation: Conversation): boolean {
     || Boolean(conversation.email?.canSend);
 }
 
-/** The contact a conversation belongs to, if it is one-to-one and exactly one contact holds it. */
+/**
+ * The contact a conversation belongs to, if it is one-to-one and exactly one contact holds it.
+ * An email thread can carry several addresses of the same sender (a company writing from two
+ * mailboxes, an alias): any of them counts, as long as they all point at the same contact.
+ */
 export function contactForConversation(cards: ContactCard[], conversation: Conversation): ContactCard | undefined {
   if (conversation.email?.recipients && conversation.email.recipients.length > 1) return undefined;
   const encounter = encounterForConversation(conversation);
-  return encounter ? cardFor(cards, encounter.ref) : undefined;
+  if (!encounter) return undefined;
+  const direct = cardFor(cards, encounter.ref);
+  if (direct || !conversation.email) return direct;
+  const found = new Map<string, ContactCard>();
+  for (const identity of conversation.participants[0].identities) {
+    if (identity.kind !== 'email') continue;
+    const card = cardFor(cards, { kind: 'email', address: identity.value });
+    if (card) found.set(card.id, card);
+  }
+  return found.size === 1 ? [...found.values()][0] : undefined;
+}
+
+/**
+ * Group chats and group emails keep their own conversation, but each person in them who is one of
+ * the viewer's contacts shows under the contact's name, in the title, the sender lines and the
+ * preview. A group a person named themselves (a bridged room's name) keeps that name.
+ */
+function withContactNames(conversation: Conversation, cards: ContactCard[]): Conversation {
+  if (conversation.participants.length < 2) return conversation;
+  let changed = false;
+  const renamed = new Map<string, { from: string; to: string }>();
+  const participants = conversation.participants.map((person) => {
+    const ref = refForParticipant(conversation, person);
+    const name = ref ? contactName(cardFor(cards, ref)) : '';
+    if (!name || name === person.name) return person;
+    changed = true;
+    renamed.set(person.id, { from: person.name, to: name });
+    return { ...person, name, initials: initialsOf(name) };
+  });
+  if (!changed) return conversation;
+  // Email groups are titled from their people; bridged groups carry the room's own name.
+  const groupTitle = conversation.email && conversation.groupTitle ? titleFor(participants.map((person) => person.name)) : conversation.groupTitle;
+  const latest = conversation.messages[conversation.messages.length - 1];
+  const author = latest?.direction === 'inbound' ? renamed.get(latest.senderPersonId) : undefined;
+  const oldPrefix = author ? `${firstName(author.from)}: ` : '';
+  const preview = author && conversation.preview.startsWith(oldPrefix) ? `${firstName(author.to)}: ${conversation.preview.slice(oldPrefix.length)}` : conversation.preview;
+  return { ...conversation, participants, groupTitle, preview };
+}
+
+function firstName(name: string): string {
+  return name.includes('@') ? name : name.split(' ')[0];
+}
+
+/** "Ana, Bo and Cy", or "Ana, Bo and 3 others", from first names (as email groups are titled). */
+function titleFor(names: string[]): string {
+  const first = [...names].sort((a, b) => a.localeCompare(b)).map(firstName);
+  if (first.length <= 3) return first.length === 2 ? first.join(' and ') : `${first.slice(0, -1).join(', ')} and ${first.at(-1)}`;
+  return `${first.slice(0, 2).join(', ')} and ${first.length - 2} others`;
 }
 
 /**
@@ -38,7 +89,7 @@ export function mergeByContact(conversations: Conversation[], cards: ContactCard
   const out: (Conversation | string)[] = [];
   for (const conversation of conversations) {
     const card = contactForConversation(cards, conversation);
-    if (!card) { out.push(conversation); continue; }
+    if (!card) { out.push(withContactNames(conversation, cards)); continue; }
     const group = byCard.get(card.id);
     if (group) group.members.push(conversation);
     else { byCard.set(card.id, { card, members: [conversation] }); out.push(card.id); }
@@ -51,7 +102,7 @@ export function mergeByContact(conversations: Conversation[], cards: ContactCard
 }
 
 function named(conversation: Conversation, card: ContactCard): Conversation {
-  const name = card.name.trim();
+  const name = contactName(card);
   if (!name) return { ...conversation, contactId: card.id };
   return { ...conversation, contactId: card.id, participants: conversation.participants.map((person) => ({ ...person, name, initials: initialsOf(name) })) };
 }
@@ -60,7 +111,7 @@ function merged(card: ContactCard, members: Conversation[]): Conversation {
   const channels = [...members].sort((a, b) => Date.parse(b.lastMessageAt) - Date.parse(a.lastMessageAt));
   const latest = channels[0];
   const people = channels.map((channel) => channel.participants[0]).filter(Boolean);
-  const name = card.name.trim() || people[0]?.name || 'Someone';
+  const name = contactName(card) || people[0]?.name || 'Someone';
   // A person's picture, not a company's: Open Media and chat pictures before email logos.
   const pictured = people.find((person) => person.avatarUrls?.length && !person.verifiedDomain) ?? people.find((person) => person.avatarUrls?.length);
   const person: Person = {
@@ -124,7 +175,7 @@ export interface ContactDraft {
 }
 
 export function draftOf(card: ContactCard): ContactDraft {
-  return { name: card.name, emails: [...card.emails], phones: [...card.phones], handles: (card.handles ?? []).map((item) => ({ ...item })), notes: card.notes };
+  return { name: contactName(card), emails: [...card.emails], phones: [...card.phones], handles: (card.handles ?? []).map((item) => ({ ...item })), notes: card.notes };
 }
 
 const emailPattern = /^[^\s@"]+@[^\s@"]+\.[^\s@"]+$/;
@@ -167,9 +218,43 @@ export function sharedWith(cards: ContactCard[], cardId: string, draft: ContactD
   const out: { value: string; contact: string }[] = [];
   for (const other of cards) {
     if (other.id === cardId) continue;
-    for (const email of draft.emails) if (email.trim() && other.emails.some((saved) => normalizeEmail(saved) === normalizeEmail(email))) out.push({ value: email.trim(), contact: other.name });
-    for (const phone of draft.phones) if (phone.trim() && other.phones.some((saved) => samePhone(saved, phone))) out.push({ value: phone.trim(), contact: other.name });
-    for (const item of draft.handles) if (item.handle.trim() && (other.handles ?? []).some((saved) => saved.network === item.network && normalizeHandle(saved.network, saved.handle) === normalizeHandle(item.network, item.handle))) out.push({ value: item.handle.trim(), contact: other.name });
+    for (const email of draft.emails) if (email.trim() && other.emails.some((saved) => normalizeEmail(saved) === normalizeEmail(email))) out.push({ value: email.trim(), contact: contactLabel(other) });
+    for (const phone of draft.phones) if (phone.trim() && other.phones.some((saved) => samePhone(saved, phone))) out.push({ value: phone.trim(), contact: contactLabel(other) });
+    for (const item of draft.handles) if (item.handle.trim() && (other.handles ?? []).some((saved) => saved.network === item.network && normalizeHandle(saved.network, saved.handle) === normalizeHandle(item.network, item.handle))) out.push({ value: item.handle.trim(), contact: contactLabel(other) });
+  }
+  return out;
+}
+
+// Suggestions for a new email's To field (ADR 0023).
+
+export interface RecipientSuggestion { address: string; name: string; initials: string; avatarUrls: string[] }
+
+/**
+ * Who the To field offers: every email address on the viewer's contacts, under the contact's
+ * name, then the people they have emailed with. Someone in both appears once, under the contact's
+ * name and with their picture from mail. A contact with no name is offered by address.
+ */
+export function recipientSuggestions(emailed: RecipientSuggestion[], cards: ContactCard[]): RecipientSuggestion[] {
+  const out: RecipientSuggestion[] = [];
+  const seen = new Set<string>();
+  const add = (item: RecipientSuggestion) => {
+    const address = normalizeEmail(item.address);
+    if (!address || seen.has(address)) return;
+    seen.add(address);
+    out.push({ ...item, address });
+  };
+  const named = [...cards].filter((card) => card.emails.length).sort((a, b) => contactLabel(a).localeCompare(contactLabel(b)));
+  for (const card of named) {
+    const name = contactName(card);
+    for (const address of card.emails) {
+      const known = emailed.find((item) => sameEmail(item.address, address));
+      const shown = name || known?.name || address;
+      add({ address, name: shown, initials: initialsOf(shown), avatarUrls: known?.avatarUrls ?? [] });
+    }
+  }
+  for (const item of emailed) {
+    const name = contactName(cardFor(cards, { kind: 'email', address: item.address }));
+    add(name ? { ...item, name, initials: initialsOf(name) } : item);
   }
   return out;
 }

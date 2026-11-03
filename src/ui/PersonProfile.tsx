@@ -5,7 +5,7 @@ import { Loader } from './Loader';
 
 import { FollowStatus, followPerson, loadPublicPerson, loadTimeline, PublicPerson, sourcesFor, TimelineSource, unfollowPerson } from '../data/peopleService';
 import { networks } from '../domain/networkPosts';
-import { cardFor, ContactCard, confirmLink, IdentityRef, linkedIdentities, phoneNetworks, refKey, shownName } from '../domain/people';
+import { cardFor, ContactCard, confirmLink, contactLabel, contactName, IdentityRef, linkedIdentities, phoneNetworks, refKey, shownName } from '../domain/people';
 import { SocialPost } from '../domain/posts';
 import { fieldDefinition, fieldDisplay, fieldHref, publicProfileUrl } from '../domain/profileFields';
 import { ThemeColors } from '../theme';
@@ -67,7 +67,7 @@ export function PersonProfile({ target, viewerId, onBack, onMessage }: { target:
   const names = shownName({ declaredName: person?.displayName ?? (target.ref.kind === 'network' ? target.name : undefined), handle: person?.handle ?? handle }, card);
   const publicName = target.ref.kind === 'email' || target.ref.kind === 'phone' || target.ref.kind === 'bridge' ? (target.name ?? names.name) : names.name;
   // The name the viewer saved comes first, wherever they saved one (ADR 0023); the public name follows it.
-  const name = card?.name.trim() || publicName;
+  const name = contactName(card) || publicName;
   const alsoKnownAs = card && publicName && publicName.replace(/^@/, '').toLowerCase() !== name.toLowerCase() && !publicName.startsWith('@') ? publicName : undefined;
   const avatar = person?.avatarUrl ?? target.avatarUrl;
   const where = target.ref.kind === 'network' ? networks[target.ref.network].displayName : target.ref.kind === 'open_media' ? 'Open Media' : undefined;
@@ -129,7 +129,7 @@ export function PersonProfile({ target, viewerId, onBack, onMessage }: { target:
     {contacts && (card || suggestions.length || !self) ? <View style={styles.private}>
       <View style={styles.privateTitleRow}>
         <Ionicons name="lock-closed-outline" size={14} color={colors.textSecondary} /><Text style={[styles.privateTitle, styles.grow]}>Only you see this</Text>
-        {card && !editing ? <Pressable accessibilityRole="button" accessibilityLabel={`Edit ${card.name}`} onPress={() => setEditing(true)} hitSlop={8} style={styles.edit}><Ionicons name="create-outline" size={14} color={colors.text} /><Text style={styles.editText}>Edit</Text></Pressable> : null}
+        {card && !editing ? <Pressable accessibilityRole="button" accessibilityLabel={`Edit ${contactLabel(card)}`} onPress={() => setEditing(true)} hitSlop={8} style={styles.edit}><Ionicons name="create-outline" size={14} color={colors.text} /><Text style={styles.editText}>Edit</Text></Pressable> : null}
       </View>
       {card && editing ? <ContactEditor
         key={card.id}
@@ -139,6 +139,10 @@ export function PersonProfile({ target, viewerId, onBack, onMessage }: { target:
         onSave={async (next) => { await contacts.save(next); setEditing(false); }}
         onDelete={async () => { await contacts.remove(card.id); setEditing(false); }}
       /> : card ? <>
+        {!contactName(card) ? <Pressable accessibilityRole="button" onPress={() => setEditing(true)} style={styles.nameNudge}>
+          <Ionicons name="person-outline" size={15} color={colors.text} />
+          <Text style={styles.nameNudgeText}><Text style={styles.nameNudgeStrong}>Add their name</Text> and it shows instead of the address, in Messages and everywhere else.</Text>
+        </Pressable> : null}
         {card.nicknames.length ? <Row label="Nicknames" value={card.nicknames.join(', ')} styles={styles} /> : null}
         {card.phones.map((phone) => <Row key={phone} label="Phone" value={phone} styles={styles} />)}
         {card.emails.map((email) => <Row key={email} label="Email" value={email} styles={styles} />)}
@@ -154,7 +158,7 @@ export function PersonProfile({ target, viewerId, onBack, onMessage }: { target:
       {suggestions.map((suggestion) => {
         const suggested = contacts.cards.find((item) => item.id === suggestion.cardId);
         return suggested ? <View key={suggestion.cardId} style={styles.linkRow}>
-          <View style={styles.linkCopy}><Text style={styles.linkName}>Is this {suggested.name} from your contacts?</Text><Text style={styles.linkWhy}>{suggestion.reason}</Text></View>
+          <View style={styles.linkCopy}><Text style={styles.linkName}>Is this {contactLabel(suggested)} from your contacts?</Text><Text style={styles.linkWhy}>{suggestion.reason}</Text></View>
           <Pressable accessibilityRole="button" disabled={Boolean(busy)} onPress={() => act('yes', () => contacts.confirm(suggestion.cardId, target.ref))} style={[styles.chip, styles.chipStrong]}><Text style={styles.chipStrongText}>Yes</Text></Pressable>
           <Pressable accessibilityRole="button" disabled={Boolean(busy)} onPress={() => act('no', () => contacts.reject(suggestion.cardId, target.ref))} style={styles.chip}><Text style={styles.chipText}>No</Text></Pressable>
         </View> : null;
@@ -168,10 +172,10 @@ export function PersonProfile({ target, viewerId, onBack, onMessage }: { target:
           <TextInput autoFocus accessibilityLabel="Find a contact" value={contactQuery} onChangeText={setContactQuery} placeholder="Find a contact" placeholderTextColor={colors.textTertiary} style={styles.pickerInput} />
           {contacts.cards
             .filter((item) => !contactQuery.trim() || [item.name, ...item.emails, ...item.phones].join(' ').toLowerCase().includes(contactQuery.trim().toLowerCase()))
-            .sort((a, b) => a.name.localeCompare(b.name)).slice(0, 6)
-            .map((item) => <Pressable key={item.id} accessibilityRole="button" accessibilityLabel={`Add to ${item.name}`} disabled={Boolean(busy)} onPress={() => act('merge', async () => { await contacts.save(confirmLink(item, target.ref)); setPickingContact(false); setContactQuery(''); })} style={({ pressed }) => [styles.pickerRow, pressed && styles.pressed]}>
-              <View style={styles.pickerFace}><Text style={styles.pickerInitials}>{(item.name[0] ?? '?').toUpperCase()}</Text></View>
-              <View style={styles.linkCopy}><Text numberOfLines={1} style={styles.linkName}>{item.name}</Text>{item.emails[0] || item.phones[0] ? <Text numberOfLines={1} style={styles.linkWhy}>{item.emails[0] ?? item.phones[0]}</Text> : null}</View>
+            .sort((a, b) => contactLabel(a).localeCompare(contactLabel(b))).slice(0, 6)
+            .map((item) => <Pressable key={item.id} accessibilityRole="button" accessibilityLabel={`Add to ${contactLabel(item)}`} disabled={Boolean(busy)} onPress={() => act('merge', async () => { await contacts.save(confirmLink(item, target.ref)); setPickingContact(false); setContactQuery(''); })} style={({ pressed }) => [styles.pickerRow, pressed && styles.pressed]}>
+              <View style={styles.pickerFace}><Text style={styles.pickerInitials}>{(contactLabel(item)[0] ?? '?').toUpperCase()}</Text></View>
+              <View style={styles.linkCopy}><Text numberOfLines={1} style={styles.linkName}>{contactLabel(item)}</Text>{item.emails[0] || item.phones[0] ? <Text numberOfLines={1} style={styles.linkWhy}>{item.emails[0] ?? item.phones[0]}</Text> : null}</View>
               <Ionicons name="add-circle-outline" size={18} color={colors.textTertiary} />
             </Pressable>)}
           <Pressable accessibilityRole="button" onPress={() => { setPickingContact(false); setContactQuery(''); }} style={styles.pickerCancel}><Text style={styles.quietText}>Cancel</Text></Pressable>
@@ -210,13 +214,17 @@ function describe(ref: IdentityRef): string {
   }
 }
 
-/** A new contact for this identity, holding it as an email, number or handle so it can be edited. */
-function newCard(name: string, ref: IdentityRef): ContactCard {
+/**
+ * A new contact for this identity, holding it as an email, number or handle so it can be edited.
+ * When all we know is an address or number, the name starts empty, so the editor asks for one.
+ */
+function newCard(shown: string, ref: IdentityRef): ContactCard {
   const now = new Date().toISOString();
+  const name = contactName({ name: shown.replace(/^@/, '') } as ContactCard);
   const handles = ref.kind === 'open_media' ? [{ network: 'open_media' as const, handle: ref.handle }]
     : ref.kind === 'network' ? [{ network: ref.network, handle: ref.handle }]
     : ref.kind === 'bridge' ? [{ network: ref.network, handle: ref.id }] : [];
-  return { id: newId(), source: 'manual', name: name.replace(/^@/, ''), nicknames: [], phones: ref.kind === 'phone' ? [ref.number] : [], emails: ref.kind === 'email' ? [ref.address] : [], handles, notes: '', links: [{ ref, method: 'confirmed', evidence: 'You added this', linkedAt: now }], rejected: [], updatedAt: now };
+  return { id: newId(), source: 'manual', name, nicknames: [], phones: ref.kind === 'phone' ? [ref.number] : [], emails: ref.kind === 'email' ? [ref.address] : [], handles, notes: '', links: [{ ref, method: 'confirmed', evidence: 'You added this', linkedAt: now }], rejected: [], updatedAt: now };
 }
 
 function createStyles(colors: ThemeColors) {
@@ -250,6 +258,9 @@ function createStyles(colors: ThemeColors) {
     private: { marginHorizontal: 16, marginBottom: 20, padding: 16, gap: 8, borderRadius: 16, backgroundColor: colors.surfaceAlt, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
     privateTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
     grow: { flex: 1 },
+    nameNudge: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 12, backgroundColor: colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
+    nameNudgeText: { flex: 1, color: colors.textSecondary, fontSize: 13, lineHeight: 18 },
+    nameNudgeStrong: { color: colors.text, fontWeight: '600' },
     edit: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 28, paddingHorizontal: 10, borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, backgroundColor: colors.surface },
     editText: { color: colors.text, fontSize: 12, fontWeight: '600' },
     addRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 18, rowGap: 4 },

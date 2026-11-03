@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { StoredMailMessage } from '../connectors/mailApiConnector';
 import { mapBridgeSnapshot } from './bridgedChats';
-import { applyDraft, canReply, channelOf, contactForConversation, defaultChannel, draftOf, draftProblems, fullerName, mergeByContact, sharedWith } from './contactMerge';
+import { applyDraft, canReply, channelOf, contactForConversation, defaultChannel, draftOf, draftProblems, fullerName, mergeByContact, recipientSuggestions, sharedWith } from './contactMerge';
 import { normalizeStoredEmail } from './emailNormalization';
 import { Conversation } from './models';
 import { cardFor, cardRefs, ContactCard, refKey, unlink } from './people';
@@ -130,4 +130,84 @@ test('editing cleans, de-duplicates and checks, and keeps links', () => {
 test('the editor says when another contact already has an identifier', () => {
   const other = card({ id: 'c2', name: 'Dev', phones: ['+15550001234'] });
   assert.deepEqual(sharedWith([card(), other], 'c1', { ...draftOf(card()), phones: ['555 000 1234'] }), [{ value: '555 000 1234', contact: 'Dev' }]);
+});
+
+// Saved email addresses must show the contact's name in every shape of real mail.
+
+test('a bare-address email from a saved contact shows their name, even when you replied last', () => {
+  const [thread] = normalizeStoredEmail([
+    mail({ sourceMessageId: '<n1@x>', from: 'ada@example.com', sentAt: '2026-11-01T09:00:00Z' }),
+    mail({ sourceMessageId: '<n2@x>', mailbox: 'Sent', from: 'me@example.com', to: ['Ada@Example.com'], sentAt: '2026-11-01T10:00:00Z' }),
+  ]);
+  assert.equal(thread.participants[0].name, 'ada@example.com', 'the platform only gave an address');
+  const [shown] = mergeByContact([thread], [card({ name: 'Ada Lovelace', emails: ['ADA@example.com'] })]);
+  assert.equal(shown.participants[0].name, 'Ada Lovelace');
+});
+
+test('a +tag alias or a Gmail address with dots is the same person', () => {
+  const [alias] = normalizeStoredEmail([mail({ from: 'priya.shah+travel@example.com' })]);
+  assert.equal(mergeByContact([alias], [card({ emails: ['priya.shah@example.com'] })])[0].participants[0].name, 'Priya Shah');
+  const [gmail] = normalizeStoredEmail([mail({ from: 'Priya.Shah@googlemail.com' })]);
+  assert.equal(mergeByContact([gmail], [card({ emails: ['priyashah@gmail.com'] })])[0].participants[0].name, 'Priya Shah');
+  assert.equal(mergeByContact([alias], [card({ emails: ['priya.shahs@example.com'] })])[0].participants[0].name, 'priya.shah+travel@example.com', 'a different name is a different person');
+});
+
+test('in a group email, each saved person shows under their contact name, in the title, sender lines and preview', () => {
+  const [group] = normalizeStoredEmail([
+    mail({ sourceMessageId: '<g1@x>', from: 'priya.shah@example.com', to: ['me@example.com', 'dev@example.com'], sentAt: '2026-11-01T09:00:00Z' }),
+    mail({ sourceMessageId: '<g2@x>', from: 'P. Shah <priya.shah@example.com>', to: ['me@example.com', 'dev@example.com'], sentAt: '2026-11-01T10:00:00Z', text: 'Count me in' }),
+  ]);
+  assert.equal(group.groupTitle, 'dev@example.com and P.');
+  const [shown] = mergeByContact([group], [card({ emails: ['priya.shah@example.com'] }), card({ id: 'c2', name: 'Dev Mehta', emails: ['dev@example.com'] })]);
+  assert.equal(shown.id, group.id, 'a group stays its own conversation');
+  assert.deepEqual(shown.participants.map((person) => person.name).sort(), ['Dev Mehta', 'Priya Shah']);
+  assert.equal(shown.groupTitle, 'Dev and Priya');
+  assert.equal(shown.preview, 'Priya: Count me in');
+  const sender = shown.participants.find((person) => person.id === shown.messages[1].senderPersonId);
+  assert.equal(sender?.name, 'Priya Shah', 'the sender line reads the renamed person');
+});
+
+test('a bridged group keeps the name its members gave it, with contact names inside', () => {
+  const [group] = mapBridgeSnapshot({ userId: '@me:x', rooms: [{ id: '!g:x', network: 'whatsapp', name: 'Climbing crew', members: [{ id: '@whatsapp_15550001234:x', displayName: '+1 555 000 1234' }, { id: '@whatsapp_15550009999:x', displayName: 'Dev' }], events: [] }] });
+  const [shown] = mergeByContact([group], [card({ phones: ['+1 555 000 1234'] })]);
+  assert.equal(shown.groupTitle, 'Climbing crew');
+  assert.deepEqual(shown.participants.map((person) => person.name), ['Priya Shah', 'Dev']);
+});
+
+test('a company thread written from two mailboxes matches a contact saved with either one', () => {
+  const [thread] = normalizeStoredEmail([
+    mail({ sourceMessageId: '<s1@x>', from: 'hello@studio.example.com', sentAt: '2026-11-01T09:00:00Z' }),
+    mail({ sourceMessageId: '<s2@x>', from: 'support@studio.example.com', sentAt: '2026-11-01T10:00:00Z' }),
+  ]);
+  assert.equal(mergeByContact([thread], [card({ name: 'Studio Ana', emails: ['hello@studio.example.com'] })])[0].participants[0].name, 'Studio Ana');
+});
+
+test('a contact whose “name” is only its email address shows the platform’s name and asks for a real one', () => {
+  const [email] = normalizeStoredEmail([mail({ from: 'Maria López <maria@example.org>' })]);
+  const unnamed = card({ name: 'maria@example.org', emails: ['maria@example.org'] });
+  assert.equal(mergeByContact([email], [unnamed])[0].participants[0].name, 'Maria López');
+  assert.equal(draftOf(unnamed).name, '', 'the editor starts with an empty name');
+  assert.deepEqual(draftProblems(draftOf(unnamed)), ['Add a name.']);
+});
+
+test('the To field offers saved contacts by name, then people you emailed, each address once', () => {
+  const emailed = [
+    { address: 'priya.shah@example.com', name: 'P. Shah', initials: 'PS', avatarUrls: ['https://example.com/p.png'] },
+    { address: 'dev@example.com', name: 'dev@example.com', initials: 'D', avatarUrls: [] },
+    { address: 'news@shop.example.com', name: 'Shop', initials: 'S', avatarUrls: [] },
+  ];
+  const cards = [
+    card({ emails: ['Priya.Shah@example.com', 'priya@work.example.com'] }),
+    card({ id: 'c2', name: 'Dev Mehta', emails: ['dev@example.com'] }),
+    card({ id: 'c3', name: 'ada@example.com', emails: ['ada@example.com'] }),
+  ];
+  const suggestions = recipientSuggestions(emailed, cards);
+  assert.deepEqual(suggestions.map((item) => [item.address, item.name]), [
+    ['ada@example.com', 'ada@example.com'],
+    ['dev@example.com', 'Dev Mehta'],
+    ['priya.shah@example.com', 'Priya Shah'],
+    ['priya@work.example.com', 'Priya Shah'],
+    ['news@shop.example.com', 'Shop'],
+  ]);
+  assert.deepEqual(suggestions[2].avatarUrls, ['https://example.com/p.png'], 'the picture from mail stays');
 });

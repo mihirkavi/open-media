@@ -1,5 +1,5 @@
 import { normalizeEmail, normalizePhone } from './contactCleaning';
-import { ContactCard, ContactHandle, HandleNetwork, normalizeHandle, samePhone } from './people';
+import { ContactCard, ContactHandle, contactName, HandleNetwork, normalizeHandle, sameEmail, samePhone } from './people';
 
 /**
  * Importing contacts (ADR 0023): vCard files (Apple Contacts, Google Contacts, Outlook, Android),
@@ -234,7 +234,7 @@ export function planImport(cards: ContactCard[], imported: ImportedContact[], ne
   const fresh = new Set<string>();
   let unchanged = 0;
   for (const contact of imported) {
-    const matches = working.filter((card) => contact.emails.some((email) => card.emails.some((saved) => normalizeEmail(saved) === email))
+    const matches = working.filter((card) => contact.emails.some((email) => card.emails.some((saved) => sameEmail(saved, email)))
       || contact.phones.some((phone) => card.phones.some((saved) => samePhone(saved, phone))));
     if (matches.length === 1) {
       const card = matches[0];
@@ -245,7 +245,7 @@ export function planImport(cards: ContactCard[], imported: ImportedContact[], ne
       continue;
     }
     const card: ContactCard = {
-      id: newId(), source: 'manual', name: contact.name || contact.emails[0] || contact.phones[0] || 'Unnamed contact', nicknames: contact.nicknames, phones: contact.phones,
+      id: newId(), source: 'manual', name: contact.name, nicknames: contact.nicknames, phones: contact.phones,
       emails: contact.emails, handles: contact.handles, notes: contact.notes, links: [], rejected: [], updatedAt: now,
     };
     working.push(card);
@@ -258,12 +258,12 @@ export function planImport(cards: ContactCard[], imported: ImportedContact[], ne
 
 /** The card with whatever the import adds; the same object when it adds nothing. */
 function addTo(card: ContactCard, contact: ImportedContact, now: string): ContactCard {
-  const emails = contact.emails.filter((email) => !card.emails.some((saved) => normalizeEmail(saved) === email));
+  const emails = contact.emails.filter((email) => !card.emails.some((saved) => sameEmail(saved, email)));
   const phones = contact.phones.filter((phone) => !card.phones.some((saved) => samePhone(saved, phone)));
   const handles = contact.handles.filter((item) => !(card.handles ?? []).some((saved) => saved.network === item.network && normalizeHandle(saved.network, saved.handle) === normalizeHandle(item.network, item.handle)));
   const nicknames = contact.nicknames.filter((nickname) => !card.nicknames.some((saved) => saved.toLowerCase() === nickname.toLowerCase()));
   const notes = contact.notes && !card.notes.includes(contact.notes) ? [card.notes, contact.notes].filter(Boolean).join('\n') : card.notes;
-  const name = card.name && card.name !== 'Unnamed contact' ? card.name : contact.name || card.name;
+  const name = contactName(card) && card.name !== 'Unnamed contact' ? card.name : contact.name || card.name;
   if (!emails.length && !phones.length && !handles.length && !nicknames.length && notes === card.notes && name === card.name) return card;
   return { ...card, name, emails: [...card.emails, ...emails], phones: [...card.phones, ...phones], handles: [...(card.handles ?? []), ...handles], nicknames: [...card.nicknames, ...nicknames], notes, updatedAt: now };
 }

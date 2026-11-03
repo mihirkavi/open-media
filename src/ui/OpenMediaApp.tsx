@@ -49,7 +49,7 @@ import {
 import { PeopleProvider, PersonTarget, useContactsStore } from "./people";
 import { PersonProfile } from "./PersonProfile";
 import { encounterForConversation } from "../domain/people";
-import { mergeByContact } from "../domain/contactMerge";
+import { mergeByContact, recipientSuggestions } from "../domain/contactMerge";
 import { loadPublicPerson } from "../data/peopleService";
 
 export type PrimaryDestination = "feed" | "clips" | "messages";
@@ -354,6 +354,8 @@ export function OpenMediaApp({
     () => (messageMode === "open_media" ? mergeByContact(conversations, contacts.cards) : conversations),
     [contacts.cards, conversations, messageMode],
   );
+  // The To field offers saved contacts under their names, then everyone you have emailed.
+  const recipientContacts = useMemo(() => recipientSuggestions(emailContacts, contacts.cards), [contacts.cards, emailContacts]);
   const openPerson = useCallback((target: PersonTarget) => {
     setPerson(target);
     if (Platform.OS !== "web" || typeof window === "undefined") return;
@@ -488,7 +490,7 @@ export function OpenMediaApp({
             onStartConversation={beginConversation}
             onSendNewEmail={sendNewEmail}
             emailFrom={sendingMailboxes[0]?.email}
-            emailContacts={emailContacts}
+            emailContacts={recipientContacts}
             onSetBlocked={updateBlock}
             onReport={reportConversation}
             openConversationId={openConversationId}

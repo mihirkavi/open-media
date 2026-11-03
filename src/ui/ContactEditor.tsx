@@ -5,7 +5,7 @@ import { Loader } from './Loader';
 
 import { applyDraft, ContactDraft, draftOf, draftProblems, sharedWith } from '../domain/contactMerge';
 import { networks } from '../domain/networkPosts';
-import { ContactCard, HandleNetwork, phoneNetworks } from '../domain/people';
+import { ContactCard, contactName, HandleNetwork, phoneNetworks } from '../domain/people';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { sourceLabel } from './SourceMarker';
@@ -92,7 +92,7 @@ export function ContactEditor({ card, cards, onSave, onCancel, onDelete }: { car
   return <View style={styles.editor}>
     <TextInput
       accessibilityLabel="Name"
-      autoFocus={!card.name}
+      autoFocus={!contactName(card)}
       value={name}
       onChangeText={setName}
       placeholder="Name"

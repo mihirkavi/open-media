@@ -83,6 +83,23 @@ export function refKey(ref: IdentityRef): string {
   }
 }
 
+/**
+ * Two addresses are the same mailbox: case never matters, a "+tag" after the name is the same
+ * inbox (priya+travel@ is priya@), and Gmail ignores dots in the name.
+ */
+export function sameEmail(left: string, right: string): boolean {
+  const a = canonicalEmail(left);
+  return Boolean(a) && a === canonicalEmail(right);
+}
+
+function canonicalEmail(value: string): string {
+  const [local = '', domain = ''] = normalizeEmail(value).split('@');
+  if (!local || !domain) return normalizeEmail(value);
+  const gmail = domain === 'gmail.com' || domain === 'googlemail.com';
+  const name = local.split('+')[0] || local;
+  return `${gmail ? name.replace(/\./g, '') : name}@${gmail ? 'gmail.com' : domain}`;
+}
+
 /** Two numbers are the same when equal, or when one lacks a country code and the last 10 digits agree. */
 export function samePhone(left: string, right: string): boolean {
   const a = normalizePhone(left);
@@ -122,7 +139,7 @@ export function reconcile(cards: ContactCard[], encounters: Encounter[], now = n
     const emails = emailsOf(encounter);
     const phones = phonesOf(encounter);
     const byIdentifier = eligible.flatMap((card) => {
-      if (emails.some((email) => card.emails.map(normalizeEmail).includes(email))) return [{ card, evidence: 'Same email address' }];
+      if (emails.some((email) => card.emails.some((saved) => sameEmail(saved, email)))) return [{ card, evidence: 'Same email address' }];
       if (phones.some((phone) => card.phones.some((saved) => samePhone(saved, phone)))) return [{ card, evidence: 'Same phone number' }];
       return [];
     });
@@ -190,7 +207,7 @@ export function holdsHandle(card: ContactCard, ref: IdentityRef, { phones = true
 /** True when the card holds this identity directly: as an email, phone or handle saved on it. */
 export function holdsRef(card: ContactCard, ref: IdentityRef): boolean {
   if (card.rejected.includes(refKey(ref))) return false;
-  if (ref.kind === 'email') return card.emails.some((email) => normalizeEmail(email) === normalizeEmail(ref.address));
+  if (ref.kind === 'email') return card.emails.some((email) => sameEmail(email, ref.address));
   if (ref.kind === 'phone') return card.phones.some((phone) => samePhone(phone, ref.number));
   return holdsHandle(card, ref);
 }
@@ -259,6 +276,20 @@ export function importDeviceContacts(cards: ContactCard[], contacts: DeviceConta
   return [...imported, ...kept.filter((card) => !card.deviceId || !seen.has(card.deviceId))];
 }
 
+/**
+ * The name the viewer gave a contact, or '' when they gave none: a card whose "name" is only an
+ * email address or phone number (saved before they typed a name) has no name to show.
+ */
+export function contactName(card: ContactCard | undefined): string {
+  const name = card?.name.trim() ?? '';
+  return name && !name.includes('@') && !/^\+?[\d\s().-]{5,}$/.test(name) ? name : '';
+}
+
+/** How a contact is listed: its name, else its first email address or number. */
+export function contactLabel(card: ContactCard): string {
+  return contactName(card) || card.emails[0] || card.phones[0] || card.handles?.[0]?.handle || 'Unnamed contact';
+}
+
 /** Picks the fullest name a platform gives: a real name before a handle, number, id or address. */
 export function fullerName(...candidates: (string | undefined)[]): string {
   const values = candidates.map((value) => value?.trim() ?? '').filter(Boolean);
@@ -277,6 +308,20 @@ export function isContactCard(value: unknown): value is ContactCard {
 }
 
 const bridgedNetworks: BridgedNetwork[] = ['whatsapp', 'telegram', 'signal', 'gmessages', 'gvoice', 'instagram', 'messenger', 'linkedin', 'twitter', 'bluesky', 'slack', 'discord'];
+
+/**
+ * The identity behind one person in a conversation: their email address in email, their chat id
+ * on a bridged network, their handle on Open Media. Used for people in groups too.
+ */
+export function refForParticipant(conversation: Conversation, person: Conversation['participants'][number]): IdentityRef | undefined {
+  const email = person.identities.find((identity) => identity.kind === 'email')?.value;
+  if (conversation.email && email) return { kind: 'email', address: email };
+  const handle = person.identities.find((identity) => identity.source === 'open_media')?.value;
+  if (handle) return { kind: 'open_media', handle: handle.replace(/^@/, '') };
+  const bridged = conversation.sourceSummary.find((source): source is BridgedNetwork => (bridgedNetworks as string[]).includes(source));
+  if (bridged) return { kind: 'bridge', network: bridged, id: person.id.replace(/^@/, '').split(':')[0].replace(new RegExp(`^${bridged}_`), '') };
+  return undefined;
+}
 
 /**
  * Who a one-to-one conversation is with, as an identity the viewer can link. Group chats have no

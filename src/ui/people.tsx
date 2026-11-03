@@ -4,7 +4,7 @@ import { Image, Platform, Pressable, StyleProp, StyleSheet, View, ViewStyle } fr
 import { readDeviceContacts } from '../contacts/deviceContacts';
 import { deleteContactCard, loadContactCards, loadPublicPerson, PublicPerson, saveContactCards } from '../data/peopleService';
 import { networks } from '../domain/networkPosts';
-import { cardFor, ContactCard, confirmLink, Encounter, IdentityRef, importDeviceContacts, LinkSuggestion, reconcile, refKey, rejectSuggestion, unlink } from '../domain/people';
+import { cardFor, ContactCard, confirmLink, contactName, Encounter, IdentityRef, importDeviceContacts, LinkSuggestion, reconcile, refKey, rejectSuggestion, unlink } from '../domain/people';
 import { SocialPost } from '../domain/posts';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
@@ -132,7 +132,7 @@ export function useContactsStore(enabled: boolean, encounters: Encounter[]): Con
 /** The name the viewer saved for this person, when they have one (ADR 0023). */
 export function useSavedName(ref: IdentityRef): string | undefined {
   const cards = useContext(PeopleContext)?.contacts?.cards;
-  return useMemo(() => (cards?.length ? cardFor(cards, ref)?.name.trim() || undefined : undefined), [cards, refKey(ref)]);
+  return useMemo(() => (cards?.length ? contactName(cardFor(cards, ref)) || undefined : undefined), [cards, refKey(ref)]);
 }
 
 export function newId(): string {

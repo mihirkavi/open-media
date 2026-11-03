@@ -5,7 +5,7 @@ import { Loader } from './Loader';
 
 import { loadPublicPerson, PublicPerson, saveLinkedAccounts } from '../data/peopleService';
 import { NetworkId, networks } from '../domain/networkPosts';
-import { ContactCard, handleRef, IdentityRef } from '../domain/people';
+import { ContactCard, contactName, handleRef, IdentityRef } from '../domain/people';
 import { initialsFor } from '../domain/publicPosts';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
@@ -31,7 +31,7 @@ export function PeopleSettings({ handle }: { handle: string }) {
   const [busy, setBusy] = useState('');
   const [message, setMessage] = useState('');
   const [showContacts, setShowContacts] = useState(false);
-  const sortedContacts = useMemo(() => [...(contacts?.cards ?? [])].sort((a, b) => a.name.localeCompare(b.name)), [contacts?.cards]);
+  const sortedContacts = useMemo(() => [...(contacts?.cards ?? [])].sort((a, b) => (contactName(a) || a.emails[0] || '').localeCompare(contactName(b) || b.emails[0] || '')), [contacts?.cards]);
 
   useEffect(() => {
     loadPublicPerson(handle).then((person) => setAccounts(person?.linkedAccounts ?? [])).catch(() => setAccounts([]));
@@ -103,22 +103,22 @@ export function PeopleSettings({ handle }: { handle: string }) {
 }
 
 /** Where tapping a contact goes: their Open Media profile when linked, else their email or phone. */
-function contactTarget(card: ContactCard): { ref: IdentityRef; name: string } | undefined {
+function contactTarget(card: ContactCard): { ref: IdentityRef; name?: string } | undefined {
   const linked = card.links.find((link) => link.ref.kind === 'open_media') ?? card.links[0];
   const handle = card.handles?.find((item) => item.handle.trim());
   const ref: IdentityRef | undefined = linked?.ref ?? (card.emails[0] ? { kind: 'email', address: card.emails[0] } : card.phones[0] ? { kind: 'phone', number: card.phones[0] } : handle ? handleRef(handle) : undefined);
-  return ref ? { ref, name: card.name } : undefined;
+  return ref ? { ref, name: contactName(card) || undefined } : undefined;
 }
 
-function ContactRow({ card, onOpen, styles, colors }: { card: ContactCard; onOpen: (target: { ref: IdentityRef; name: string }) => void; styles: ReturnType<typeof createStyles>; colors: ThemeColors }) {
+function ContactRow({ card, onOpen, styles, colors }: { card: ContactCard; onOpen: (target: { ref: IdentityRef; name?: string }) => void; styles: ReturnType<typeof createStyles>; colors: ThemeColors }) {
   const target = contactTarget(card);
   const onOpenMedia = card.links.some((link) => link.ref.kind === 'open_media');
   const detail = [card.emails[0], card.phones[0]].filter(Boolean).join(' · ');
   return <Pressable accessibilityRole={target ? 'link' : undefined} disabled={!target} onPress={() => target && onOpen(target)} style={({ pressed }) => [styles.row, styles.contactRow, pressed && styles.pressed]}>
-    <View style={styles.initials}><Text style={styles.initialsText}>{initialsFor(card.name || detail || '?')}</Text></View>
+    <View style={styles.initials}><Text style={styles.initialsText}>{initialsFor(contactName(card) || detail || '?')}</Text></View>
     <View style={styles.grow}>
-      <Text numberOfLines={1} style={styles.contactName}>{card.name || detail}</Text>
-      {detail || onOpenMedia ? <Text numberOfLines={1} style={styles.rowMeta}>{[onOpenMedia ? 'On Open Media' : '', card.name ? detail : ''].filter(Boolean).join(' · ')}</Text> : null}
+      <Text numberOfLines={1} style={styles.contactName}>{contactName(card) || detail}</Text>
+      {detail || onOpenMedia ? <Text numberOfLines={1} style={styles.rowMeta}>{[onOpenMedia ? 'On Open Media' : '', contactName(card) ? detail : ''].filter(Boolean).join(' · ')}</Text> : null}
     </View>
     {target ? <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} /> : null}
   </Pressable>;
