@@ -121,6 +121,40 @@ To make a site read well, publish a \`/resume.json\` or a JSON-LD Person.
 `,
   },
   {
+    path: '/docs/web-feeds', title: 'Web feeds: how Open Media reads RSS, Atom and JSON Feed',
+    description: 'How Open Media follows blogs, news sites, podcasts and weather alerts for people who ask it to: the user agent, how often feeds are read, conditional requests, robots.txt, what is shown (a headline, a short excerpt, one image and a link back), and the official mark for news outlets and weather services.',
+    body: (origin) => `# Web feeds: how Open Media reads RSS, Atom and JSON Feed
+
+People can follow a blog, news site, podcast or weather-alert feed in their Open Media Feed (ADR 0024): by typing or pasting a site in Search, through an agent, or by importing an OPML file from another reader. This page is for publishers and agents.
+
+## What Open Media reads
+
+- RSS 2.0, RSS 1.0, Atom (RFC 4287) and JSON Feed 1.1, with Media RSS, \`content:encoded\`, Dublin Core, enclosures, Apple's podcast tags and CAP 1.2 alert fields.
+- Feeds are found through \`<link rel="alternate">\` autodiscovery on the page a person names. robots.txt is obeyed for that page (a group for \`OpenMediaFeedReader\`, else \`*\`). A feed a person chose to follow is then read for them, as feed readers do.
+
+## How politely
+
+- User agent \`OpenMediaFeedReader/1.0 (+${origin}/docs/web-feeds)\`.
+- Conditional requests with your \`ETag\` and \`Last-Modified\`; a \`304\` costs you nothing.
+- At most every 30 minutes, longer when your \`ttl\` or \`Cache-Control: max-age\` asks (up to a day), never during your \`skipHours\` or \`skipDays\`. One read serves everyone who follows the feed.
+- \`429\` and \`503\` with \`Retry-After\` are obeyed; other failures back off from 30 minutes to a day. \`301\` and \`308\` move the feed; \`410\` stops it.
+- https on port 443 only, public addresses only (checked after each redirect), up to 2 MB and 10 seconds per read.
+
+## What people see
+
+A card with your site's icon and name, the headline, a short excerpt (your summary when you publish one, at most 280 characters), one https image, and a prominent link to your page. Full articles are never shown or stored. Your feed's copyright line is shown in "Why this?". Feed HTML is never rendered: scripts, embeds, styles and tracking pixels are dropped.
+
+## The official mark
+
+Feeds served from the own domain of a major news outlet or public weather service (for example \`bbc.co.uk\`, \`nytimes.com\`, \`weather.gov\`, \`metoffice.gov.uk\`) show a blue tick labelled "Official feed from <domain>". It says only where the feed came from. The list is in Open Media's source code (\`src/domain/webFeedDirectory.ts\`); publishers can ask to be added.
+
+## For agents
+
+- \`preview_web_feed\` on \`${origin}/open/mcp\`, \`GET /v1/web-feeds/preview?url=\` and the WebMCP tool \`preview_open_media_web_feed\`: read-only.
+- On \`${origin}/me/mcp\`: \`list_web_feeds\`, \`follow_web_feed\`, \`unfollow_web_feed\`, \`get_web_feed_items\`, \`import_opml\`, \`export_opml\` (REST under \`/v1/me/web-feeds\`).
+`,
+  },
+  {
     path: '/docs/feed-lenses', title: 'Feed lenses: how Open Media orders the Feed',
     description: 'Raw, Relevant and every shared feed algorithm are small JSON manifests run by one open-source runner. The format, the built-in lenses, and how agents write, preview, save and share one.',
     body: (origin) => `# Feed lenses
@@ -857,6 +891,7 @@ Open Media is a free, open-source social app (iPhone, Android, web) with one fee
 - [Authentication](${origin}/auth.md): no credential for public data; the person's bearer token for their account.
 - [Feed lenses](${origin}/docs/feed-lenses.md): how Raw, Relevant and shared feed algorithms work, and how agents write, preview, save and share one.
 - [Profile import](${origin}/docs/profile-import.md): filling a profile from the person's own LinkedIn PDF or export, or their website, with consent.
+- [Web feeds](${origin}/docs/web-feeds.md): how Open Media reads RSS, Atom and JSON Feed for the people who follow them, and the official mark for news and weather feeds.
 - [Developer portal](${origin}/developers.md), [sandbox and test mode](${origin}/sandbox.md) and [pricing](${origin}/pricing.md) (free).
 - [OpenAPI 3.1](${origin}/v1/openapi.json) and the [API index](${origin}/v1).
 
@@ -902,6 +937,7 @@ export function docsLlmsTxt(origin: string): string {
 - [Agent guide](${origin}/agents.md)
 - [Feed lenses](${origin}/docs/feed-lenses.md)
 - [Profile import](${origin}/docs/profile-import.md)
+- [Web feeds](${origin}/docs/web-feeds.md)
 - [OpenAPI 3.1](${origin}/v1/openapi.json)
 - [Public MCP server card](${origin}/open/mcp/server-card)
 - [Account MCP server card](${origin}/me/mcp/server-card)
@@ -928,7 +964,7 @@ export function searchDocs(origin: string, query: string) {
 
 /** NLWeb schema map: which schema.org types each page and feed carries. */
 export function schemaMapXml(origin: string): string {
-  const types: Record<string, string> = { '/': 'SoftwareApplication', '/agents': 'TechArticle', '/docs': 'TechArticle', '/docs/profile-import': 'TechArticle', '/developers': 'TechArticle', '/sandbox': 'TechArticle', '/auth': 'TechArticle', '/pricing': 'WebPage', '/about': 'AboutPage', '/contact': 'ContactPage', '/privacy': 'WebPage' };
+  const types: Record<string, string> = { '/': 'SoftwareApplication', '/agents': 'TechArticle', '/docs': 'TechArticle', '/docs/profile-import': 'TechArticle', '/docs/web-feeds': 'TechArticle', '/developers': 'TechArticle', '/sandbox': 'TechArticle', '/auth': 'TechArticle', '/pricing': 'WebPage', '/about': 'AboutPage', '/contact': 'ContactPage', '/privacy': 'WebPage' };
   const entries = [...pages.map((page) => [`${origin}${page.path}`, types[page.path] ?? 'WebPage']), [`${origin}/feeds/posts.jsonl`, 'SocialMediaPosting']];
   return `<?xml version="1.0" encoding="UTF-8"?>\n<schemamap xmlns="http://www.nlweb.ai/schemas/schemamap/0.1">\n${entries.map(([loc, type]) => `  <url>\n    <loc>${loc}</loc>\n    <schema>https://schema.org/${type}</schema>\n    <lastmod>${siteUpdated}</lastmod>\n  </url>`).join('\n')}\n</schemamap>\n`;
 }

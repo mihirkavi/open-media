@@ -1,5 +1,6 @@
 import { explainLensPost, FeedLens, LensContext, lensById, runLens } from './feedLenses';
 import type { PostEvent, PostListing } from './listings';
+import type { WebFeedPostInfo } from './webFeeds';
 
 export type PostKind = 'text' | 'image' | 'video' | 'link';
 /** The built-in lenses' ids. Any lens (ADR 0017) can stand where a mode is accepted. */
@@ -75,6 +76,8 @@ export interface SocialPost {
   event?: PostEvent;
   /** The body is a free preview; the rest is paid for once. */
   paid?: PostPaid;
+  /** An item from a web feed the viewer follows (ADR 0024): RSS, Atom or JSON Feed. */
+  webFeed?: WebFeedPostInfo;
 }
 
 export interface FeedExplanation {

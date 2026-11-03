@@ -28,6 +28,7 @@ import { fromJsonResume, fromLinkedInExport, isEmptyProfessional, parseProfessio
 import { applyProposals, chooseProposals, ProfileProposal, proposalsFromProfessional } from '../../../src/domain/profileImport';
 import { applicationMessage, tailorProfile } from './careerAssist.js';
 import { linkedInPdfProposals, ProfileImportError, readPortfolio } from './profileImport.js';
+import { feedPreview, findWebFeed, WebFeedAccount, WebFeedApiError } from './webFeeds.js';
 import { noResumeHtml, renderCvYaml, resumeHtml, resumePageHeaders, validateJsonResume } from './resumeFormats.js';
 import { UserFacingError } from './errors.js';
 import { deleteLens as deleteStoredLens, draftLens, findLens, installLens as installSharedLens, LensApiError, lensView, listLenses, myLenses, myLensHistory, publicLensHistory, resolveLens, revertMyLens, saveLens as saveStoredLens, tuneDraft, tuneMyLens } from './feedLensApi.js';
@@ -93,6 +94,18 @@ async function portfolioCall<T>(run: () => Promise<T>): Promise<T> {
   catch (error) { throw error instanceof ProfileImportError ? new AgentError(error.status, error.status === 403 ? 'robots_disallowed' : 'bad_request', error.message) : error; }
 }
 
+/** Web-feed refusals (not a feed, robots.txt, unreachable) are written for people (ADR 0024). */
+async function webFeedCall<T>(run: () => Promise<T>): Promise<T> {
+  try { return await run(); }
+  catch (error) { throw error instanceof WebFeedApiError ? new AgentError(error.status, error.status === 403 ? 'robots_disallowed' : error.status === 404 ? 'no_feed' : 'bad_request', error.message) : error; }
+}
+
+/** The feed behind a site or feed address, with its newest items, for anyone: nothing is saved. */
+export async function previewWebFeed(url: unknown) {
+  const found = await webFeedCall(() => findWebFeed(url));
+  return { ...feedPreview(found), note: 'A preview: nothing was followed. To put this feed in a person’s Feed, use follow_web_feed on /me/mcp with their token, or they type the address in Search.' };
+}
+
 /** What a site says about its owner, for anyone (WebMCP, public MCP): proposals only, nothing is saved. */
 export async function previewProfileFromUrl(env: AgentEnv, url: unknown) {
   const read = await portfolioCall(() => readPortfolio(url, { allowLocal: env.PROFILE_IMPORT_ALLOW_LOCAL === 'true' }));
@@ -109,7 +122,7 @@ export function isAgentPath(pathname: string, method: string): boolean {
   const path = pathname.replace(/\/+$/, '') || '/';
   if (isSitePath(path) || path === '/agent/identity' || path === '/ask' || path === '/feeds/posts.jsonl' || path.startsWith('/v1/auth/')) return true;
   if (['/', '/v1', '/v1/openapi.json', '/llms.txt', '/.well-known/mcp.json', '/.well-known/mcp-server', '/open/mcp', '/me/mcp'].includes(path)) return true;
-  if (['/v1/feed', '/v1/search', '/v1/networks', '/v1/settings', '/v1/about', '/v1/events/upcoming', '/v1/transparency', '/v1/jobs', '/v1/profile-preview'].includes(path)) return true;
+  if (['/v1/feed', '/v1/search', '/v1/networks', '/v1/settings', '/v1/about', '/v1/events/upcoming', '/v1/transparency', '/v1/jobs', '/v1/profile-preview', '/v1/web-feeds/preview'].includes(path)) return true;
   if (path === '/v1/lenses' || path.startsWith('/v1/lenses/')) return true;
   if (path.startsWith('/v1/operator/') || path.startsWith('/v1/verification-tasks')) return true;
   if (method === 'GET' && /^\/v1\/listings\/[^/]+\/checks$/.test(path)) return true;
@@ -1035,6 +1048,21 @@ export class Account {
   }
 
   /** The Feed through a lens with the person's own follows, the way their app shows it. */
+  // ─── Web feeds (ADR 0024) ───
+  private get webFeedAccount() { return new WebFeedAccount((method, path, body, prefer) => this.rest(method, path, body, prefer)); }
+  webFeeds() { return this.webFeedAccount.list(); }
+  async followWebFeed(body: Record<string, unknown>) {
+    if (!(await withinLimit(this.env.PUBLIC_API_RATE_LIMITER, `web-feed:${this.userId}`))) throw new AgentError(429, 'rate_limited', 'Too many feeds looked up in a short time. Wait a minute and try again.');
+    return webFeedCall(() => this.webFeedAccount.follow(body));
+  }
+  unfollowWebFeed(target: unknown) { return webFeedCall(() => this.webFeedAccount.unfollow(target)); }
+  webFeedItems(limit?: number) { return this.webFeedAccount.items({ limit }); }
+  importOpml(body: Record<string, unknown>) { return webFeedCall(() => this.webFeedAccount.importOpml(body)); }
+  async exportOpml() {
+    const me = await this.me().catch(() => undefined);
+    return this.webFeedAccount.exportOpml(me?.displayName);
+  }
+
   async myFeed(options: { lens?: unknown; manifest?: unknown; request?: unknown; sources?: Source[]; kind?: 'feed' | 'clips'; cursor?: string }) {
     const lens = await lensCall(() => resolveLens(this.env, options));
     const followedAuthorIds = lens.permissions.includes('follows') ? await this.followedAuthorIds() : undefined;
@@ -1232,6 +1260,7 @@ function registerPublicTools(server: McpServer, env: AgentEnv, origin: string) {
   tool(server, 'find_jobs', { title: 'Find jobs', description: 'Open job posts on Open Media, newest first, with pay, place, remote, the kind of job and the employer’s apply link. Filter by words (role, skill, city) and remote. Only jobs posted on Open Media: LinkedIn and other job boards are not searched. Open Media never applies for anyone; to help the person apply, use draft_job_application with their account.', input: { query: z.string().max(80).optional(), remote: z.boolean().optional(), limit: z.number().int().min(1).max(50).optional() }, readOnly: true, view: postsViewUri },
     (args) => jobs(env, origin, { query: args.query as string | undefined, remote: args.remote as boolean | undefined, limit: args.limit as number | undefined }));
   tool(server, 'preview_profile_from_url', { title: 'Preview a profile from a website', description: 'Reads a public https website the way Open Media’s profile import does and returns what it says about its owner: name, bio, headline, location, work, education, skills, projects and links, each with its source (JSON Resume, JSON-LD schema.org Person, h-card, Open Graph, rel="me", page headings). Obeys robots.txt (user agent OpenMediaProfileReader), reads at most four pages plus /resume.json, and saves nothing. To fill a profile, the owner uses import_portfolio on /me/mcp.', input: { url: z.string().max(300).describe('A public https site, e.g. https://asha.example') }, readOnly: true }, (args) => previewProfileFromUrl(env, args.url));
+  tool(server, 'preview_web_feed', { title: 'Preview a web feed', description: 'Finds the web feed (RSS, Atom or JSON Feed) behind a site or feed address — e.g. theverge.com, https://simonwillison.net/atom/everything/ — and returns its title, format, whether it is an official feed from a major news outlet or weather service, how often Open Media reads it, and its five newest items (headline, short excerpt, link). Reads politely (user agent OpenMediaFeedReader, conditional requests, robots.txt for the home page) and saves nothing. To follow it, use follow_web_feed on /me/mcp.', input: { url: z.string().max(2048).describe('A site or feed address, e.g. theverge.com') }, readOnly: true }, (args) => previewWebFeed(args.url));
   tool(server, 'list_networks', { title: 'List networks and capabilities', description: 'Every network Open Media connects to and exactly what works today: open networks, email, chat bridges running on this server, and networks that cannot be reached.', input: {}, readOnly: true }, () => networksDescription(env));
   tool(server, 'find_setting', { title: 'Find a setting', description: 'Find where a control lives in the Open Media app, e.g. “dark mode”, “stop posting to farcaster”, “export my data”.', input: { query: z.string().min(1).max(120) }, readOnly: true }, (args) => settingsLookup(String(args.query)));
   tool(server, 'get_listing_checks', { title: 'What was checked on a listing', description: 'For a public listing: whether it is clear or getting a closer look, how many verified people checked its claims, each claim with its outcome, and the public pages they cited.', input: { postId: z.string() }, readOnly: true }, (args) => listingChecks(env, String(args.postId)));
@@ -1314,6 +1343,12 @@ function registerAccountTools(server: McpServer, account: Account) {
   tool(server, 'get_my_identity', { title: 'My identity and privacy', description: 'The person’s identity tier (2 handle only, 3 declared name, 4 verified, 5 verified with legal name shown), whether they have the blue tick, the name others see, public or private, verification status and how many follow requests wait.', input: {}, readOnly: true }, () => account.identity());
   tool(server, 'set_my_privacy', { title: 'Set name and privacy', description: 'Change which name others see (handle_only, declared, or verified_legal once verified) and whether the account is public or private. Confirm with the person first; private hides posts from everyone but accepted followers.', input: { nameDisclosure: z.enum(['handle_only', 'declared', 'verified_legal']).optional(), visibility: z.enum(['public', 'private']).optional() }, readOnly: false }, (args) => account.setIdentity(args));
   tool(server, 'start_identity_verification', { title: 'Start identity verification', description: 'Returns a Stripe Identity link for the person to open themselves (document plus selfie). Never ask the person for document details yourself. Says so when verification is not available on this server.', input: {}, readOnly: false }, () => account.startVerification());
+  tool(server, 'list_web_feeds', { title: 'My web feeds', description: 'The web feeds (RSS, Atom, JSON Feed) the person follows: blogs, news sites, podcasts and weather alerts. Their newest items appear in the person’s Feed as headline-and-excerpt cards linking to the publisher. Feeds from major news outlets’ and weather services’ own domains are marked official.', input: {}, readOnly: true }, () => account.webFeeds());
+  tool(server, 'follow_web_feed', { title: 'Follow a web feed', description: 'Follows a blog, news site, podcast or weather-alert feed in the person’s Feed. Give a site (theverge.com) or a feed address; Open Media finds the feed through the page’s autodiscovery links, checks it is a real RSS, Atom or JSON Feed, and follows it. Confirm the site with the person first. Returns the feed and its newest items. For US weather alerts use https://api.weather.gov/alerts/active.atom?area=<state code>; for UK warnings https://www.metoffice.gov.uk/public/data/PWSCache/WarningsRSS/Region/UK.', input: { url: z.string().max(2048).describe('A site or feed address'), title: z.string().max(200).optional().describe('A name to show instead of the feed’s own') }, readOnly: false }, (args) => account.followWebFeed(args));
+  tool(server, 'unfollow_web_feed', { title: 'Unfollow a web feed', description: 'Stops following a web feed: give its address, its site (theverge.com), its title or its id from list_web_feeds.', input: { feed: z.string().max(2048) }, readOnly: false }, (args) => account.unfollowWebFeed(args.feed));
+  tool(server, 'get_web_feed_items', { title: 'Newest items from my web feeds', description: 'The newest items from every feed the person follows, newest first, as Open Media posts with the feed, a short excerpt and the publisher’s link, plus each feed’s read status. Keep the link to the publisher when summarising; never present excerpts as full articles.', input: { limit: z.number().int().min(1).max(300).optional() }, readOnly: true }, (args) => account.webFeedItems(typeof args.limit === 'number' ? args.limit : undefined));
+  tool(server, 'import_opml', { title: 'Import feeds from OPML', description: 'Follows every feed in an OPML file exported from another feed reader (NetNewsWire, Feedly, Reeder, Inoreader…). Folders are flattened; http-only feeds are skipped; up to 300 feeds in all.', input: { opml: z.string().max(2_000_000).describe('The OPML file’s text') }, readOnly: false }, (args) => account.importOpml(args));
+  tool(server, 'export_opml', { title: 'Export my feeds as OPML', description: 'The person’s web feeds as an OPML 2.0 file that any feed reader imports.', input: {}, readOnly: true }, async () => ({ opml: await account.exportOpml() }));
   tool(server, 'list_my_feed_lenses', { title: 'My feed lenses', description: 'The lenses the person saved (private and shared), with their rules in words. They appear in the person’s Feed picker on every device.', input: {}, readOnly: true }, () => account.lenses());
   tool(server, 'save_feed_lens', { title: 'Save or share a feed lens', description: 'Saves a lens to the person’s account (visibility private, the default) or shares it publicly (visibility public: anyone can read, install and fork it, under the person’s handle unless their account is private). Give lens (a manifest, e.g. from draft_feed_lens) or request (plain words). Saving the same id again updates it. Show the person the summary and rules first, and ask before sharing publicly.', input: { lens: z.record(z.string(), z.unknown()).optional(), request: z.string().max(400).optional(), visibility: z.enum(['private', 'public']).optional() }, readOnly: false }, (args) => account.saveLens(args));
   tool(server, 'install_feed_lens', { title: 'Install a shared feed lens', description: 'Copies a publicly shared lens into the person’s lenses (counted as an install for its author). The copy is theirs to change.', input: { id: z.string() }, readOnly: false }, (args) => account.installLens(args.id));
@@ -1396,8 +1431,8 @@ export function serverCard(origin: string) {
     version,
     documentation: `${origin}/llms.txt`,
     servers: [
-      { name: 'open-media', title: 'Open Media', url: `${origin}/open/mcp`, transport: 'streamable-http', authentication: { type: 'none' }, tools: ['get_feed', 'search', 'get_post', 'get_profile', 'list_feed_lenses', 'get_feed_lens', 'draft_feed_lens', 'preview_feed_lens', 'get_feed_lens_history', 'find_jobs', 'preview_profile_from_url', 'list_networks', 'find_setting', 'translate_text', 'about_open_media'] },
-      { name: 'open-media-account', title: 'Open Media (your account)', url: `${origin}/me/mcp`, transport: 'streamable-http', authentication: { type: 'bearer', description: 'The person’s Open Media access token: sign in with request_sign_in_code and sign_in_with_code on the public server (or POST /v1/auth/email-code then /v1/auth/verify), or copy it from Settings → Developers and agents. It expires after about an hour; renew it with refresh_sign_in.' }, tools: ['get_me', 'set_up_profile', 'publish_post', 'delete_post', 'report_post', 'list_conversations', 'start_conversation', 'send_message', 'export_my_data', 'block_person', 'report_conversation', 'delete_my_account', 'list_email', 'list_mailboxes', 'connect_mailbox', 'sync_mailbox', 'send_email', 'remove_mailbox', 'list_chat_networks', 'list_bridged_chats', 'send_bridged_message', 'chat_network_sign_in_options', 'start_chat_network_sign_in', 'continue_chat_network_sign_in', 'disconnect_chat_network', 'cross_posting_status', 'list_my_feed_lenses', 'save_feed_lens', 'tune_feed_lens', 'get_my_feed_lens_history', 'revert_feed_lens', 'install_feed_lens', 'delete_feed_lens', 'get_my_feed', 'get_profile_fields', 'set_profile_fields', 'get_professional_profile', 'set_professional_profile', 'import_resume', 'import_portfolio', 'tailor_resume', 'draft_job_application', 'publish_job', 'translate_private_text', 'plus every public tool'] },
+      { name: 'open-media', title: 'Open Media', url: `${origin}/open/mcp`, transport: 'streamable-http', authentication: { type: 'none' }, tools: ['get_feed', 'search', 'get_post', 'get_profile', 'list_feed_lenses', 'get_feed_lens', 'draft_feed_lens', 'preview_feed_lens', 'get_feed_lens_history', 'find_jobs', 'preview_profile_from_url', 'preview_web_feed', 'list_networks', 'find_setting', 'translate_text', 'about_open_media'] },
+      { name: 'open-media-account', title: 'Open Media (your account)', url: `${origin}/me/mcp`, transport: 'streamable-http', authentication: { type: 'bearer', description: 'The person’s Open Media access token: sign in with request_sign_in_code and sign_in_with_code on the public server (or POST /v1/auth/email-code then /v1/auth/verify), or copy it from Settings → Developers and agents. It expires after about an hour; renew it with refresh_sign_in.' }, tools: ['get_me', 'set_up_profile', 'publish_post', 'delete_post', 'report_post', 'list_conversations', 'start_conversation', 'send_message', 'export_my_data', 'block_person', 'report_conversation', 'delete_my_account', 'list_email', 'list_mailboxes', 'connect_mailbox', 'sync_mailbox', 'send_email', 'remove_mailbox', 'list_chat_networks', 'list_bridged_chats', 'send_bridged_message', 'chat_network_sign_in_options', 'start_chat_network_sign_in', 'continue_chat_network_sign_in', 'disconnect_chat_network', 'cross_posting_status', 'list_my_feed_lenses', 'save_feed_lens', 'tune_feed_lens', 'get_my_feed_lens_history', 'revert_feed_lens', 'install_feed_lens', 'delete_feed_lens', 'get_my_feed', 'get_profile_fields', 'set_profile_fields', 'get_professional_profile', 'set_professional_profile', 'import_resume', 'import_portfolio', 'list_web_feeds', 'follow_web_feed', 'unfollow_web_feed', 'get_web_feed_items', 'import_opml', 'export_opml', 'tailor_resume', 'draft_job_application', 'publish_job', 'translate_private_text', 'plus every public tool'] },
       { name: 'open-media-events', title: 'Open Media Events', url: `${origin}/mcp`, transport: 'streamable-http', authentication: { type: 'oauth2', metadata: `${origin}/.well-known/oauth-authorization-server` } },
     ],
   };
@@ -1458,6 +1493,7 @@ function baseOpenApi(origin: string) {
       '/v1/profiles/{handle}/resume.json': { get: { summary: 'The same resume as a JSON Resume document (imports into Reactive Resume and other JSON Resume tools)', parameters: [{ name: 'handle', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: ok('JSON Resume'), 404: error } } },
       '/v1/profiles/{handle}/resume.yaml': { get: { summary: 'The same resume as RenderCV input (rendercv render), made by the JSON Resume project’s converter', parameters: [{ name: 'handle', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: { description: 'RenderCV YAML', content: { 'text/yaml': {} } }, 404: error } } },
       '/v1/profile-preview': { get: { summary: 'What a public https website says about its owner, as profile proposals with sources (JSON Resume, JSON-LD Person, h-card, Open Graph, page text). Read-only: nothing is saved. Obeys robots.txt (user agent OpenMediaProfileReader).', parameters: [{ name: 'url', in: 'query', required: true, schema: { type: 'string', format: 'uri', maxLength: 300 } }], responses: { 200: ok('Proposals'), 400: error, 403: error, 429: error } } },
+      '/v1/web-feeds/preview': { get: { summary: 'The web feed (RSS, Atom or JSON Feed) behind a site or feed address, with its format, whether it is an official news or weather feed, and its newest items. Read-only; robots.txt obeyed for home pages (user agent OpenMediaFeedReader).', parameters: [{ name: 'url', in: 'query', required: true, schema: { type: 'string', maxLength: 2048 } }], responses: { 200: ok('The feed'), 400: error, 403: error, 404: error, 429: error } } },
       '/v1/jobs': { get: { summary: 'Open job posts on Open Media (ADR 0018), newest first, with pay, place and the employer’s apply link. Open Media never applies for anyone.', parameters: [{ name: 'q', in: 'query', schema: { type: 'string', maxLength: 80 }, description: 'Words in the role, text or place' }, { name: 'remote', in: 'query', schema: { type: 'boolean' } }, { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 50 } }], responses: { 200: ok('Job posts') } } },
       '/v1/settings': { get: { summary: 'The searchable settings index', parameters: [{ name: 'q', in: 'query', schema: { type: 'string' } }], responses: { 200: ok('Matching settings') } } },
       '/v1/events/upcoming': { get: { summary: 'Upcoming public events (Luma, Meetup, Eventbrite) in the San Francisco Bay Area, de-duplicated across platforms, with official registration links', parameters: [{ name: 'area', in: 'query', schema: { type: 'string' } }, { name: 'days', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 14, default: 7 } }, { name: 'q', in: 'query', schema: { type: 'string' } }, { name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 50, default: 20 } }], responses: { 200: ok('Events, soonest first, with each provider’s status'), 400: error } } },
@@ -1532,6 +1568,16 @@ function baseOpenApi(origin: string) {
       '/v1/me/lenses/{key}/history': { get: { summary: 'Every kept version of one of your lenses, and who made it', security: bearer, parameters: [{ name: 'key', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: ok('Versions, newest first'), 401: error } } },
       '/v1/me/lenses/{key}/revert': { post: { summary: 'Make an earlier version the newest one', security: bearer, parameters: [{ name: 'key', in: 'path', required: true, schema: { type: 'string' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['version'], properties: { version: { type: 'integer', minimum: 1 } } } } } }, responses: { 200: ok('Restored'), 400: error, 401: error, 404: error } } },
       '/v1/me/lenses/{key}': { delete: { summary: 'Remove one of your lenses', security: bearer, parameters: [{ name: 'key', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: ok('Removed'), 401: error } } },
+      '/v1/me/web-feeds': {
+        get: { summary: 'The web feeds you follow (ADR 0024)', security: bearer, responses: { 200: ok('Feeds'), 401: error } },
+        post: { summary: 'Follow a web feed by site or feed address; the feed is found through autodiscovery and checked', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['url'], properties: { url: { type: 'string', maxLength: 2048 }, title: { type: 'string', maxLength: 200 } } } } } }, responses: { 201: ok('Followed, with a preview'), 400: error, 401: error, 403: error, 404: error, 429: error } },
+        delete: { summary: 'Unfollow a web feed by address, site, title or id', security: bearer, parameters: [{ name: 'feed', in: 'query', required: true, schema: { type: 'string' } }], responses: { 200: ok('Unfollowed'), 401: error, 404: error } },
+      },
+      '/v1/me/web-feeds/items': { get: { summary: 'Newest items from your web feeds as posts (headline, excerpt, publisher link), with each feed’s read status', security: bearer, parameters: [{ name: 'limit', in: 'query', schema: { type: 'integer', minimum: 1, maximum: 300 } }], responses: { 200: ok('Posts and feed status'), 401: error } } },
+      '/v1/me/web-feeds/opml': {
+        get: { summary: 'Your web feeds as an OPML 2.0 file', security: bearer, responses: { 200: { description: 'OPML', content: { 'text/x-opml': {} } }, 401: error } },
+        post: { summary: 'Follow every feed in an OPML file from another reader', security: bearer, requestBody: textBody('opml', 2_000_000), responses: { 200: ok('How many were added and which were skipped'), 400: error, 401: error } },
+      },
       '/v1/me/feed': { get: { summary: 'Your feed through a lens, using who you follow when the lens asks for it', security: bearer, parameters: [{ name: 'lens', in: 'query', schema: { type: 'string' } }, { name: 'kind', in: 'query', schema: { type: 'string', enum: ['feed', 'clips'] } }, { name: 'cursor', in: 'query', schema: { type: 'string' } }], responses: { 200: ok('Posts with their “why”'), 401: error } } },
       '/v1/me/follows/{handle}': { delete: { summary: 'Unfollow, or withdraw a request', security: bearer, parameters: [{ name: 'handle', in: 'path', required: true, schema: { type: 'string' } }], responses: { 200: ok('Done'), 401: error } } },
       '/v1/me/follow-requests/{id}': { post: { summary: 'Accept or decline a follow request', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['accept'], properties: { accept: { type: 'boolean' } } } } } }, responses: { 200: ok('Done'), 401: error } } },
@@ -1669,7 +1715,7 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
   if (agent && !(await withinLimit(env.PUBLIC_API_RATE_LIMITER, agent))) return limited();
   // Bodies on these routes are small JSON; refuse large ones before reading them. A LinkedIn PDF
   // (up to 2 MB, sent as base64) is the one larger body.
-  const bodyLimit = path === '/v1/me/professional/import' || path === '/me/mcp' ? 3_000_000 : 262_144;
+  const bodyLimit = path === '/v1/me/professional/import' || path === '/v1/me/web-feeds/opml' || path === '/me/mcp' ? 3_000_000 : 262_144;
   if (Number(request.headers.get('content-length') ?? '0') > bodyLimit) return json({ error: { code: 'too_large', message: 'The request body is too large.' } }, 0, 413);
   try {
     if (path === '/ask' && (request.method === 'POST' || request.method === 'GET')) return nlwebAsk(request, env, origin);
@@ -1734,6 +1780,10 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     if (request.method === 'GET' && path === '/v1/profile-preview') {
       if (!(await withinLimit(env.PUBLIC_API_RATE_LIMITER, `portfolio:ip:${ip}`))) return limited();
       return json(await previewProfileFromUrl(env, url.searchParams.get('url')), 0);
+    }
+    if (request.method === 'GET' && path === '/v1/web-feeds/preview') {
+      if (!(await withinLimit(env.PUBLIC_API_RATE_LIMITER, `web-feed:ip:${ip}`))) return limited();
+      return json(await previewWebFeed(url.searchParams.get('url')), 0);
     }
     if (request.method === 'GET' && path === '/v1/jobs') {
       const remote = url.searchParams.get('remote');
@@ -1807,6 +1857,12 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     if (request.method === 'PUT' && path === '/v1/me/professional') return json(await account.setProfessional(body), 0);
     if (request.method === 'POST' && path === '/v1/me/professional/import') return json(await account.importResume(body), 0);
     if (request.method === 'POST' && path === '/v1/me/professional/portfolio') return json(await account.importPortfolio(body), 0);
+    if (request.method === 'GET' && path === '/v1/me/web-feeds') return json(await account.webFeeds(), 0);
+    if (request.method === 'POST' && path === '/v1/me/web-feeds') return json(await account.followWebFeed(body), 0, 201);
+    if (request.method === 'DELETE' && path === '/v1/me/web-feeds') return json(await account.unfollowWebFeed(url.searchParams.get('feed') ?? body.feed ?? body.url), 0);
+    if (request.method === 'GET' && path === '/v1/me/web-feeds/items') return json(await account.webFeedItems(Number(url.searchParams.get('limit')) || undefined), 0);
+    if (request.method === 'POST' && path === '/v1/me/web-feeds/opml') return json(await account.importOpml(body), 0);
+    if (request.method === 'GET' && path === '/v1/me/web-feeds/opml') return new Response(await account.exportOpml(), { headers: { ...publicHeaders, 'content-type': 'text/x-opml; charset=utf-8', 'content-disposition': 'attachment; filename="open-media-feeds.opml"', 'cache-control': 'no-store' } });
     if (request.method === 'POST' && path === '/v1/me/career/tailor') return json(await account.tailor(body), 0);
     if (request.method === 'POST' && path === '/v1/me/career/application') return json(await account.draftApplication(body), 0);
     const listingMatch = path.match(/^\/v1\/me\/listings\/([^/]+)$/);

@@ -65,6 +65,12 @@ export const webMcpTools: WebMcpToolDefinition[] = [
     path: '/v1/profile-preview', query: { url: 'url' },
   },
   {
+    name: 'preview_open_media_web_feed', title: 'Preview a web feed',
+    description: 'The web feed (RSS, Atom or JSON Feed) behind a site or feed address, the way Open Media follows it: title, format, whether it is an official feed from a major news outlet or weather service, how often it is read, and its five newest items as headline, short excerpt and link. Read-only: nothing is followed.',
+    inputSchema: { type: 'object', properties: { url: { type: 'string', description: 'A site or feed address, e.g. theverge.com or https://feeds.bbci.co.uk/news/rss.xml' } }, required: ['url'] },
+    path: '/v1/web-feeds/preview', query: { url: 'url' },
+  },
+  {
     name: 'get_open_media_profile', title: 'Get an Open Media profile',
     description: 'A public Open Media profile by handle, with its recent public posts.',
     inputSchema: { type: 'object', properties: { handle: { type: 'string', description: 'The Open Media handle, without @' } }, required: ['handle'] },

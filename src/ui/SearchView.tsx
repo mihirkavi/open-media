@@ -24,6 +24,7 @@ import { FeedViewer, PostCard } from './OpenMediaFeed';
 import { Highlighted, SearchHighlight } from './RichText';
 import type { FeedLenses } from './useFeedLenses';
 import { useUniversalSearch } from './useUniversalSearch';
+import { useWebFeedRows } from './useWebFeedRows';
 import { Loader } from './Loader';
 
 export type SearchTarget = 'feed' | 'messages' | 'settings';
@@ -48,7 +49,8 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
   const hasQuery = Boolean(search.parsed.raw);
   const lensRows = useLensRows(search.parsed.raw, lenses, Boolean(viewer));
   const profileRows = useProfileRows(query, Boolean(viewer));
-  const nothing = hasQuery && !search.searching && !search.posts.length && !search.settings.length && !search.messages.length && !lensRows.length && !profileRows.length;
+  const feedRows = useWebFeedRows(query, Boolean(viewer));
+  const nothing = hasQuery && !search.searching && !search.posts.length && !search.settings.length && !search.messages.length && !lensRows.length && !profileRows.length && !feedRows.length;
   // Choosing a lens shows the Feed through it.
   const showFeed = () => { if (onNavigate) onNavigate('feed'); else onClose?.(); };
 
@@ -68,6 +70,7 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
   const remember = (run: () => void) => () => { recent.add(query); run(); };
   const items: ResultItem[] = (hasQuery ? [
     ...lensRows.map((row) => ({ key: row.key, section: 'Feed', icon: 'options-outline' as const, title: row.title, subtitle: row.subtitle, run: () => { row.run().then((leave) => { if (leave) showFeed(); }).catch(() => undefined); } })),
+    ...feedRows.map((row) => ({ key: row.key, section: 'Web feeds', icon: 'logo-rss' as const, title: row.title, subtitle: row.subtitle, run: () => { row.run().then((leave) => { if (leave) showFeed(); }).catch(() => undefined); } })),
     ...profileRows.map((row) => ({ key: row.key, section: 'Your profile', icon: 'briefcase-outline' as const, title: row.title, subtitle: row.subtitle, run: () => { row.run().catch(() => undefined); } })),
     ...search.settings.map((setting) => ({ key: setting.id, section: 'Settings', icon: 'settings-outline' as const, title: setting.title, subtitle: setting.description, run: () => onNavigate?.('settings') })),
     ...search.messages.map((conversation) => ({ key: conversation.id, section: 'Messages and email', icon: (conversation.email ? 'mail-outline' : 'chatbubble-outline') as keyof typeof Ionicons.glyphMap, title: conversationTitle(conversation), subtitle: matchingLine(conversation), run: () => onOpenConversation ? onOpenConversation(conversation.id) : onNavigate?.('messages') })),

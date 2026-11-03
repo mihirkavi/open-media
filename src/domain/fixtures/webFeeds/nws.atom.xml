@@ -1,0 +1,216 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:cap="urn:oasis:names:tc:emergency:cap:1.2">
+    <id>https://api.weather.gov/alerts.atom?area%5B0%5D=CA&amp;active=1</id>
+    <generator>NWS CAP Server</generator>
+    <updated>2026-11-03T05:00:23+00:00</updated>
+    <author>
+        <name>w-nws.webmaster@noaa.gov</name>
+    </author>
+    <title>Current watches, warnings, and advisories for California</title>
+    <link rel="self" href="https://api.weather.gov/alerts.atom?area%5B0%5D=CA&amp;active=1"/>
+    <entry>
+        <id>https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.b5498a1206b577c19d600e8e534cc9d67e791eb7.001.1</id>
+        <link rel="alternate" href="https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.b5498a1206b577c19d600e8e534cc9d67e791eb7.001.1.cap"/>
+        <updated>2026-11-02T20:49:00-08:00</updated>
+        <published>2026-11-02T20:49:00-08:00</published>
+        <author>
+            <name>NWS</name>
+        </author>
+        <title>Beach Hazards Statement issued November 2 at 8:49PM PST until November 3 at 9:00AM PST by NWS Eureka CA</title>
+        <summary>* WHAT...Increased threat of sneaker waves expected.
+
+* WHERE...Coastal Del Norte, Northern Coastal Humboldt,
+Southwestern Humboldt and Coastal Mendocino Counties.
+
+* WHEN...Through Tuesday morning.
+
+* IMPACTS...Large, unexpected waves can sweep across the beach
+without warning, sweeping people into the sea from rocks,
+jetties, and beaches. These sneaker waves can also move large
+objects such as logs, crushing anyone caught underneath.</summary>
+        <cap:event>Beach Hazards Statement</cap:event>
+        <cap:sent>2026-11-02T20:49:00-08:00</cap:sent>
+        <cap:effective>2026-11-02T20:49:00-08:00</cap:effective>
+        <cap:onset>2026-11-02T20:49:00-08:00</cap:onset>
+        <cap:expires>2026-11-03T09:00:00-08:00</cap:expires>
+        <cap:status>Actual</cap:status>
+        <cap:msgType>Update</cap:msgType>
+        <cap:category>Met</cap:category>
+        <cap:urgency>Expected</cap:urgency>
+        <cap:severity>Moderate</cap:severity>
+        <cap:certainty>Likely</cap:certainty>
+        <cap:areaDesc>Coastal Del Norte; Northern Coastal Humboldt; Southwestern Humboldt; Coastal Mendocino</cap:areaDesc>
+        <cap:polygon/>
+        <cap:geocode>
+            <valueName>SAME</valueName>
+            <value>006015</value>
+        </cap:geocode>
+        <cap:geocode>
+            <valueName>SAME</valueName>
+            <value>006023</value>
+        </cap:geocode>
+        <cap:geocode>
+            <valueName>SAME</valueName>
+            <value>006045</value>
+        </cap:geocode>
+        <cap:geocode>
+            <valueName>UGC</valueName>
+            <value>CAZ101</value>
+        </cap:geocode>
+        <cap:geocode>
+            <valueName>UGC</valueName>
+            <value>CAZ103</value>
+        </cap:geocode>
+        <cap:geocode>
+            <valueName>UGC</valueName>
+            <value>CAZ104</value>
+        </cap:geocode>
+        <cap:geocode>
+            <valueName>UGC</valueName>
+            <value>CAZ109</value>
+        </cap:geocode>
+        <cap:parameter>
+            <valueName>AWIPSidentifier</valueName>
+            <value>CFWEKA</value>
+        </cap:parameter>
+        <cap:parameter>
+            <valueName>WMOidentifier</valueName>
+            <value>WHUS46 KEKA 030449</value>
+        </cap:parameter>
+        <cap:parameter>
+            <valueName>NWSheadline</valueName>
+            <value>BEACH HAZARDS STATEMENT NOW IN EFFECT THROUGH TUESDAY MORNING</value>
+        </cap:parameter>
+        <cap:parameter>
+            <valueName>BLOCKCHANNEL</valueName>
+            <value>EAS</value>
+        </cap:parameter>
+        <cap:parameter>
+            <valueName>BLOCKCHANNEL</valueName>
+            <value>NWEM</value>
+        </cap:parameter>
+        <cap:parameter>
+            <valueName>BLOCKCHANNEL</valueName>
+            <value>CMAS</value>
+        </cap:parameter>
+        <cap:parameter>
+            <valueName>VTEC</valueName>
+            <value>/O.EXT.KEKA.BH.S.0013.000000T0000Z-261103T1700Z/</value>
+        </cap:parameter>
+        <cap:parameter>
+            <valueName>eventEndingTime</valueName>
+            <value>2026-11-03T09:00:00-08:00</value>
+        </cap:parameter>
+        <cap:parameter>
+            <valueName>expiredReferences</valueName>
+            <value>w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.3674e6e21bc1ff2159bde4aac13a23b853212788.001.1,2026-10-31T22:07:00-07:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.9d0568e907594df2b1cb02f8310bf960fe25a14d.001.1,2026-10-30T22:05:00-07:00</value>
+        </cap:parameter>
+        <cap:scope>Public</cap:scope>
+        <cap:code>IPAWSv1.0</cap:code>
+        <cap:language>en-US</cap:language>
+        <cap:web>http://www.weather.gov</cap:web>
+        <cap:eventCode>
+            <valueName>SAME</valueName>
+            <value>NWS</value>
+        </cap:eventCode>
+        <cap:eventCode>
+            <valueName>NationalWeatherService</valueName>
+            <value>BHS</value>
+        </cap:eventCode>
+    </entry>
+    <entry>
+        <id>https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.1f822e53b1de9acf1a772c4d188cee11e38b64df.001.2</id>
+        <link rel="alternate" href="https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.1f822e53b1de9acf1a772c4d188cee11e38b64df.001.2.cap"/>
+        <updated>2026-11-02T12:00:00-08:00</updated>
+        <published>2026-11-02T12:00:00-08:00</published>
+        <author>
+            <name>NWS</name>
+        </author>
+        <title>Frost Advisory issued November 2 at 12:00PM PST until November 3 at 9:00AM PST by NWS Eureka CA</title>
+        <summary>* WHAT...Temperatures as low as 33 will result in frost formation.
+
+* WHERE...Northern Mendocino Interior, and Northern Lake.
+
+* WHEN...From midnight tonight to 9 AM PST Tuesday.
+
+* IMPACTS...Frost could harm sensitive outdoor vegetation. Sensitive
+outdoor plants may be killed if left uncovered.</summary>
+        <cap:event>Frost Advisory</cap:event>
+        <cap:sent>2026-11-02T12:00:00-08:00</cap:sent>
+        <cap:effective>2026-11-02T12:00:00-08:00</cap:effective>
+        <cap:onset>2026-11-03T00:00:00-08:00</cap:onset>
+        <cap:expires>2026-11-03T09:00:00-08:00</cap:expires>
+        <cap:status>Actual</cap:status>
+        <cap:msgType>Alert</cap:msgType>
+        <cap:category>Met</cap:category>
+        <cap:urgency>Expected</cap:urgency>
+        <cap:severity>Minor</cap:severity>
+        <cap:certainty>Likely</cap:certainty>
+        <cap:areaDesc>Northwestern Interior Mendocino; Northeastern Interior Mendocino; Northern Lake</cap:areaDesc>
+        <cap:polygon/>
+        <cap:geocode>
+            <valueName>SAME</valueName>
+            <value>006045</value>
+        </cap:geocode>
+        <cap:geocode>
+            <valueName>SAME</valueName>
+            <value>006033</value>
+        </cap:geocode>
+        <cap:geocode>
+            <valueName>UGC</valueName>
+            <value>CAZ110</value>
+        </cap:geocode>
+        <cap:geocode>
+            <valueName>UGC</valueName>
+            <value>CAZ111</value>
+        </cap:geocode>
+        <cap:geocode>
+            <valueName>UGC</valueName>
+            <value>CAZ114</value>
+        </cap:geocode>
+        <cap:parameter>
+            <valueName>AWIPSidentifier</valueName>
+            <value>NPWEKA</value>
+        </cap:parameter>
+        <cap:parameter>
+            <valueName>WMOidentifier</valueName>
+            <value>WWUS76 KEKA 022000</value>
+        </cap:parameter>
+        <cap:parameter>
+            <valueName>NWSheadline</valueName>
+            <value>FROST ADVISORY IN EFFECT FROM MIDNIGHT TONIGHT TO 9 AM PST TUESDAY</value>
+        </cap:parameter>
+        <cap:parameter>
+            <valueName>BLOCKCHANNEL</valueName>
+            <value>EAS</value>
+        </cap:parameter>
+        <cap:parameter>
+            <valueName>BLOCKCHANNEL</valueName>
+            <value>NWEM</value>
+        </cap:parameter>
+        <cap:parameter>
+            <valueName>BLOCKCHANNEL</valueName>
+            <value>CMAS</value>
+        </cap:parameter>
+        <cap:parameter>
+            <valueName>VTEC</valueName>
+            <value>/O.NEW.KEKA.FR.Y.0034.261103T0800Z-261103T1700Z/</value>
+        </cap:parameter>
+        <cap:parameter>
+            <valueName>eventEndingTime</valueName>
+            <value>2026-11-03T09:00:00-08:00</value>
+        </cap:parameter>
+        <cap:scope>Public</cap:scope>
+        <cap:code>IPAWSv1.0</cap:code>
+        <cap:language>en-US</cap:language>
+        <cap:web>http://www.weather.gov</cap:web>
+        <cap:eventCode>
+            <valueName>SAME</valueName>
+            <value>NWS</value>
+        </cap:eventCode>
+        <cap:eventCode>
+            <valueName>NationalWeatherService</valueName>
+            <value>FRY</value>
+        </cap:eventCode>
+    </entry>
+    </feed>

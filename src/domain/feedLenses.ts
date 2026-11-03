@@ -14,7 +14,7 @@ export const lensFormat = 'open-media.feed-lens/1';
 export const lensFormatV2 = 'open-media.feed-lens/2';
 export type LensFormat = typeof lensFormat | typeof lensFormatV2;
 
-export type LensSource = 'open-media' | 'farcaster' | 'lens' | 'hive' | 'deso' | 'events';
+export type LensSource = 'open-media' | 'farcaster' | 'lens' | 'hive' | 'deso' | 'events' | 'rss';
 export type LensKind = 'text' | 'image' | 'video' | 'product' | 'service' | 'event' | 'job';
 /** Data about the viewer or the post's audience that a lens must ask for. Post text, time, network and kind are always readable. */
 export type LensPermission = 'follows' | 'interests' | 'public_engagement';
@@ -96,7 +96,7 @@ export interface LensContext {
 /** Never readable by any lens; listed in every “Why this?”. */
 export const forbiddenSignals = ['Private messages', 'Exact location', 'Sensitive-trait inference', 'KYC documents', 'Emotional-state prediction'] as const;
 
-export const lensSources: LensSource[] = ['open-media', 'farcaster', 'lens', 'hive', 'deso', 'events'];
+export const lensSources: LensSource[] = ['open-media', 'farcaster', 'lens', 'hive', 'deso', 'events', 'rss'];
 export const lensKinds: LensKind[] = ['text', 'image', 'video', 'product', 'service', 'event', 'job'];
 export const lensPermissions: LensPermission[] = ['follows', 'interests', 'public_engagement'];
 
@@ -474,7 +474,7 @@ export function explainLensPost(post: SocialPost, lens: FeedLens, context: LensC
   const signals = permittedSignals(lens, context);
   const now = signals.now;
   const used: string[] = [];
-  if (isFollowed(post, signals)) used.push('You follow this author');
+  if (isFollowed(post, signals)) used.push(post.webFeed ? 'You follow this web feed' : 'You follow this author');
   matchingTopics(post, signals.interests).forEach((topic) => used.push(`Matches your ${topic} interest`));
   if (signals.interestsAllowed && !matchingTopics(post, signals.interests).length) post.relevance.selectedInterestMatches.forEach((topic) => used.push(`Matches your ${topic} interest`));
   if (post.relevance.communityMatch) used.push(`From ${post.relevance.communityMatch}`);
@@ -551,7 +551,7 @@ const kindWords: [RegExp, LensKind[], string][] = [
   [/\b(events?|meetups?|happenings?)\b/gi, ['event'], 'events'],
   [/\b(job (?:posts?|listings?|openings?)|vacanc(?:y|ies)|openings?)\b/gi, ['job'], 'job posts'],
 ];
-const sourceWords: [RegExp, LensSource][] = [[/\b(farcaster|warpcast)\b/gi, 'farcaster'], [/\blens\b(?!\s+(?:called|named))/gi, 'lens'], [/\bhive\b/gi, 'hive'], [/\bdeso\b/gi, 'deso'], [/\bopen media\b/gi, 'open-media']];
+const sourceWords: [RegExp, LensSource][] = [[/\b(farcaster|warpcast)\b/gi, 'farcaster'], [/\blens\b(?!\s+(?:called|named))/gi, 'lens'], [/\bhive\b/gi, 'hive'], [/\bdeso\b/gi, 'deso'], [/\bopen media\b/gi, 'open-media'], [/\b(rss|atom feeds?|web ?feeds?|feed reader|blogs and news(?: sites)?)\b/gi, 'rss']];
 const negative = /^\s*(?:and\s+|but\s+|also\s+)?(?:no|hide|hiding|without|mute|muting|not|never|skip|exclude|excluding|remove|block|less|fewer|stop showing|don'?t show|do not show|nothing (?:about|from|on))\b/i;
 const filler = new Set(['a', 'an', 'the', 'my', 'me', 'i', 'want', 'show', 'give', 'make', 'create', 'build', 'set', 'up', 'feed', 'lens', 'algorithm', 'timeline', 'only', 'just', 'posts', 'post', 'stuff', 'things', 'content', 'from', 'by', 'on', 'of', 'in', 'to', 'for', 'with', 'and', 'or', 'that', 'is', 'are', 'please', 'which', 'where', 'all', 'any', 'some', 'more', 'less', 'about', 'mentioning', 'covering', 'related', 'like', 'no', 'hide', 'without', 'mute', 'not', 'never', 'skip', 'exclude', 'remove', 'block', 'also', 'but', 'everything', 'anything', 'people', 'accounts', 'follow', 'following', 'follows', 'newest', 'latest', 'first', 'chronological', 'order', 'mostly', 'mainly', 'lot', 'lots', 'can', 'you', 'could', 'would', 'let', 'see', 'into', 'interested', 'am', "i'm", 'im', 'new', 'one', 'called', 'named', 'it', 'them', 'those', 'these', 'what', 'who', 'do', 'don\'t', 'dont', 'stop', 'showing', 'see', 'nothing', 'none']);
 
@@ -603,7 +603,7 @@ export function lensFromRequest(input: string): LensDraft {
   if (filters.maxAgeHours) understood.push(`From the last ${ageLabel(filters.maxAgeHours)}`);
 
   // Clauses carry their own polarity: “videos about cooking, no crypto” keeps cooking and mutes crypto.
-  const clauses = rest.split(/[,;.]|\bbut\b|\bexcept\b|\b(?:and|also)\b(?=\s+(?:no|hide|without|mute|not|never|skip|less|fewer)\b)/i).map((clause) => clause.trim()).filter(Boolean);
+  const clauses = rest.split(/[,;]|\.(?=\s|$)|\bbut\b|\bexcept\b|\b(?:and|also)\b(?=\s+(?:no|hide|without|mute|not|never|skip|less|fewer)\b)/i).map((clause) => clause.trim()).filter(Boolean);
   for (const original of clauses) {
     let clause = ` ${original} `;
     const isNegative = negative.test(original) || /\bexcept\b/i.test(original);
@@ -737,7 +737,7 @@ export function tuneLens(base: FeedLens, input: string): LensTuning {
   if (/\b(newest first|latest first|chronological|in order|by time|no ranking)\b/i.test(rest)) { order = 'newest'; understood.push('Newest first'); rest = rest.replace(/\b(newest first|latest first|chronological|in order|by time|no ranking)\b/gi, ' '); }
   else if (/\b(ranked|rank it|rank them)\b/i.test(rest)) { order = 'ranked'; understood.push('Ranked'); rest = rest.replace(/\b(ranked|rank it|rank them)\b/gi, ' '); }
 
-  const clauses = rest.split(/[,;.]|\bbut\b|\b(?:and|also|plus)\b(?=\s+(?:a\s+(?:lot|bit|little)\s+|much\s+|way\s+|slightly\s+)?(?:more|less|fewer|no|hide|without|mute|unmute|only|show|bring)\b)/i).map((clause) => clause.trim()).filter(Boolean);
+  const clauses = rest.split(/[,;]|\.(?=\s|$)|\bbut\b|\b(?:and|also|plus)\b(?=\s+(?:a\s+(?:lot|bit|little)\s+|much\s+|way\s+|slightly\s+)?(?:more|less|fewer|no|hide|without|mute|unmute|only|show|bring)\b)/i).map((clause) => clause.trim()).filter(Boolean);
   for (const original of clauses) {
     const leaning = original.match(/^(?:please\s+)?(?:(?:show|give)(?:\s+me)?\s+|i\s+want\s+)?(a\s+lot\s+|much\s+|way\s+|a\s+(?:bit|little)\s+|slightly\s+|somewhat\s+)?(more|less|fewer)\b(?!\s+than)/i);
     const again = /\b(?:again|unmute|bring\s+back|stop\s+hiding)\b/i.test(original);
@@ -883,7 +883,7 @@ function ageLabel(hours: number) {
   return `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
 }
 
-const sourceLabels: Record<LensSource, string> = { 'open-media': 'Open Media', farcaster: 'Farcaster', lens: 'Lens', hive: 'Hive', deso: 'DeSo', events: 'public event listings' };
+const sourceLabels: Record<LensSource, string> = { 'open-media': 'Open Media', farcaster: 'Farcaster', lens: 'Lens', hive: 'Hive', deso: 'DeSo', events: 'public event listings', rss: 'web feeds' };
 
 function sourceName(source: string): string {
   return sourceLabels[source as LensSource] ?? source;

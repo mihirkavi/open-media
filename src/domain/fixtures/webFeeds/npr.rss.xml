@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss xmlns:npr="https://www.npr.org/rss/" xmlns:nprml="https://api.npr.org/nprml" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:media="http://search.yahoo.com/mrss/" version="2.0">
+  <channel>
+    <title>NPR Topics: News</title>
+    <link>https://www.npr.org/templates/story/story.php?storyId=1001</link>
+    <description>Breaking news, top national and world stories, politics, business and culture from NPR. Catch up on demand with NPR News Now, Up First and Consider This.</description>
+    <language>en</language>
+    <copyright>Copyright 2024 NPR - For Personal Use Only</copyright>
+    <generator>Story API Shim 1.2.24</generator>
+    <lastBuildDate>Tue, 03 Nov 2026 00:00:33 -0500</lastBuildDate>
+    <image>
+      <url>https://media.npr.org/images/podcasts/primary/npr_generic_image_300.jpg?s=200</url>
+      <title>NPR Topics: News</title>
+      <link>https://www.npr.org/sections/news/</link>
+    </image>
+    <item>
+      <title>AI chatbots are becoming political advisers. Their answers can mislead voters</title>
+      <description>Millions of Americans are turning to AI for election information, but chatbots are getting voting facts wrong and recommending candidates, raising concerns they could influence voters&apos; decisions.</description>
+      <pubDate>Mon, 02 Nov 2026 15:02:41 -0500</pubDate>
+      <link>https://www.npr.org/2026/11/02/nx-s1-6025407/chatbots-midterms-voting-advice</link>
+      <guid>https://www.npr.org/2026/11/02/nx-s1-6025407/chatbots-midterms-voting-advice</guid>
+      <content:encoded><![CDATA[<img src='https://npr.brightspotcdn.com/dims3/default/strip/false/crop/8256x5504+0+0/resize/8256x5504!/quality/85/format/webp/?url=http%3A%2F%2Fnpr-brightspot.s3.amazonaws.com%2F33%2F38%2F09ecdec14eff88fe2fc14345fc06%2Fgettyimages-2302583503.jpg' alt='About half of American adults reported using AI-powered chatbots and about 42% of users said they use them to search for information, according to a Pew Research Center survey from earlier this year.'/><p>Millions of Americans are turning to AI for election information, but chatbots are getting voting facts wrong and recommending candidates, raising concerns they could influence voters' decisions.</p><p>(Image credit: Jon Cherry)</p><img src='https://media.npr.org/include/images/tracking/npr-rss-pixel.png?story=nx-s1-6025407' />]]></content:encoded>
+      <dc:creator>Katie McQue</dc:creator>
+    </item>
+    <item>
+      <title>Is America really that polarized? The answer might be a surprise</title>
+      <description>The U.S. has become more politically polarized, but research shows people overestimate their differences and there is &apos;messy middle&apos; majority of Americans who share overlapping political views.</description>
+      <pubDate>Mon, 02 Nov 2026 15:00:00 -0500</pubDate>
+      <link>https://www.npr.org/2026/11/02/nx-s1-6003534/us-political-polarization-research-trump</link>
+      <guid>https://www.npr.org/2026/11/02/nx-s1-6003534/us-political-polarization-research-trump</guid>
+      <content:encoded><![CDATA[<img src='https://npr.brightspotcdn.com/dims3/default/strip/false/crop/5500x3670+0+0/resize/5500x3670!/quality/85/format/webp/?url=http%3A%2F%2Fnpr-brightspot.s3.amazonaws.com%2F16%2Ffd%2F401ffbcb4dea8054ffd72e0169a5%2Fgettyimages-2301917700.jpg' alt='Signage directs people outside an early voting polling place on Oct. 28, in Minneapolis, Minn. America is deeply polarized politically, but research show the problem is not as extreme as people think.'/><p>The U.S. has become more politically polarized, but research shows people overestimate their differences and there is 'messy middle' majority of Americans who share overlapping political views.</p><p>(Image credit: Stephen Maturen/Getty Images)</p><img src='https://media.npr.org/include/images/tracking/npr-rss-pixel.png?story=nx-s1-6003534' />]]></content:encoded>
+      <dc:creator>Frank Langfitt</dc:creator>
+    </item>
+    </channel>
+</rss>

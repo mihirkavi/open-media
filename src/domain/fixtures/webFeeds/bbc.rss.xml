@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?><rss xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:atom="http://www.w3.org/2005/Atom" version="2.0" xmlns:media="http://search.yahoo.com/mrss/">
+    <channel>
+        <title><![CDATA[BBC News]]></title>
+        <description><![CDATA[BBC News - News Front Page]]></description>
+        <link>https://www.bbc.co.uk/news</link>
+        <image>
+            <url>https://news.bbcimg.co.uk/nol/shared/img/bbc_news_120x60.gif</url>
+            <title>BBC News</title>
+            <link>https://www.bbc.co.uk/news</link>
+        </image>
+        <generator>RSS for Node</generator>
+        <lastBuildDate>Tue, 03 Nov 2026 05:01:27 GMT</lastBuildDate>
+        <atom:link href="https://feeds.bbci.co.uk/news/rss.xml" rel="self" type="application/rss+xml"/>
+        <copyright><![CDATA[Copyright: (C) British Broadcasting Corporation, see https://www.bbc.co.uk/usingthebbc/terms-of-use/#15metadataandrssfeeds for terms and conditions of reuse.]]></copyright>
+        <language><![CDATA[en-gb]]></language>
+        <ttl>15</ttl>
+        <item>
+            <title><![CDATA[UK and EU agree draft deal to scrap Brexit red tape over food exports]]></title>
+            <description><![CDATA[The food deal, ahead of a UK-EU summit later this month, is the most significant part of the so-called Brexit reset agreed so far.]]></description>
+            <link>https://www.bbc.co.uk/news/articles/cmp3grwre9xdo?at_medium=RSS&amp;at_campaign=rss</link>
+            <guid isPermaLink="false">https://www.bbc.co.uk/news/articles/cmp3grwre9xdo#1</guid>
+            <pubDate>Tue, 03 Nov 2026 02:11:13 GMT</pubDate>
+            <media:thumbnail width="240" height="135" url="https://ichef.bbci.co.uk/ace/standard/240/cpsprodpb/665c/live/802099e0-d6de-11f1-b2be-0146bf989691.jpg"/>
+        </item>
+        <item>
+            <title><![CDATA[US strikes Iran ahead of midterm elections]]></title>
+            <description><![CDATA[US officials described the attacks on Qeshm Island as limited and defensive, according to CBS, the BBC's US partner. ]]></description>
+            <link>https://www.bbc.co.uk/news/articles/cx240mrm3g8vo?at_medium=RSS&amp;at_campaign=rss</link>
+            <guid isPermaLink="false">https://www.bbc.co.uk/news/articles/cx240mrm3g8vo#1</guid>
+            <pubDate>Tue, 03 Nov 2026 03:39:08 GMT</pubDate>
+            <media:thumbnail width="240" height="134" url="https://ichef.bbci.co.uk/ace/standard/240/cpsprodpb/9b14/live/7d50c580-d735-11f1-8523-e7796527683a.jpg"/>
+        </item>
+        </channel>
+</rss>

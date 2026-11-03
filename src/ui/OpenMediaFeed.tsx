@@ -33,6 +33,7 @@ import { useCrossPosting } from './useCrossPosting';
 import { TranslationNote, useTranslation } from './useTranslation';
 import type { FeedSourceStatus } from './useMixedFeed';
 import { VerifiedTick } from './VerifiedTick';
+import { WebFeedCard } from './WebFeedCard';
 
 export interface FeedViewer { id: string; initials: string }
 
@@ -306,7 +307,14 @@ export function FeedPicker({ value, lenses = [], onChange }: { value: string; le
   return <View accessibilityRole="tablist" accessibilityLabel="Feed lens" style={styles.segment}>{choices.map((choice) => <Pressable key={choice.id} accessibilityRole="tab" accessibilityLabel={choice.id === third?.id ? `${choice.name}, your lens` : choice.name} accessibilityState={{ selected: value === choice.id }} onPress={() => onChange(choice.id)} style={[styles.segmentButton, value === choice.id && styles.segmentActive]}><Text numberOfLines={1} style={[styles.segmentText, choice.id === third?.id && styles.segmentCustom, value === choice.id && styles.segmentTextActive]}>{choice.name}</Text></Pressable>)}</View>;
 }
 
-export function PostCard({ post, mode, lensContext, viewer, onDelete, onReport }: { post: SocialPost; mode: FeedMode | FeedLens; lensContext?: LensContext; viewer?: FeedViewer; onDelete?: (postId: string) => Promise<void>; onReport?: (postId: string, reason: PostReportReason) => Promise<void> }) {
+type PostCardProps = { post: SocialPost; mode: FeedMode | FeedLens; lensContext?: LensContext; viewer?: FeedViewer; onDelete?: (postId: string) => Promise<void>; onReport?: (postId: string, reason: PostReportReason) => Promise<void> };
+
+/** One post in the Feed or Search. Items from web feeds get their own news card (ADR 0024). */
+export function PostCard(props: PostCardProps) {
+  return props.post.webFeed ? <WebFeedCard post={props.post} mode={props.mode} lensContext={props.lensContext} /> : <NetworkPostCard {...props} />;
+}
+
+function NetworkPostCard({ post, mode, lensContext, viewer, onDelete, onReport }: PostCardProps) {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]); const [expanded, setExpanded] = useState(false); const [menuOpen, setMenuOpen] = useState(false); const explanation = explainFeedPost(post, mode, lensContext);
   const native = post.provenance.connectorId === 'open-media';
   const own = Boolean(native && viewer && viewer.id === post.author.id);

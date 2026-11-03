@@ -12,6 +12,7 @@ Open Media is one open app for a person's social world: one feed across Open Med
 - The person asks what is being said about a topic on Farcaster, Lens, Hive, DeSo or Open Media.
 - The person wants a summary of a feed, a profile or a person's posts across networks.
 - The person wants upcoming public events in the San Francisco Bay Area.
+- The person wants to follow a blog, news site, podcast or weather alerts in their Feed, or move their feeds from another reader (OPML).
 - The person wants to publish, read their messages, manage contacts, listings, follows or privacy on Open Media (needs their token).
 
 ## How to call Open Media
@@ -29,6 +30,13 @@ Prefer MCP. Public tools need no account:
 4. Renew with refresh_sign_in before expires_in runs out. In a terminal, `open-media login` does all of this, and `open-media token` prints the token for OPEN_MEDIA_TOKEN.
 - Docs MCP: `https://api.openmedia.site/docs/mcp` - search_docs and get_docs_page.
 - REST: `https://api.openmedia.site/v1` (index) and `https://api.openmedia.site/v1/openapi.json` (OpenAPI 3.1).
+
+## Web feeds (RSS, Atom, JSON Feed)
+
+1. Without an account, `preview_web_feed` (public MCP, or `GET https://api.openmedia.site/v1/web-feeds/preview?url=`) finds the feed behind a site ("theverge.com") or feed address and shows its format, newest items, and whether it is an official feed from a major news outlet or weather service.
+2. With the person's token: confirm the site, then `follow_web_feed` with `url`. Its items appear in their Feed as headline-and-excerpt cards that link to the publisher. `list_web_feeds`, `unfollow_web_feed` (address, site, title or id), `get_web_feed_items`, `import_opml` and `export_opml` do the rest.
+3. Weather: US alerts are `https://api.weather.gov/alerts/active.atom?area=<state code>` (National Weather Service); UK warnings are `https://www.metoffice.gov.uk/public/data/PWSCache/WarningsRSS/Region/UK`. These are alerts and warnings, not forecasts.
+4. Keep the publisher's link when summarising feed items, and never present an excerpt as the full article. Only https feeds can be followed. See https://api.openmedia.site/docs/web-feeds.
 
 ## Rules
 
