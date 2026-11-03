@@ -60,6 +60,7 @@ test('every marketplace manifest describes one plugin, with the same servers and
   for (const [key, url] of Object.entries(expected)) {
     const entry = read<{ name: string; remotes: { type: string; url: string }[] }>(`registry/${key}.server.json`);
     assert.match(entry.name, /^site\.openmedia\//);
+    assert.ok((entry as unknown as { description: string }).description.length <= 100, 'the MCP Registry caps descriptions at 100 characters');
     assert.deepEqual(entry.remotes, [{ type: 'streamable-http', url }]);
   }
 });
