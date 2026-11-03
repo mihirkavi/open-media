@@ -2,6 +2,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, Animated, Easing, Image, Keyboard, Linking, Modal, Platform, Pressable, ScrollView, StyleProp, StyleSheet, TextStyle, View, useWindowDimensions } from "react-native";
 import { Loader } from "./Loader";
+import { PullToRefresh } from "./PullToRefresh";
 import { PersonLink, PersonTarget } from "./people";
 import { Text, TextInput } from "./Text";
 
@@ -37,6 +38,8 @@ interface Props {
   emailContacts?: EmailContact[];
   /** Opens this conversation, e.g. after “Message” on someone's profile. */
   openConversationId?: string;
+  /** Pull down on the list: ask every mailbox and chat for anything new. */
+  onRefresh?: () => Promise<void>;
   onSetBlocked: (personId: string, blocked: boolean) => Promise<void>;
   onReport: (
     conversationId: string,
@@ -61,6 +64,7 @@ export function OpenMediaMessages({
   onSetBlocked,
   onReport,
   openConversationId,
+  onRefresh,
 }: Props) {
   const { width } = useWindowDimensions();
   const compact = width < 760;
@@ -129,18 +133,34 @@ export function OpenMediaMessages({
             </Text>
           </View>
           {messageMode === "open_media" ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="New message"
-              onPress={() => setNewMessageOpen(true)}
-              style={styles.newButton}
-            >
-              <Ionicons
-                name="create-outline"
-                size={20}
-                color={colors.surface}
-              />
-            </Pressable>
+            <View style={styles.headingActions}>
+              {/* Unread only, as an envelope with a dot like Apple Mail's; filled while it's on. */}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Unread only"
+                accessibilityState={{ selected: unreadOnly }}
+                onPress={() => setUnreadOnly((value) => !value)}
+                style={({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) => [styles.unreadButton, unreadOnly && styles.unreadButtonActive, (hovered || pressed) && !unreadOnly && styles.unreadButtonHover]}
+              >
+                <Ionicons
+                  name={unreadOnly ? "mail-unread" : "mail-unread-outline"}
+                  size={19}
+                  color={unreadOnly ? colors.surface : colors.text}
+                />
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="New message"
+                onPress={() => setNewMessageOpen(true)}
+                style={styles.newButton}
+              >
+                <Ionicons
+                  name="create-outline"
+                  size={20}
+                  color={colors.surface}
+                />
+              </Pressable>
+            </View>
           ) : (
             <View style={styles.matrixBadge}>
               <Ionicons name="git-network-outline" size={14} color="#0D9488" />
@@ -157,18 +177,8 @@ export function OpenMediaMessages({
           style={styles.filterBar}
           contentContainerStyle={styles.filters}
         >
-          {(["all", "unread", "direct", "groups", "favorites"] as const).map(
-            (filter) => filter === "unread" ? (
-              <Pressable
-                key="unread"
-                accessibilityRole="button"
-                accessibilityState={{ selected: unreadOnly }}
-                onPress={() => setUnreadOnly((value) => !value)}
-                style={[styles.chip, unreadOnly && styles.chipActive]}
-              >
-                <Text style={[styles.chipText, unreadOnly && styles.chipTextActive]}>Unread</Text>
-              </Pressable>
-            ) : (
+          {(["all", "direct", "groups", "favorites"] as const).map(
+            (filter) => (
               <Pressable
                 key={filter}
                 accessibilityRole="button"
@@ -215,7 +225,7 @@ export function OpenMediaMessages({
             </Pressable>
           </View>
         ) : filtered.length ? (
-          <ScrollView>
+          <PullToRefresh onRefresh={onRefresh}>
             {filtered.map((conversation) => (
               <Pressable
                 key={conversation.id}
@@ -254,14 +264,18 @@ export function OpenMediaMessages({
                 </View>
               </Pressable>
             ))}
-          </ScrollView>
+          </PullToRefresh>
         ) : unreadOnly && conversations.length ? (
+          // Empty lists can be pulled too: that is when people check for new mail.
+          <PullToRefresh onRefresh={onRefresh} style={styles.pullEmpty} contentContainerStyle={styles.pullEmptyContent}>
           <View style={styles.center}>
             <Ionicons name="checkmark-done-outline" size={28} color={colors.textSecondary} />
             <Text style={styles.emptyTitle}>You’re all caught up</Text>
             <Text style={styles.statusText}>No unread messages or email.</Text>
           </View>
+          </PullToRefresh>
         ) : (
+          <PullToRefresh onRefresh={onRefresh} style={styles.pullEmpty} contentContainerStyle={styles.pullEmptyContent}>
           <View style={styles.center}>
             <Ionicons
               name="chatbubbles-outline"
@@ -288,6 +302,7 @@ export function OpenMediaMessages({
               </Pressable>
             ) : null}
           </View>
+          </PullToRefresh>
         )}
         </>}
       </View>
@@ -1509,6 +1524,22 @@ function createStyles(colors: ThemeColors) {
       justifyContent: "center",
       backgroundColor: colors.text,
     },
+    headingActions: { flexDirection: "row", alignItems: "center", gap: 8 },
+    pullEmpty: { flex: 1 },
+    pullEmptyContent: { flexGrow: 1 },
+    // A quiet outlined twin of New message; it fills in, like New message, while it's on.
+    unreadButton: {
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+      alignItems: "center",
+      justifyContent: "center",
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    unreadButtonHover: { backgroundColor: colors.chrome },
+    unreadButtonActive: { backgroundColor: colors.text, borderColor: colors.text },
     matrixBadge: {
       minHeight: 30,
       paddingHorizontal: 10,

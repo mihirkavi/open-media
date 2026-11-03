@@ -9,6 +9,7 @@ import {
   listMailAccounts,
   listStoredMail,
   sendMail,
+  syncMailAccount,
 } from "../connectors/mailApiConnector";
 import {
   loadMatrixConversations,
@@ -211,6 +212,15 @@ export function OpenMediaApp({
       if (sequence === refreshSequence.current) setMessagesLoading(false);
     }
   }, [currentUserId, messageMode]);
+  // Pulling down on Messages: every mailbox checks for new mail now, then mail and chats reload.
+  const pullMessages = useCallback(async () => {
+    const mailboxes = messageMode === "open_media" ? await listMailAccounts().catch(() => []) : [];
+    await Promise.all([
+      ...mailboxes.map((mailbox) => syncMailAccount(mailbox.id).catch(() => [])),
+      refreshMessages(),
+    ]);
+    await refreshMail();
+  }, [messageMode, refreshMail, refreshMessages]);
   useEffect(() => {
     setMessagesLoading(true);
     refreshMessages();
@@ -472,6 +482,7 @@ export function OpenMediaApp({
             messageMode={messageMode}
             blockedUserIds={blockedUserIds}
             onRetry={refreshMessages}
+            onRefresh={pullMessages}
             onSend={sendMessage}
             onSearchProfiles={searchProfiles}
             onStartConversation={beginConversation}
