@@ -15,14 +15,27 @@ Open Media is one open app for a person's social world: one feed across Open Med
 - The person wants to follow a blog, news site, podcast or weather alerts in their Feed, or move their feeds from another reader (OPML).
 - The person wants to publish, read their messages, manage contacts, listings, follows or privacy on Open Media (needs their token).
 
+## Which skill for which job
+
+- Feed, search, people, events: this skill.
+- Inbox (messages, email, chats, contacts, read receipts): open-media-inbox.
+- Posting, likes, reshares and comments: open-media-posting.
+- The person's own feed algorithm: open-media-feed-lenses.
+- Blogs, news and weather in the Feed: open-media-web-feeds.
+- Jobs and professional profile: open-media-work. Payments: open-media-payments. Translation: open-media-translate. Checking listings: verify-listings.
+
+Many results come with a visual view (posts, inbox, algorithm, events, profiles) that hosts such as Claude and ChatGPT show inline; still give a short spoken summary.
+
 ## How to call Open Media
 
 Prefer MCP. Public tools need no account:
 
 - MCP (public, no key): `https://api.openmedia.site/open/mcp` - get_feed, list_feed_lenses, draft_feed_lens, preview_feed_lens, search, get_post, get_profile, get_person_timeline, find_upcoming_events, get_listing_checks, get_transparency, list_networks, find_setting, about_open_media, and sign-in: request_sign_in_code, sign_in_with_code, refresh_sign_in.
-- MCP (the person's account): `https://api.openmedia.site/me/mcp` with `Authorization: Bearer <token>`.
+- MCP (the person's account): `https://api.openmedia.site/account/mcp`, signed in with OAuth ("Sign in with Open Media"); or `https://api.openmedia.site/me/mcp` with `Authorization: Bearer <token>` for scripts.
 
 ## Signing the person in
+
+If the host connected the `open-media-account` server (`https://api.openmedia.site/account/mcp`), the person signed in with "Sign in with Open Media" (OAuth) and you can use the account tools directly. Otherwise:
 
 1. Ask for their email, then call request_sign_in_code (or `POST https://api.openmedia.site/v1/auth/email-code`). Open Media emails them a code from security@openmedia.site.
 2. Ask them for the code and call sign_in_with_code (or `POST https://api.openmedia.site/v1/auth/verify`). Keep the returned access_token and refresh_token private.

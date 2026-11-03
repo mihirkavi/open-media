@@ -1,29 +1,38 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "open-media",
-  "version": "1.5.0",
-  "description": "Open Media for AI agents: one feed and search across Open Media, Farcaster, Lens, Hive and DeSo, Bay Area events, and the person's own Open Media account, with skills for safe use and payments.",
+  "displayName": "Open Media",
+  "version": "2.0.0",
+  "description": "Open Media for AI agents: one feed and search across Open Media, Farcaster, Lens, Hive and DeSo, your inbox (messages, email, chats) with read receipts, your own feed algorithm, web feeds, events, and your account, with every change confirmed first.",
   "author": {
     "name": "Open Media",
-    "url": "https://github.com/mihirkavi/open-media"
+    "url": "https://openmedia.site"
   },
   "homepage": "https://api.openmedia.site/agents",
   "repository": "https://github.com/mihirkavi/open-media",
   "license": "MIT",
   "keywords": [
     "social",
+    "feed",
+    "inbox",
+    "email",
+    "messaging",
     "farcaster",
     "lens",
     "hive",
     "deso",
+    "rss",
     "mcp",
-    "feed",
-    "search",
-    "events"
+    "open-source"
   ],
+  "icon": "./assets/icon.png",
+  "documentationUrl": "https://api.openmedia.site/agents",
+  "supportUrl": "https://api.openmedia.site/contact",
+  "privacyPolicyUrl": "https://api.openmedia.site/privacy",
+  "termsOfServiceUrl": "https://api.openmedia.site/terms",
   "skills": [
     "./skills/"
   ],
-  "mcpServers": "./.mcp.json",
-  "privacyPolicyUrl": "https://api.openmedia.site/privacy"
+  "commands": "./commands/",
+  "mcpServers": "./.mcp.json"
 }

@@ -1,0 +1,34 @@
+{
+  "name": "open-media",
+  "displayName": "Open Media",
+  "description": "Open Media for AI agents: one feed and search across Open Media, Farcaster, Lens, Hive and DeSo, your inbox (messages, email, chats) with read receipts, your own feed algorithm, web feeds, events, and your account, with every change confirmed first.",
+  "version": "2.0.0",
+  "logo": "./assets/icon.png",
+  "suggestedPrompts": [
+    "Catch me up on my unread messages and email",
+    "What are people saying about ethereum on Lens and Farcaster?",
+    "Make my feed show less Hive and more videos"
+  ],
+  "author": {
+    "name": "Open Media",
+    "url": "https://openmedia.site"
+  },
+  "homepage": "https://api.openmedia.site/agents",
+  "repository": "https://github.com/mihirkavi/open-media",
+  "license": "MIT",
+  "keywords": [
+    "social",
+    "feed",
+    "inbox",
+    "email",
+    "messaging",
+    "farcaster",
+    "lens",
+    "hive",
+    "deso",
+    "rss",
+    "mcp",
+    "open-source"
+  ],
+  "skills": "./skills/"
+}

@@ -251,7 +251,7 @@ Do not use Open Media to read Instagram, X, LinkedIn or TikTok feeds; those netw
 
 ## How to call it
 
-1. **MCP (preferred).** Public: \`${origin}/open/mcp\` (no key). Account: \`${origin}/me/mcp\` with \`Authorization: Bearer <token>\`. Docs: \`${origin}/docs/mcp\`. Streamable HTTP.
+1. **MCP (preferred).** Public: \`${origin}/open/mcp\` (no key). Account: \`${origin}/account/mcp\` with OAuth ("Sign in with Open Media"), or \`${origin}/me/mcp\` with \`Authorization: Bearer <token>\` for scripts. Docs: \`${origin}/docs/mcp\`. Streamable HTTP.
 2. **REST.** Index at [${origin}/v1](${origin}/v1); OpenAPI at [${origin}/v1/openapi.json](${origin}/v1/openapi.json).
 3. **WebMCP.** On the web, Open Media pages register tools with \`document.modelContext.registerTool()\`.
 4. **Skills.** [open-media](${origin}/.well-known/agent-skills/open-media/SKILL.md) and [open-media-payments](${origin}/.well-known/agent-skills/open-media-payments/SKILL.md), also packaged as a plugin for Claude Code and Codex in the [repository](${sourceRepository}/tree/main/agent-plugin).
@@ -283,6 +283,7 @@ curl -H "Authorization: Bearer $OPEN_MEDIA_TOKEN" "${origin}/v1/me"
 ## MCP servers
 
 - \`${origin}/open/mcp\`: public tools, no key.
+- \`${origin}/account/mcp\`: the person's account over OAuth 2.1 (the host signs them in with their email code once; scope \`account\`). The same tools as /me/mcp.
 - \`${origin}/me/mcp\`: the person's account, bearer token required. Money-moving tools preview first and need explicit confirmation.
 - \`${origin}/docs/mcp\`: search and read this documentation.
 - \`${origin}/mcp\`: Open Media Events, OAuth 2.1 (PKCE S256, client ID metadata documents).
@@ -485,6 +486,40 @@ Questions: see [contact](${origin}/contact).
 `,
   },
   {
+    path: '/terms', title: 'Open Media terms of use',
+    description: 'The plain-language terms for using Open Media, its API and its agent plugins: your content stays yours, what is not allowed, and how agents act for you.',
+    body: (origin) => `# Open Media terms of use
+
+Open Media is an open-source project in public beta. These terms describe how it may be used, through the app, this API, the MCP servers and the agent plugins. The source code is public under the MIT License in the [repository](${sourceRepository}).
+
+## Your content and your account
+
+- What you post, send and save stays yours. You can export it (Profile → Export my data, or \`${origin}/v1/me/export\`) and delete your account at any time.
+- Posts and profiles are public unless your account is private. Messages, email, chats and contacts are private to you; see [privacy](${origin}/privacy).
+
+## What is not allowed
+
+- Spam, harassment, impersonation, or anything illegal.
+- Listings that break the [listing rules](${origin}/policies/listings).
+- Scraping, overloading or probing the service beyond the published API and its rate limits, or trying to reach data that isn't yours.
+
+Content or accounts that break these rules may be hidden or suspended; you'll be told why and can reply to appeal.
+
+## Agents and apps acting for you
+
+- When you connect an AI app (for example with "Sign in with Open Media"), it acts as you, within what your account can do and the same rules as the app.
+- Agents are instructed to ask before they publish, send, delete, pay or change settings. You stay responsible for what you approve, and you can disconnect an app at any time by signing out.
+
+## No warranty
+
+Open Media is provided as is, without warranty of any kind, as described in the MIT License. Features in beta may change or stop. Payments are between buyers and sellers through Stripe or their own wallets; Open Media never holds money.
+
+## Changes and contact
+
+These terms may change as the project grows; the date above shows the latest version. Questions: see [contact](${origin}/contact).
+`,
+  },
+  {
     path: '/policies/listings', title: 'Open Media listing rules',
     description: 'How products, services, apps and events on Open Media are checked: what is not allowed, what gets a closer look, how reports and community verification work, and what large sellers confirm.',
     body: () => listingPolicyMarkdown(),
@@ -530,6 +565,7 @@ How an agent gets access to Open Media, and exactly which credentials exist. Thi
 
 - **No credential:** everything public. Start here.
 - **Anonymous agent registration** (\`agent_auth\`, type \`anonymous\`): an agent gets its own identity and an access token with the \`public:read\` scope, so its requests are counted in its own rate-limit bucket instead of sharing one with its IP address. It never grants access to anyone's account.
+- **Sign in with Open Media (OAuth 2.1, for MCP hosts):** connect \`${origin}/account/mcp\`. The host discovers \`${origin}/.well-known/oauth-protected-resource\`, registers itself (client ID metadata document, or dynamic registration) and sends the person to \`${origin}/authorize\`, where they enter their email, the code Open Media emails them, and approve. The host never sees their session; refreshing its token renews it.
 - **Sign the person in with an email code (bearer):** for the account API (\`/v1/me/...\`) and the account MCP server (\`/me/mcp\`). Open Media emails the person a code from security@openmedia.site; they tell you the code; you get their access token. See \"Sign a person in\" below. People can also copy a token from the app (Settings, then Developers and agents). Either way it acts only as them.
 - **OAuth 2.1 with PKCE (S256):** Open Media Events at \`${origin}/mcp\`, scopes \`events:read\` and \`events:write\`, with client ID metadata documents or Dynamic Client Registration at \`${origin}/oauth/register\`.
 
@@ -798,6 +834,7 @@ function reverseHost(origin: string): string {
 const mcpServers = (origin: string) => [
   { id: 'open', path: '/open/mcp', title: 'Open Media (public)', description: 'Public feed, cross-network search, profiles, timelines and Bay Area events. No key.', auth: 'none', kind: 'product' },
   { id: 'me', path: '/me/mcp', title: 'Open Media (your account)', description: 'Act for a person with their token: posts, messages, contacts, listings and payments.', auth: 'bearer', kind: 'product' },
+  { id: 'account', path: '/account/mcp', title: 'Open Media (your account, OAuth)', description: 'Act for a person after they sign in with Open Media (OAuth 2.1, no token to paste): posts, messages, contacts, listings and payments.', auth: 'oauth2', kind: 'product' },
   { id: 'docs', path: '/docs/mcp', title: 'Open Media docs', description: 'Search and read Open Media’s API, MCP and agent documentation.', auth: 'none', kind: 'docs' },
 ].map((server) => ({ ...server, url: `${origin}${server.path}` }));
 
@@ -897,6 +934,8 @@ export function robotsTxt(origin: string): string {
     'Allow: /',
     'Disallow: /v1/me',
     'Disallow: /me/mcp',
+    'Disallow: /account/mcp',
+    'Disallow: /authorize',
     'Disallow: /authorize',
     'Disallow: /oauth/',
     '',
@@ -943,6 +982,7 @@ Open Media is a free, open-source social app (iPhone, Android, web) with one fee
 ## MCP servers (Streamable HTTP)
 
 - Public, no key: ${origin}/open/mcp ([server card](${origin}/open/mcp/server-card))
+- The person's account, Sign in with Open Media (OAuth 2.1): ${origin}/account/mcp
 - The person's account, bearer token: ${origin}/me/mcp ([server card](${origin}/me/mcp/server-card))
 - Documentation: ${origin}/docs/mcp ([server card](${origin}/docs/mcp/server-card))
 

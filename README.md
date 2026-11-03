@@ -215,19 +215,32 @@ Everything Open Media does for people, it also offers to programs and AI assista
 
 [`packages/`](packages) holds a typed TypeScript SDK (`open-media-sdk`), a command line (`open-media`: `feed`, `search`, `events`, `profile`, `timeline`, `me`, `post --yes`, `payments`, `mcp-config`, all with `--json`) and a Python client. They are not on npm or PyPI yet; build them from source (see [packages/README.md](packages/README.md)). `npm run packages:test` runs their tests.
 
-### Plugin for Claude Code and Codex
+### Plugin for Claude, Codex and every agent marketplace
 
-The [agent-plugin](agent-plugin) folder bundles the three MCP servers and two skills (using Open Media, and paying safely):
+The [agent-plugin](agent-plugin) folder is one plugin for Claude Code, Codex, VS Code, Cursor, Antigravity, Gemini CLI and the official MCP Registry. It bundles:
+- three MCP servers (114 tools);
+- nine skills;
+- six slash commands (`/open-media:catch-up`, `inbox`, `feed`, `post`, `algorithm`, `follow`);
+- one visual view that shows posts, your inbox with read receipts, your algorithm and its code, events and profiles the way the app looks.
 
-```
-/plugin install open-media --marketplace mihirkavi/open-media
+```bash
+claude plugin marketplace add mihirkavi/open-media && claude plugin install open-media@open-media
 ```
 
 ```bash
 codex plugin marketplace add mihirkavi/open-media && codex plugin add open-media@open-media
 ```
 
-To act as you, an agent signs you in the same way the app does: it asks for your email, Open Media emails you a code from security@openmedia.site, and you tell the agent the code (`POST /v1/auth/email-code`, then `POST /v1/auth/verify`, or the `request_sign_in_code` and `sign_in_with_code` MCP tools). From a terminal, `open-media login you@example.com` does the same, and `export OPEN_MEDIA_TOKEN=$(open-media token)` hands the session to the plugin. You can also copy a token from **Settings → Developers and agents**. Tokens expire after about an hour and renew with the refresh token. Every account call acts only as you; the database refuses anything else. See [ADR 0012](docs/adrs/0012-agent-interfaces-and-design-system.md) and the [public API guide](services/mail-sync/PUBLIC_API.md).
+Install links for VS Code and Cursor, and the steps for every other client, are in [agent-plugin/README.md](agent-plugin/README.md).
+
+**Signing in:**
+- Agents connect to your account at `https://api.openmedia.site/account/mcp` with **Sign in with Open Media** (OAuth 2.1). A browser page asks for your email and the code Open Media emails you, and you approve once.
+- The agent never sees your session, refreshing its token renews it, and signing out disconnects it.
+- Scripts can still use a token on `/me/mcp`:
+  - `open-media login you@example.com`, then `export OPEN_MEDIA_TOKEN=$(open-media token)`;
+  - or the `request_sign_in_code` and `sign_in_with_code` tools.
+- Every account call acts only as you; the database refuses anything else.
+- See [ADR 0027](docs/adrs/0027-one-agent-plugin-for-every-marketplace.md), [ADR 0012](docs/adrs/0012-agent-interfaces-and-design-system.md) and the [public API guide](services/mail-sync/PUBLIC_API.md).
 
 ## Why now
 

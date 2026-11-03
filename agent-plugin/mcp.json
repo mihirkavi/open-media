@@ -1,0 +1,17 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "open-media": {
+      "type": "streamable-http",
+      "url": "https://api.openmedia.site/open/mcp"
+    },
+    "open-media-docs": {
+      "type": "streamable-http",
+      "url": "https://api.openmedia.site/docs/mcp"
+    },
+    "open-media-account": {
+      "type": "streamable-http",
+      "url": "https://api.openmedia.site/account/mcp"
+    }
+  }
+}

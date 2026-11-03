@@ -1,0 +1,17 @@
+{
+  "name": "open-media",
+  "version": "2.0.0",
+  "description": "Open Media for Gemini CLI: one feed and search across Open Media, Farcaster, Lens, Hive and DeSo, and your Open Media account over OAuth.",
+  "contextFileName": "GEMINI.md",
+  "mcpServers": {
+    "open-media": {
+      "httpUrl": "https://api.openmedia.site/open/mcp"
+    },
+    "open-media-docs": {
+      "httpUrl": "https://api.openmedia.site/docs/mcp"
+    },
+    "open-media-account": {
+      "httpUrl": "https://api.openmedia.site/account/mcp"
+    }
+  }
+}

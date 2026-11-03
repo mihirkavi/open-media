@@ -188,6 +188,7 @@ export const agentInterfaces = {
   mcp: [
     { path: '/open/mcp', auth: 'none', description: 'Public tools: feed, feed lenses (list, draft, preview), search, posts, profiles, person timelines, upcoming events, networks, settings and the mission.' },
     { path: '/me/mcp', auth: 'Open Media access token', description: 'Your account: posts, feed lenses (save, share, install, your feed through one), listings, payments (each one confirmed by you first), tips and paid posts, messages, contacts, linked accounts, identity and privacy, follows, email, chat networks, cross-posting status, blocking, reports, export and account deletion.' },
+    { path: '/account/mcp', auth: 'OAuth 2.1 (Sign in with Open Media)', description: 'Your account, connected from Claude, ChatGPT, Codex, VS Code or Cursor without pasting a token: the same tools as /me/mcp, signed in with your email code once.' },
     { path: '/mcp', auth: 'OAuth 2.1', description: 'Open Media Events: find events, check your calendar and plan your week.' },
   ],
 };

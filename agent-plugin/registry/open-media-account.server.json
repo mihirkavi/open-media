@@ -1,0 +1,19 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "site.openmedia/account",
+  "title": "Open Media account",
+  "description": "Your Open Media account over OAuth: inbox, email, chats, contacts, posts, feed algorithm, web feeds and more, confirmed first.",
+  "version": "2.0.0",
+  "websiteUrl": "https://api.openmedia.site/agents",
+  "repository": {
+    "url": "https://github.com/mihirkavi/open-media",
+    "source": "github",
+    "subfolder": "agent-plugin"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://api.openmedia.site/account/mcp"
+    }
+  ]
+}

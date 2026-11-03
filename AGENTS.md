@@ -19,7 +19,7 @@ Open Media ships as one app on web, iOS, and Android. A change is not done until
 ## Agent plugin and agent site
 
 - Skills live in `src/domain/agentSkills.ts`; run `npm run agent-plugin:sync` after changing them (a test fails if `agent-plugin/skills` drifts). Never edit the generated `SKILL.md` files.
-- Keep the version equal in `.claude-plugin/plugin.json` and `.codex-plugin/plugin.json`. Both read `agent-plugin/.mcp.json`: `type: http` and `headers` for Claude Code, `bearer_token_env_var` for Codex. Never add a portable root `plugin.json`; Codex then ignores the plugin's MCP servers.
+- One plugin, many marketplaces (ADR 0027): `agent-plugin/` holds the Claude (`.claude-plugin/`), Codex (`.codex-plugin/`), Agent Plugins standard (`plugin.json` + `mcp.json`), Antigravity (`.antigravity-plugin/` + `mcp_config.json`) and MCP Registry (`registry/`) manifests; Gemini CLI's is `gemini-extension.json` at the repo root. Keep name, version and the three servers equal everywhere (a test checks). The account server is `/account/mcp` with OAuth, so no manifest ever holds a token, header or env placeholder.
 - WebMCP tools are data in `src/domain/webMcpTools.ts`, used by both the Worker's pages and the web app. Keep them read-only.
 
 ## ONDC seller app

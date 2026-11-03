@@ -1,0 +1,19 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "site.openmedia/docs",
+  "title": "Open Media docs",
+  "description": "Search and read Open Media's documentation for agents and developers: API, MCP servers, sign-in, privacy.",
+  "version": "2.0.0",
+  "websiteUrl": "https://api.openmedia.site/agents",
+  "repository": {
+    "url": "https://github.com/mihirkavi/open-media",
+    "source": "github",
+    "subfolder": "agent-plugin"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://api.openmedia.site/docs/mcp"
+    }
+  ]
+}

@@ -48,7 +48,7 @@ test('every documented interface appears in the docs, the API index and the serv
   for (const item of [...agentInterfaces.discovery, ...agentInterfaces.public, ...agentInterfaces.account, ...agentInterfaces.mcp]) {
     assert.ok(index.includes(item.path), `/v1 lists ${item.path}`);
   }
-  assert.deepEqual(serverCard(origin).servers.map((server) => server.url), [`${origin}/open/mcp`, `${origin}/me/mcp`, `${origin}/mcp`]);
+  assert.deepEqual(serverCard(origin).servers.map((server) => server.url), [`${origin}/open/mcp`, `${origin}/me/mcp`, `${origin}/account/mcp`, `${origin}/mcp`]);
 });
 
 test('the OpenAPI document covers the public, feed and account routes and marks account routes as bearer-only', () => {

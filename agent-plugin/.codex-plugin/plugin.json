@@ -1,27 +1,34 @@
 {
   "name": "open-media",
-  "version": "1.5.0",
-  "description": "Open Media for AI agents: one feed and search across Open Media, Farcaster, Lens, Hive and DeSo, Bay Area events, and the person's own Open Media account.",
+  "version": "2.0.0",
+  "description": "Open Media for AI agents: one feed and search across Open Media, Farcaster, Lens, Hive and DeSo, your inbox (messages, email, chats) with read receipts, your own feed algorithm, web feeds, events, and your account, with every change confirmed first.",
   "author": {
     "name": "Open Media",
-    "url": "https://github.com/mihirkavi/open-media"
+    "url": "https://openmedia.site"
   },
   "homepage": "https://api.openmedia.site/agents",
   "repository": "https://github.com/mihirkavi/open-media",
   "license": "MIT",
   "keywords": [
     "social",
+    "feed",
+    "inbox",
+    "email",
+    "messaging",
     "farcaster",
     "lens",
     "hive",
     "deso",
-    "mcp"
+    "rss",
+    "mcp",
+    "open-source"
   ],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Open Media",
-    "shortDescription": "One open feed and inbox across social networks",
+    "shortDescription": "Your open social feed & inbox",
+    "longDescription": "Read and search public posts across Open Media, Farcaster, Lens, Hive and DeSo; catch up on your messages, email and chats by person, with read receipts; shape your own feed algorithm in plain words and see its code; follow blogs, news and weather; find Bay Area events. Sign in with Open Media to act on your account: everything that posts, sends, pays or changes settings is shown to you first.",
     "developerName": "Open Media",
     "category": "Productivity",
     "capabilities": [
@@ -29,12 +36,17 @@
       "Write"
     ],
     "websiteURL": "https://openmedia.site/",
+    "supportURL": "https://api.openmedia.site/contact",
     "privacyPolicyURL": "https://api.openmedia.site/privacy",
+    "termsOfServiceURL": "https://api.openmedia.site/terms",
     "defaultPrompt": [
-      "What are people saying about ethereum on Lens and Farcaster today?"
+      "Catch me up on my unread messages and email",
+      "What are people saying about ethereum on Lens and Farcaster?",
+      "Make my feed show less Hive and more videos"
     ],
     "brandColor": "#111111",
-    "logo": "./assets/logo.png",
-    "longDescription": "Search and read public posts across Open Media, Farcaster, Lens, Hive and DeSo, find Bay Area events, and act for the person on Open Media with their own token: posts, messages, contacts, listings and payments that are always confirmed first."
+    "brandColorDark": "#F6F6F2",
+    "composerIcon": "./assets/icon.png",
+    "logo": "./assets/logo.png"
   }
 }

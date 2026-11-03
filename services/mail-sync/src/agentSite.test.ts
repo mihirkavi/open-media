@@ -127,19 +127,20 @@ test('auth.md leads with its heading, and the homepage marks up its FAQ and feat
   assert.ok(visibleText(await (await get('/sandbox', { accept: 'text/html' })).text()).length >= 500);
 });
 
-test('the public MCP server offers an MCP Apps view for feed and search results', async () => {
+test('the public MCP server offers one MCP Apps view for its results, at both addresses', async () => {
   const call = async (method: string, params: object = {}) => {
     const response = await handleAgentRequest(new Request(`${origin}/open/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', 'mcp-protocol-version': '2025-06-18' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }) }), env);
     const text = await response.text();
     return JSON.parse(text.startsWith('{') ? text : text.split('\n').find((line) => line.startsWith('data: '))!.slice(6)).result;
   };
   const tools = (await call('tools/list')).tools as { name: string; _meta?: { ui?: { resourceUri?: string } } }[];
-  assert.equal(tools.find((tool) => tool.name === 'get_feed')?._meta?.ui?.resourceUri, 'ui://open-media/posts');
-  assert.equal(tools.find((tool) => tool.name === 'search')?._meta?.ui?.resourceUri, 'ui://open-media/posts');
+  for (const name of ['get_feed', 'search', 'find_upcoming_events', 'get_profile']) assert.equal(tools.find((tool) => tool.name === name)?._meta?.ui?.resourceUri, 'ui://open-media/view', name);
   const resources = (await call('resources/list')).resources as { uri: string; mimeType: string }[];
-  assert.deepEqual(resources.map((item) => [item.uri, item.mimeType]), [['ui://open-media/posts', 'text/html;profile=mcp-app']]);
-  const view = (await call('resources/read', { uri: 'ui://open-media/posts' })).contents[0];
-  assert.match(view.text, /^<!DOCTYPE html>/);
-  assert.match(view.text, /<meta name="color-scheme" content="light dark">/);
-  assert.doesNotMatch(view.text, /<script src=|<link rel="stylesheet"|fetch\(/, 'the view loads nothing and calls nothing');
+  assert.deepEqual(resources.map((item) => [item.uri, item.mimeType]), [['ui://open-media/view', 'text/html;profile=mcp-app'], ['ui://open-media/posts', 'text/html;profile=mcp-app']]);
+  for (const uri of ['ui://open-media/view', 'ui://open-media/posts']) {
+    const view = (await call('resources/read', { uri })).contents[0];
+    assert.match(view.text, /^<!DOCTYPE html>/);
+    assert.match(view.text, /<meta name="color-scheme" content="light dark">/);
+    assert.doesNotMatch(view.text, /<script src=|<link rel="stylesheet"|fetch\(|innerHTML/, 'the view loads nothing, calls nothing and never parses data as HTML');
+  }
 });

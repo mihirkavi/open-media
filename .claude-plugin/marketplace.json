@@ -1,14 +1,23 @@
 {
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "open-media",
-  "owner": { "name": "Open Media", "url": "https://github.com/mihirkavi/open-media" },
-  "metadata": { "description": "The Open Media plugin for Claude Code and Codex." },
+  "description": "The Open Media plugin for Claude Code, Codex and other agents.",
+  "owner": {
+    "name": "Open Media",
+    "url": "https://openmedia.site"
+  },
   "plugins": [
     {
       "name": "open-media",
       "source": "./agent-plugin",
-      "description": "One feed and search across Open Media, Farcaster, Lens, Hive and DeSo, Bay Area events, and the person's own Open Media account.",
-      "version": "1.0.0",
-      "category": "productivity"
+      "description": "One feed, inbox and feed algorithm across Open Media, Farcaster, Lens, Hive and DeSo, for AI agents.",
+      "category": "productivity",
+      "tags": [
+        "social",
+        "inbox",
+        "feed",
+        "mcp"
+      ]
     }
   ]
 }

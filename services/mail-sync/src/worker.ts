@@ -1,6 +1,7 @@
 import { OAuthProvider } from '@cloudflare/workers-oauth-provider';
 
 import { handleAuthorization } from './events/auth.js';
+import { ACCOUNT_SCOPE, accountMcpPath, accountMcpRequest, accountTokenExchange, handleAccountAuthorization, isAccountGrant } from './accountOAuth.js';
 import { handleProtectedEventsRequest, handlePublicEventsRequest, runScheduledRefresh, type EventsEnv } from './events/http.js';
 import { SUPPORTED_SCOPES } from './events/tools.js';
 import { AgentAuthError, agentAuthMetadata, exchangeAssertion, jwtBearerGrant } from './agentAuth.js';
@@ -21,7 +22,9 @@ const marketplaceCron = '* * * * *';
 /** Public routes: OAuth owner sign-in, the signed plan calendar, event API docs, then mail sync and the public API. */
 const defaultHandler = {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
-    const response = (await handleAuthorization(request, env))
+    // Account connections ("Sign in with Open Media", ADR 0027) first; the Events owner flow otherwise.
+    const response = (await handleAccountAuthorization(request, env))
+      ?? (await handleAuthorization(request, env))
       ?? (await handlePublicEventsRequest(request, env))
       ?? (await handleMailRequest(request, env));
     return agentFriendlyNotFound(request, response);
@@ -31,21 +34,33 @@ const defaultHandler = {
 /** OAuth-protected Open Media Events routes: MCP for agents and REST for apps. */
 const eventsApiHandler = {
   async fetch(request: Request, env: WorkerEnv, ctx: ExecutionContext): Promise<Response> {
-    return handleProtectedEventsRequest(request, env, (ctx as ExecutionContext & { props?: unknown }).props);
+    const props = (ctx as ExecutionContext & { props?: unknown }).props;
+    // The person's account over OAuth: the same account server as /me/mcp, as them.
+    if (new URL(request.url).pathname.replace(/\/+$/, '') === accountMcpPath) {
+      if (!isAccountGrant(props)) return Response.json({ error: 'insufficient_scope', error_description: 'This connection is for Open Media Events. Connect your Open Media account to use it here.' }, { status: 403 });
+      return handleMailRequest(accountMcpRequest(request, props), env);
+    }
+    // An account connection is not an Events grant, whatever scopes it names.
+    if (isAccountGrant(props)) return Response.json({ error: 'insufficient_scope', error_description: 'This connection is for your Open Media account, not Open Media Events.' }, { status: 403 });
+    return handleProtectedEventsRequest(request, env, props);
   },
 };
 
+/** The token callback gets no env; the Worker's bindings are the same for every request, so the first one keeps them. */
+let signInEnv: WorkerEnv | undefined;
+
 const oauth = new OAuthProvider<WorkerEnv>({
-  apiRoute: ['/mcp', '/v1/events/tools/'],
+  apiRoute: ['/mcp', '/v1/events/tools/', accountMcpPath],
   apiHandler: eventsApiHandler as never,
   defaultHandler: defaultHandler as never,
   authorizeEndpoint: '/authorize',
   tokenEndpoint: '/oauth/token',
   clientRegistrationEndpoint: '/oauth/register',
   clientIdMetadataDocumentEnabled: true,
-  scopesSupported: [...SUPPORTED_SCOPES],
+  scopesSupported: [...SUPPORTED_SCOPES, ACCOUNT_SCOPE],
   // RFC 9728 metadata names the scopes agents can ask for. `resource` stays unset so existing grants keep working.
-  resourceMetadata: { scopes_supported: [...SUPPORTED_SCOPES], bearer_methods_supported: ['header'], resource_name: 'Open Media' },
+  resourceMetadata: { scopes_supported: [...SUPPORTED_SCOPES, ACCOUNT_SCOPE], bearer_methods_supported: ['header'], resource_name: 'Open Media' },
+  tokenExchangeCallback: (options) => (signInEnv ? accountTokenExchange(options, signInEnv) : undefined),
   accessTokenTTL: 60 * 60,
   refreshTokenTTL: 60 * 60 * 24 * 90,
   allowPlainPKCE: false,
@@ -107,6 +122,7 @@ async function handleRequest(request: Request, env: WorkerEnv, ctx: ExecutionCon
 
 export default {
   fetch: async (request: Request, env: WorkerEnv, ctx: ExecutionContext) => {
+    signInEnv ??= env;
     const response = await handleRequest(request, env, ctx);
     // The web app's own responses already carry their policy; everything else gets the common set.
     return response.headers.has('content-security-policy') ? response : withSecurityHeaders(response);
