@@ -3,13 +3,14 @@ import {
   socialPostFromHive, socialPostFromLens, threeSpeakVideoId,
 } from '../domain/networkPosts';
 import { SocialPost } from '../domain/posts';
+import { fetchBlueskyAuthor, fetchMastodonAuthor, fetchNostrAuthor } from './openNetworkFeeds';
 import { desoEndpoint, farcasterProfile, hiveEndpoint, lensEndpoint, lensPostsQuery, NetworkFeedPage, requestJSON, resolveLivepeer, resolveThreeSpeak, snapchain } from './networkFeeds';
 
 /**
  * One person's own public posts on an open network, newest first, for their unified profile
  * (ADR 0013). Read-only and keyless, like the feeds. Each post says where it came from.
  */
-export const authorNetworks: NetworkId[] = ['farcaster', 'lens', 'hive', 'deso'];
+export const authorNetworks: NetworkId[] = ['farcaster', 'lens', 'hive', 'deso', 'bluesky', 'mastodon', 'nostr'];
 
 const pageSize = 15;
 
@@ -73,12 +74,15 @@ async function desoAuthor(handle: string, cursor?: string): Promise<NetworkFeedP
 
 const readers: Record<NetworkId, (handle: string, cursor?: string) => Promise<NetworkFeedPage>> = {
   farcaster: farcasterAuthor, lens: lensAuthor, hive: hiveAuthor, deso: desoAuthor,
+  bluesky: fetchBlueskyAuthor, mastodon: fetchMastodonAuthor, nostr: fetchNostrAuthor,
 };
 
 /** Posts by one account on one network. Returns no posts (rather than failing) for unknown accounts. */
 export async function fetchAuthorPosts(network: NetworkId, handle: string, cursor?: string): Promise<NetworkFeedPage> {
   const clean = cleanHandle(handle);
-  if (!/^[A-Za-z0-9._-]{1,64}$/.test(clean)) return { posts: [] };
+  // Mastodon handles carry their server (user@server); Nostr uses npub keys or name@domain.
+  const pattern = network === 'mastodon' || network === 'nostr' ? /^[A-Za-z0-9._@-]{1,128}$/ : /^[A-Za-z0-9._-]{1,64}$/;
+  if (!pattern.test(clean)) return { posts: [] };
   const page = await readers[network](clean, cursor);
   return { posts: fromAuthor(page.posts, network, clean), cursor: page.cursor };
 }

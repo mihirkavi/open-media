@@ -1,10 +1,9 @@
-import { CrossPostContent } from '../../domain/crossPosting';
-import { NetworkId } from '../../domain/networkPosts';
+import { CrossPostContent, DestinationId } from '../../domain/crossPosting';
 import { InteractionTarget } from '../../domain/postInteractions';
 
 /** The account a person connected for cross-posting. Contains no secrets. */
 export interface NetworkAccount {
-  network: NetworkId;
+  network: DestinationId;
   /** Shown as “Connected as …”. */
   handle: string;
   profileURL?: string;
@@ -32,7 +31,7 @@ export interface ApprovalPrompt {
 }
 
 /** A short value the person types while connecting, such as their Hive username. */
-export interface TextRequest { title: string; message: string; placeholder: string }
+export interface TextRequest { title: string; message: string; placeholder: string; /** Masks what is typed (an app password). */ secret?: boolean }
 
 export interface ConnectContext {
   /** Shows (or, with `undefined`, clears) an approval step while the connector waits for it. */
@@ -48,7 +47,7 @@ export interface ConnectContext {
  * derived key, or signer the person approves on that network) and keeps it on this device.
  */
 export interface PublishingConnector {
-  id: NetworkId;
+  id: DestinationId;
   availability(): Promise<PublishAvailability>;
   /** The connected account on this device, if any. */
   account(): Promise<NetworkAccount | undefined>;

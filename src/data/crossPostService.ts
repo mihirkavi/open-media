@@ -1,8 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { PublishedCopy, PublishingConnector, PublishingError } from '../connectors/publishing/types';
-import { CrossPostOutcome, CrossPostPreferences, crossPostNetworks, CrossPostVideo, defaultCrossPostPreferences, prepareCrossPost } from '../domain/crossPosting';
-import { NetworkId, networks } from '../domain/networkPosts';
+import { CrossPostOutcome, CrossPostPreferences, crossPostNetworks, CrossPostVideo, defaultCrossPostPreferences, DestinationId, destinationNames, prepareCrossPost } from '../domain/crossPosting';
 
 const preferencesKey = 'open-media.cross-posting.preferences';
 const ledgerKey = 'open-media.cross-posting.ledger';
@@ -12,7 +11,7 @@ const ledgerLimit = 300;
  * The publishing client for a network. The clients carry signing code (curves, hashes, QR codes),
  * so they load on first use rather than with the app.
  */
-export async function publishingConnector(network: NetworkId): Promise<PublishingConnector> {
+export async function publishingConnector(network: DestinationId): Promise<PublishingConnector> {
   const { publishingConnectors } = await import('../connectors/publishing');
   return publishingConnectors.find((connector) => connector.id === network)!;
 }
@@ -20,7 +19,7 @@ export async function publishingConnector(network: NetworkId): Promise<Publishin
 export async function loadCrossPostPreferences(): Promise<CrossPostPreferences> {
   try {
     const stored = JSON.parse((await AsyncStorage.getItem(preferencesKey)) ?? 'null') as Partial<CrossPostPreferences> | null;
-    const excluded = Array.isArray(stored?.excludedByDefault) ? stored.excludedByDefault.filter((network): network is NetworkId => crossPostNetworks.includes(network as NetworkId)) : [];
+    const excluded = Array.isArray(stored?.excludedByDefault) ? stored.excludedByDefault.filter((network): network is DestinationId => crossPostNetworks.includes(network as DestinationId)) : [];
     return { excludedByDefault: excluded };
   } catch {
     return defaultCrossPostPreferences;
@@ -50,7 +49,7 @@ async function remember(key: string, copy: PublishedCopy) {
  * canonical Open Media post's client ID; with it, a retry skips networks that already have the post.
  * `video` is the post's video, already stored by Open Media (ADR 0009).
  */
-export async function crossPost(body: string, destinations: NetworkId[], postId: string, video?: CrossPostVideo): Promise<CrossPostOutcome[]> {
+export async function crossPost(body: string, destinations: DestinationId[], postId: string, video?: CrossPostVideo): Promise<CrossPostOutcome[]> {
   const ledger = await readLedger();
   return Promise.all(destinations.map(async (network): Promise<CrossPostOutcome> => {
     const key = `${postId}:${network}`;
@@ -62,12 +61,12 @@ export async function crossPost(body: string, destinations: NetworkId[], postId:
     const availability = await connector.availability();
     if (!availability.available) return { network, status: 'skipped', message: availability.reason };
     try {
-      if (!(await connector.account())) return { network, status: 'skipped', message: `Connect ${networks[network].displayName} in Settings → Cross-posting.` };
+      if (!(await connector.account())) return { network, status: 'skipped', message: `Connect ${destinationNames[network]} in Settings → Cross-posting.` };
       const copy = await connector.publish(prepared.content, key);
       await remember(key, copy);
       return { network, status: 'published', url: copy.url, externalId: copy.externalId, message: prepared.note };
     } catch (error) {
-      return { network, status: 'failed', message: error instanceof PublishingError ? error.message : `${networks[network].displayName} didn’t accept the post. Try again.` };
+      return { network, status: 'failed', message: error instanceof PublishingError ? error.message : `${destinationNames[network]} didn’t accept the post. Try again.` };
     }
   }));
 }

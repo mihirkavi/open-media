@@ -1,5 +1,6 @@
 import { chatNetworks } from '../domain/chatNetworks';
 import { networkConnectors } from './networkFeeds';
+import { destinationNames, oauthNetworks } from '../domain/crossPosting';
 import { ConnectorDescriptor } from './types';
 
 const developmentBuild = typeof __DEV__ !== 'undefined' ? __DEV__ : process.env.NODE_ENV !== 'production';
@@ -64,13 +65,18 @@ export const connectorCatalog: ConnectorDescriptor[] = [
       ],
     };
   }),
-  // ADR 0018: only LinkedIn's official products. Until Open Media has its own LinkedIn app, profiles come from the person's own data export.
-  {
-    id: 'linkedin-official', displayName: 'LinkedIn (official API)', kind: 'social', authentication: 'oauth2-pkce', status: 'planned',
+  // ADR 0033: closed networks, posting only, through each network's official OAuth API. Each turns on
+  // once Open Media's own developer app there is approved (the server reports it at /v1/social/status).
+  ...oauthNetworks.map((id): ConnectorDescriptor => ({
+    id: `${id}-posting`, displayName: `${destinationNames[id]} posting`, kind: 'social', authentication: 'oauth2-pkce', status: 'planned',
     capabilities: [
-      { operation: 'publish-post', available: false, reason: 'Share on LinkedIn (posting as you) needs Open Media’s LinkedIn developer app, which is not set up yet.' },
-      { operation: 'read-feed', available: false, reason: 'LinkedIn offers no API to read your feed, connections or jobs, and Open Media does not scrape it. Import your own profile from LinkedIn’s data export instead.' },
+      { operation: 'publish-post', available: false, reason: `Works as soon as Open Media’s ${destinationNames[id]} app is approved; then connect it in Settings → Cross-posting.` },
+      { operation: 'read-feed', available: false, reason: `${destinationNames[id]} has no free public API for reading feeds, and Open Media does not scrape it.` },
     ],
+  })),
+  {
+    id: 'youtube', displayName: 'YouTube', kind: 'social', authentication: 'oauth2-pkce', status: 'unavailable',
+    capabilities: [{ operation: 'publish-post', available: false, reason: 'YouTube takes uploads only from apps that pass Google’s verification and audit; not set up.' }],
   },
   {
     id: 'snapchat', displayName: 'Snapchat', kind: 'social', authentication: 'oauth2-pkce', status: 'unavailable',
@@ -78,15 +84,8 @@ export const connectorCatalog: ConnectorDescriptor[] = [
   },
   {
     id: 'tiktok', displayName: 'TikTok', kind: 'social', authentication: 'oauth2-pkce', status: 'unavailable',
-    capabilities: [{ operation: 'read-messages', available: false, reason: 'Approved Data Portability access can export direct-message data, but no live inbox API or working chat bridge exists.' }, { operation: 'send-message', available: false, reason: 'TikTok does not expose live direct-message sending as a public developer capability.' }],
+    capabilities: [{ operation: 'read-messages', available: false, reason: 'Approved Data Portability access can export direct-message data, but no live inbox API or working chat bridge exists.' }, { operation: 'publish-post', available: false, reason: 'TikTok’s Content Posting API requires an audited app; not set up.' }],
   },
-  ...networkConnectors.map((connector) => connector.descriptor()),
-  {
-    id: 'activitypub', displayName: 'ActivityPub', kind: 'protocol', authentication: 'oauth2-pkce', status: 'planned',
-    capabilities: [{ operation: 'read-feed', available: false, reason: 'Instance discovery and authorization are not implemented.' }, { operation: 'publish-post', available: false, reason: 'Client-to-server publishing is not implemented.' }],
-  },
-  {
-    id: 'atproto', displayName: 'AT Protocol', kind: 'protocol', authentication: 'oauth2-pkce', status: 'planned',
-    capabilities: [{ operation: 'read-feed', available: false, reason: 'Repository sync is not implemented.' }, { operation: 'publish-post', available: false, reason: 'Authenticated repository writes are not implemented.' }],
-  },
+  // Bluesky is also a chat network (its DMs bridge into Messages), so its public-posts entry gets its own id.
+  ...networkConnectors.map((connector) => connector.descriptor()).map((descriptor) => chatNetworks.some((network) => network.id === descriptor.id) ? { ...descriptor, id: `${descriptor.id}-posts`, displayName: `${descriptor.displayName} posts` } : descriptor),
 ];

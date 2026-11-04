@@ -4,6 +4,7 @@ import {
 } from '../domain/networkPosts';
 import { SocialPost } from '../domain/posts';
 import { hiveTagFor, ParsedSearch, postMatchesSearch } from '../domain/searchQuery';
+import { searchBluesky, searchMastodon, searchNostr } from './openNetworkFeeds';
 import { desoEndpoint, hiveEndpoint, lensEndpoint, lensPostsQuery, requestJSON, resolveLivepeer, resolveThreeSpeak } from './networkFeeds';
 
 /**
@@ -70,4 +71,8 @@ const deso: NetworkSearch = {
   },
 };
 
-export const networkSearches: NetworkSearch[] = [farcaster, lens, hive, deso];
+const bluesky: NetworkSearch = { id: 'bluesky', method: () => 'Bluesky search', search: (search) => searchBluesky(search.text, search.media === 'video') };
+const mastodon: NetworkSearch = { id: 'mastodon', method: () => 'posts by hashtag; Mastodon has no public full-text search', search: (search) => searchMastodon(search.text, search.media === 'video') };
+const nostr: NetworkSearch = { id: 'nostr', method: () => 'Nostr relay search', search: (search) => searchNostr(search.text, search.media === 'video') };
+
+export const networkSearches: NetworkSearch[] = [farcaster, lens, hive, deso, bluesky, mastodon, nostr];

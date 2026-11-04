@@ -116,7 +116,7 @@ The app has just three main screens: **Feed**, **Clips** and **Messages**. Every
   <tr>
     <td width="50%" valign="top">
       <h3>Feed: everything in one stream</h3>
-      <p>Public posts from Open Media, Farcaster, Lens, Hive and DeSo appear together. Switch between <strong>Relevant</strong>, <strong>Raw</strong> and your own lens at the top; write a new one in Search. Anyone can read the feed without an account.</p>
+      <p>Public posts from Open Media, Bluesky, Mastodon, Nostr, Farcaster, Lens, Hive and DeSo appear together. Switch between <strong>Relevant</strong>, <strong>Raw</strong> and your own lens at the top; write a new one in Search. Anyone can read the feed without an account.</p>
     </td>
     <td width="50%" valign="top">
       <h3>Clips: short videos, full screen</h3>
@@ -168,7 +168,7 @@ Open Media is in **public beta**. Everything below is in the code today.
 
 | Area | Available now | Status |
 | --- | --- | --- |
-| **Feed** | One feed mixing Open Media with Farcaster, Lens, Hive and DeSo. Raw and Relevant modes. "Why this?" on every ranked post. Readable without an account. | ✅ Live |
+| **Feed** | One feed mixing Open Media with Bluesky, Mastodon, Nostr, Farcaster, Lens, Hive and DeSo. Raw and Relevant modes. "Why this?" on every ranked post. Readable without an account. | ✅ Live |
 | **Web feeds (RSS, Atom, JSON Feed)** | Follow blogs, news sites, podcasts and weather alerts in your Feed by typing or pasting a site in Search ("theverge.com", "bbc", "weather california"), through an agent, or by importing OPML. Cards show the headline, a short excerpt, one image and a link to the publisher, never the full article. Official feeds of 41 major news outlets, the US National Weather Service and the UK Met Office carry a blue tick labelled "Official feed". Read politely: conditional requests, at most every 30 minutes, robots.txt for discovery. See [ADR 0024](docs/adrs/0024-web-feeds-rss-atom-json-feed.md). | 🧪 Tested on the web locally; not deployed; phone apps not tested |
 | **Feed lenses** | Every feed algorithm, Raw and Relevant included, is an open JSON manifest run by [one runner](src/domain/feedLenses.ts). Write one in plain words in Search or with an AI agent, keep it across devices, share it publicly or install someone else's. Lenses read only the signals they declare. See [ADR 0017](docs/adrs/0017-feed-lenses.md). | ✅ Live |
 | **Your own algorithm** | Tune the lens you use in plain words in Search: "less hive", "a lot more videos", "more new voices", "show hive again". Relevant becomes your own "My Relevant"; the built-ins never change. "Why this?" shows each post's score under your weights, every change is a version you can undo ("undo" in Search), and agents can tune, read the history and go back through MCP and REST. See [ADR 0021](docs/adrs/0021-your-own-feed-algorithm.md). | 🧪 Built and tested on the web locally; not deployed, phones not yet tested |
@@ -176,7 +176,7 @@ Open Media is in **public beta**. Everything below is in the code today.
 | **Profiles** | Your own address, **openmedia.site/@yourhandle**, and a resume at /@yourhandle/resume. **Profile → Edit profile** has every field: name, bio, work, experience, education, skills, languages, contact details and your accounts on LinkedIn, X, Instagram, GitHub and 16 other networks. Each field can be seen by Everyone, your Connections (mutual follows or people you talk with) or Only you; email and phone start as Only you. See [ADR 0019](docs/adrs/0019-profile-fields-and-addresses.md). **Fill it in from what you have**: your LinkedIn PDF ("Save to PDF") or LinkedIn data export, or your own website (read only when you ask, obeying robots.txt). You see every proposed value with where it came from and keep only what you choose; agents can do the same with your approval. See [ADR 0020](docs/adrs/0020-profile-import-linkedin-and-portfolio.md). | ✅ Live on the web since 2026-10-29; phone apps not yet tested. No profile photo upload yet. 🧪 Filling from LinkedIn or a website: tested on the web locally, not deployed; phones need a new build for the file picker |
 | **Clips** | Full-screen short videos from the same networks, with sound on tap and smooth loading. | ✅ Live |
 | **Posting** | Text posts and short videos (up to 3 minutes). Location data is removed from videos before upload. Report and delete posts. | ✅ Live |
-| **Cross-posting** | One post to Farcaster, Lens, Hive and DeSo using keys you approve in each network's own app. No seed phrases. | 🧪 Beta: built, not yet tested on live networks |
+| **Cross-posting** | One post to Bluesky (app password), Mastodon (any server, OAuth), Nostr (signer app or extension), Farcaster, Lens, Hive and DeSo, using keys you approve in each network's own app. No seed phrases or main passwords. X, Threads, LinkedIn, Instagram (Reels) and Facebook Pages post through their official OAuth APIs once Open Media's apps there are approved. See [ADR 0033](docs/adrs/0033-every-social-network-bluesky-mastodon-nostr-and-official-oauth.md). | 🧪 Beta: built and tested locally; not yet tried with real accounts; the five closed networks wait on app approval |
 | **People** | Tap any name to open one profile with that person's posts from every network they list. Your own contacts, notes and nicknames are encrypted and visible only to you, link to accounts only on an exact email or phone match, and every link can be undone. | ✅ Live |
 | **Contacts and one conversation per person** | Edit a contact from their profile: name, any number of emails, phone numbers and handles (Open Media, Farcaster, Lens, Hive, DeSo, WhatsApp, Telegram, Signal and the other bridged networks). Your saved name shows everywhere; without one, the fullest name the platform gives. Chats and email from any of a contact's identifiers join one conversation in Messages, each run marked with where it came from, and replies go back the way they last wrote (switchable). Import from the phone (iOS, Android), the browser's contact picker (Android Chrome), a vCard or CSV from Apple, Google or Outlook, or by dragging people out of the Mac's Contacts app; you review before anything is saved. See [ADR 0023](docs/adrs/0023-editable-contacts-and-one-conversation-per-person.md). | 🧪 Tested on the web locally; not deployed; phone apps not tested |
 | **Privacy and follows** | Make your account private so only followers you approve see your posts, choose which name people see, and follow people. Verified people get a blue tick. | 🧪 Beta: verification turns on once Stripe Identity is configured |
@@ -246,7 +246,7 @@ Install links for VS Code and Cursor, and the steps for every other client, are 
 
 ## Why now
 
-1. **Open social networks are finally real.** Farcaster, Lens, Hive and DeSo let any app read and publish posts without permission from a gatekeeper. For the first time, a single app can be a full citizen of many networks.
+1. **Open social networks are finally real.** Bluesky, Mastodon, Nostr, Farcaster, Lens, Hive and DeSo let any app read and publish posts without permission from a gatekeeper. For the first time, a single app can be a full citizen of many networks.
 2. **People are tired of being the product.** Frustration with addictive, opaque feeds is mainstream, and regulators in Europe and elsewhere now require more transparency about recommendations and easier data portability.
 3. **AI assistants need open, trustworthy data.** People increasingly ask AI agents to read, search and act for them. Open Media's public posts are open to agents by design, and its events service already works inside AI assistants.
 4. **One codebase can now reach every device.** Modern cross-platform tools let a small team ship one polished app to iPhone, Android and the web at the same time.
@@ -368,7 +368,7 @@ No. Open Media is designed to be useful on day one by connecting the networks an
 <details>
 <summary><strong>Can it show my Instagram, X, TikTok or LinkedIn feed?</strong></summary>
 <br>
-Not today. Those companies do not offer open access for apps like Open Media, and Open Media does not scrape them. It connects to networks that allow it (Farcaster, Lens, Hive, DeSo and email) and will add others as official access becomes available. For messaging only, optional open-source bridges can bring in chats from WhatsApp and similar apps, with a clear warning first.
+Not today. Those companies do not offer open access for apps like Open Media, and Open Media does not scrape them. It reads networks that allow it (Bluesky, Mastodon, Nostr, Farcaster, Lens, Hive, DeSo and email). X, Threads, LinkedIn, Instagram and Facebook Pages can receive your posts through their official APIs once each approves Open Media's app, but their feeds can't be read. For messaging only, optional open-source bridges can bring in chats from WhatsApp and similar apps, with a clear warning first.
 </details>
 
 <details>

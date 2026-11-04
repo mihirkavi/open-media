@@ -15,7 +15,7 @@ import { createInterface } from 'node:readline/promises';
 import { defaultBaseUrl, Network, OpenMedia, OpenMediaError, Post, Session } from '../../sdk/src/index';
 
 const version = '0.1.0';
-const networks: Network[] = ['open-media', 'farcaster', 'lens', 'hive', 'deso'];
+const networks: Network[] = ['open-media', 'farcaster', 'lens', 'hive', 'deso', 'bluesky', 'mastodon', 'nostr'];
 
 const help = `open-media ${version}: Open Media from the command line
 

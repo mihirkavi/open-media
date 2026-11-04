@@ -4,12 +4,14 @@ import {
   socialPostFromLens,
 } from '../domain/networkPosts';
 import { clipPosts, SocialPost } from '../domain/posts';
+import { fetchBlueskyFeed, fetchMastodonFeed, fetchNostrFeed } from './openNetworkFeeds';
 import { CommunicationConnector, ConnectorDescriptor } from './types';
 
 /**
- * Read-only clients for the public, keyless APIs of four blockchain-based social networks. They run
- * in the app (all four allow cross-origin reads), send no account data, and never sign anything.
- * Publishing would need a wallet or network signer per person, so it stays unavailable.
+ * Read-only clients for the public, keyless APIs of the open social networks (four blockchain-based,
+ * plus Bluesky, Mastodon and Nostr in `openNetworkFeeds.ts`). They run in the app (all allow
+ * cross-origin reads), send no account data, and never sign anything. Publishing lives in
+ * `publishing/`, through each person's own delegated key.
  */
 export interface NetworkFeedPage { posts: SocialPost[]; cursor?: string }
 
@@ -204,6 +206,7 @@ function forKind(posts: SocialPost[], kind: FeedKind) {
 
 const fetchers: Record<NetworkId, (cursor?: string, kind?: FeedKind) => Promise<NetworkFeedPage>> = {
   farcaster: fetchFarcasterFeed, lens: fetchLensFeed, hive: fetchHiveFeed, deso: fetchDesoFeed,
+  bluesky: fetchBlueskyFeed, mastodon: fetchMastodonFeed, nostr: fetchNostrFeed,
 };
 
 export function networkDescriptor(id: NetworkId): ConnectorDescriptor {
@@ -211,7 +214,7 @@ export function networkDescriptor(id: NetworkId): ConnectorDescriptor {
     id, displayName: networks[id].displayName, kind: 'protocol', authentication: 'none', status: 'available',
     capabilities: [
       { operation: 'read-feed', available: true },
-      { operation: 'publish-post', available: false, reason: `Publishing needs your own ${networks[id].displayName} account signer; Open Media only reads public posts today.` },
+      { operation: 'publish-post', available: true, reason: `Connect your ${networks[id].displayName} account in Settings → Cross-posting.` },
       { operation: 'read-messages', available: false, reason: 'Only public posts are read.' },
     ],
   };

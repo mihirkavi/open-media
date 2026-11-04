@@ -61,10 +61,12 @@ import { discloseLegalName, handleVerificationWebhook, startVerification, Verifi
 
 export type AgentEnv = { WEB_APP_HOSTS?: string; PROFILE_IMPORT_ALLOW_LOCAL?: string } & PublicApiEnv & BridgesEnv & ContactsEnv & VerificationEnv & PublicEventsEnv & PaymentsEnv & AgentAuthEnv & MarketplaceEnv & TranslateEnv & AiChatEnv;
 
+import { socialNetworks, SocialOAuthEnv, socialStatus } from './socialOAuth.js';
+
 const version = '1.0.0';
-const sources = ['open-media', 'farcaster', 'lens', 'hive', 'deso'] as const;
+const sources = ['open-media', 'farcaster', 'lens', 'hive', 'deso', 'bluesky', 'mastodon', 'nostr'] as const;
 type Source = typeof sources[number];
-const networkIds: NetworkId[] = ['farcaster', 'lens', 'hive', 'deso'];
+const networkIds: NetworkId[] = ['farcaster', 'lens', 'hive', 'deso', 'bluesky', 'mastodon', 'nostr'];
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const handlePattern = /^[a-z0-9_]{3,24}$/i;
 
@@ -331,6 +333,8 @@ export function networksDescription(env: AgentEnv) {
         crossPosting: 'Connect it in the app (Settings → Cross-posting) with a key you approve in that network; Open Media never asks for a seed phrase.',
       };
     }),
+    // ADR 0033: closed networks Open Media posts to (never reads) through their official OAuth APIs.
+    postingNetworks: socialNetworks.map((id) => ({ id, name: { x: 'X', threads: 'Threads', linkedin: 'LinkedIn', instagram: 'Instagram', facebook: 'Facebook Pages' }[id], kind: 'closed social network, posting only', available: socialStatus(env as unknown as SocialOAuthEnv)[id], how: 'Connect it in the app (Settings → Cross-posting); the network asks you to approve Open Media.' })),
     email: { id: 'email', name: 'Email', kind: 'IMAP or POP3 with SMTP', capabilities: ['read', 'reply', 'send'], how: 'Connect in the app (Settings → Email & connections), or POST /v1/mail-accounts with your access token.' },
     chatNetworks: chatNetworks.map((network) => ({
       id: network.id, name: network.name, kind: 'chat bridge (opt-in)', runningOnThisServer: running.has(network.id), accountRisk: network.risk,
@@ -1366,7 +1370,7 @@ function registerPublicTools(server: McpServer, env: AgentEnv, origin: string) {
       async (resource) => ({ contents: [{ uri: resource.href, mimeType: mcpAppMimeType, text: appViewHtml, _meta: { ui: { prefersBorder: true } } }] }));
   }
   const sourceEnum = z.enum(sources);
-  tool(server, 'get_feed', { title: 'Read the feed', description: 'The mixed feed: Open Media plus Farcaster, Lens, Hive and DeSo public posts through a feed lens: raw (newest first, the default), relevant, work (jobs, hiring and professional posts), or any shared lens id from list_feed_lenses. Each post includes its network, source link and “why” reasons, including the lens’s rules. Pass nextCursor back to read further.', input: { sources: z.array(sourceEnum).optional(), kind: z.enum(['feed', 'clips']).optional().describe('clips = short videos only'), mode: z.enum(['raw', 'relevant']).optional().describe('Older name for the built-in lenses; prefer lens'), lens: z.string().optional().describe('raw, relevant, work, or a shared lens id'), cursor: z.string().optional() }, readOnly: true, view: appViewUri },
+  tool(server, 'get_feed', { title: 'Read the feed', description: 'The mixed feed: Open Media plus Bluesky, Mastodon, Nostr, Farcaster, Lens, Hive and DeSo public posts through a feed lens: raw (newest first, the default), relevant, work (jobs, hiring and professional posts), or any shared lens id from list_feed_lenses. Each post includes its network, source link and “why” reasons, including the lens’s rules. Pass nextCursor back to read further.', input: { sources: z.array(sourceEnum).optional(), kind: z.enum(['feed', 'clips']).optional().describe('clips = short videos only'), mode: z.enum(['raw', 'relevant']).optional().describe('Older name for the built-in lenses; prefer lens'), lens: z.string().optional().describe('raw, relevant, work, or a shared lens id'), cursor: z.string().optional() }, readOnly: true, view: appViewUri },
     async (args) => feed(env, origin, { sources: args.sources as Source[] | undefined, kind: args.kind as 'feed' | 'clips' | undefined, mode: args.mode as FeedMode | undefined, lens: typeof args.lens === 'string' ? (await lensCall(() => findLens(env, String(args.lens)))).lens : undefined, cursor: args.cursor as string | undefined }));
   // Feed lenses (ADR 0017): how the Feed is ordered, as inspectable manifests anyone can write and share.
   tool(server, 'list_feed_lenses', { title: 'List feed lenses', description: 'The feed algorithms people can use: the built-in Raw, Relevant and Work, and lenses people shared publicly, each with its rules in plain words, what it reads, how many installed it, and the manifest format for writing one.', input: { query: z.string().max(80).optional() }, readOnly: true }, (args) => listLenses(env, origin, args.query as string | undefined));

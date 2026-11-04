@@ -10,7 +10,7 @@ import { initialsFor } from './publicPosts';
  * applies the small published filters below. Filtering only hides a post from this doorway; the post
  * stays on its network. Each post carries its selection and filters so “Why this?” can show them.
  */
-export type NetworkId = 'farcaster' | 'lens' | 'hive' | 'deso';
+export type NetworkId = 'farcaster' | 'lens' | 'hive' | 'deso' | 'bluesky' | 'mastodon' | 'nostr';
 
 export interface NetworkInfo {
   id: NetworkId;
@@ -43,6 +43,21 @@ export const networks: Record<NetworkId, NetworkInfo> = {
     id: 'deso', displayName: 'DeSo',
     about: 'Accounts and posts are stored directly on the DeSo blockchain.',
     filters: ['Posts hidden by their author or by DeSo are hidden', 'Accounts without a DeSo username are hidden', 'Replies and reposts without text are hidden'],
+  },
+  bluesky: {
+    id: 'bluesky', displayName: 'Bluesky',
+    about: 'An open network on the AT Protocol: each account’s posts live in its own data repository, which any app can read.',
+    filters: ['Posts Bluesky’s moderation labelled spam, adult or graphic are hidden', 'Replies are hidden', 'Accounts without a display name or profile photo are hidden'],
+  },
+  mastodon: {
+    id: 'mastodon', displayName: 'Mastodon',
+    about: 'Part of the fediverse: thousands of independent servers that share posts over the open ActivityPub standard.',
+    filters: ['Posts the author marked sensitive or with a content warning are hidden', 'Replies, boosts and non-public posts are hidden', 'Accounts that look automated (bots) are hidden'],
+  },
+  nostr: {
+    id: 'nostr', displayName: 'Nostr',
+    about: 'An open protocol with no company in the middle: posts are signed by their author’s key and passed between public relays.',
+    filters: ['Notes whose signature doesn’t match their author are hidden', 'Accounts without a published name and profile photo are hidden (common for spam)', 'Replies and notes marked with a content warning are hidden'],
   },
 };
 
@@ -342,7 +357,7 @@ function desoVideo(record: DesoPostRecord, videos?: Map<string, ResolvedVideo>):
 
 // ---------- shared helpers ----------
 
-interface NetworkPostInput {
+export interface NetworkPostInput {
   network: NetworkId;
   externalId: string;
   canonicalURL: string;
@@ -359,7 +374,7 @@ interface NetworkPostInput {
   selection: string;
 }
 
-function networkPost(input: NetworkPostInput): SocialPost {
+export function networkPost(input: NetworkPostInput): SocialPost {
   const name = networks[input.network].displayName;
   const media: PostMedia[] = input.video
     ? [{ kind: 'video', url: input.video.url, streaming: input.video.streaming, posterUrl: input.video.posterUrl ?? input.images[0], durationSeconds: input.video.durationSeconds, aspectRatio: input.video.aspectRatio ?? 9 / 16, altText: input.imageAlt?.trim() || `Video shared on ${name}` }]

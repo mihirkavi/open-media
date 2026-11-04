@@ -22,7 +22,7 @@ export interface ParsedSearch {
 }
 
 const stopWords = new Set(['a', 'an', 'the', 'about', 'on', 'in', 'from', 'of', 'for', 'and', 'or', 'with', 'to', 'by', 'posts', 'post', 'show', 'me', 'find', 'search', 'what', 'are', 'is', 'people', 'saying', 'say', 'any', 'all', 'some', 'latest', 'recent', 'new', 'newest']);
-const networkNames: [RegExp, NetworkId][] = [[/\bfarcaster|warpcast\b/i, 'farcaster'], [/\blens\b/i, 'lens'], [/\bhive\b/i, 'hive'], [/\bdeso\b/i, 'deso']];
+const networkNames: [RegExp, NetworkId][] = [[/\bfarcaster|warpcast\b/i, 'farcaster'], [/\blens\b/i, 'lens'], [/\bhive\b/i, 'hive'], [/\bdeso\b/i, 'deso'], [/\b(bluesky|bsky)\b/i, 'bluesky'], [/\b(mastodon|fediverse)\b/i, 'mastodon'], [/\bnostr\b/i, 'nostr']];
 const day = 24 * 60 * 60 * 1000;
 
 export function parseSearchQuery(input: string, now = Date.now()): ParsedSearch {

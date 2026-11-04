@@ -88,7 +88,8 @@ test('networks report bridges as running only when this server runs them', () =>
   assert.ok(off.chatNetworks.every((network) => !network.runningOnThisServer));
   const on = networksDescription({ ...env, BRIDGES_HOMESERVER_URL: 'http://hs', BRIDGES_SERVER_NAME: 'x', BRIDGES_AS_TOKEN: 't', BRIDGES_PROVISIONING_SECRET: 's', BRIDGES_SIGNAL_URL: 'http://signal' });
   assert.deepEqual(on.chatNetworks.filter((network) => network.runningOnThisServer).map((network) => network.id), ['signal']);
-  assert.deepEqual(off.openNetworks.map((network) => network.id), ['farcaster', 'lens', 'hive', 'deso']);
+  assert.deepEqual(off.openNetworks.map((network) => network.id), ['farcaster', 'lens', 'hive', 'deso', 'bluesky', 'mastodon', 'nostr']);
+  assert.deepEqual(off.postingNetworks.map((network) => [network.id, network.available]), [['x', false], ['threads', false], ['linkedin', false], ['instagram', false], ['facebook', false]]);
 });
 
 test('account routes and the account MCP server refuse requests without a valid token', async () => {

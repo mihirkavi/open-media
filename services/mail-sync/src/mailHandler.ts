@@ -16,6 +16,7 @@ import { resolveMailHost } from './networkSafety.js';
 import { handleAgentRequest, isAgentPath } from './agentApi.js';
 import { handlePublicApiRequest, isPublicApiPath } from './publicApi.js';
 import { authenticate } from './session.js';
+import { appReturnURL, authorizeURL, exchangeCode, isSocialNetwork, parsePost, parseSession, publishSocial, refreshSession, SocialOAuthEnv, socialStatus } from './socialOAuth.js';
 import { runSearchAssist, SearchAssistEnv } from './searchAssist.js';
 import { AiChatEnv, ownSearchModel, recordSearch } from './aiChat.js';
 import { runTranslate, TranslateEnv } from './translate.js';
@@ -29,7 +30,7 @@ import { describeValidationError } from './validation.js';
 
 export interface Limiter { limit(options: { key: string }): Promise<{ success: boolean }> }
 
-export interface MailEnv extends FarcasterSignerEnv, SearchAssistEnv, AiChatEnv, TranslateEnv, BridgesEnv, GifSearchEnv {
+export interface MailEnv extends FarcasterSignerEnv, SocialOAuthEnv, SearchAssistEnv, AiChatEnv, TranslateEnv, BridgesEnv, GifSearchEnv {
   SUPABASE_URL: string;
   SUPABASE_PUBLISHABLE_KEY: string;
   MAIL_CREDENTIALS_KEY: string;
@@ -112,6 +113,10 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
     if (request.method === 'GET' && url.pathname === '/health') return json(200, { ok: true }, headers);
     // Which cross-posting networks this server can help with (no secrets, no account data).
     if (request.method === 'GET' && url.pathname === '/v1/cross-posting/status') return json(200, { farcaster: farcasterPublishingConfigured(env) }, headers);
+    // Closed networks' official OAuth (ADR 0033): which are set up, and the redirect back into the app.
+    if (request.method === 'GET' && url.pathname === '/v1/social/status') return json(200, socialStatus(env), headers);
+    const socialCallback = request.method === 'GET' && url.pathname.match(/^\/v1\/social\/([a-z]+)\/callback$/);
+    if (socialCallback && isSocialNetwork(socialCallback[1])) return new Response(null, { status: 302, headers: { location: appReturnURL(env, url.origin, url.searchParams), 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' } });
     // Basic AI search over public posts; no account needed, rate limited per IP.
     if (request.method === 'POST' && url.pathname === '/v1/search/assist') {
       const limiter = env.PUBLIC_API_RATE_LIMITER;
@@ -166,7 +171,7 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
     if (iconMatch) return await senderIconResponse(request, iconMatch[1].toLowerCase(), env);
 
     // Unknown paths are a 404 for everyone, so agents learn a URL is wrong rather than that they need a token.
-    if (!/^\/v1\/(mail-accounts|bridges|cross-posting)(\/|$)/.test(url.pathname)) return json(404, { error: 'Not found. Start at /llms.txt or /docs.' }, headers);
+    if (!/^\/v1\/(mail-accounts|bridges|cross-posting|social)(\/|$)/.test(url.pathname)) return json(404, { error: 'Not found. Start at /llms.txt or /docs.' }, headers);
     const session = await authenticate(request, env.SUPABASE_URL);
     const repository = new SupabaseRestRepository(env.SUPABASE_URL, env.SUPABASE_PUBLISHABLE_KEY, session.token);
 
@@ -261,6 +266,29 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
     if (request.method === 'POST' && url.pathname === '/v1/cross-posting/farcaster/messages') {
       if (!await allowed(env.MAIL_SEND_RATE_LIMITER, session.userId)) return rateLimited(headers);
       return json(201, await forwardSignedMessage(await request.arrayBuffer()), headers);
+    }
+
+    // Closed networks (ADR 0033). The person's token lives on their device and is sent with each
+    // post; nothing here is stored or logged.
+    const social = request.method === 'POST' && url.pathname.match(/^\/v1\/social\/([a-z]+)\/(authorize|token|publish)$/);
+    if (social && isSocialNetwork(social[1])) {
+      const network = social[1];
+      const body = (await readJSON(request)) as Record<string, unknown> | null;
+      if (social[2] === 'authorize') {
+        if (!await allowed(env.MAIL_CONNECT_RATE_LIMITER, session.userId)) return rateLimited(headers);
+        return json(200, { url: authorizeURL(network, env, url.origin, { state: String(body?.state ?? ''), challenge: typeof body?.challenge === 'string' ? body.challenge : undefined }) }, headers);
+      }
+      if (social[2] === 'token') {
+        if (!await allowed(env.MAIL_CONNECT_RATE_LIMITER, session.userId)) return rateLimited(headers);
+        const code = typeof body?.code === 'string' && body.code.length <= 2048 ? body.code : '';
+        if (!code) return json(400, { error: 'That sign-in didn’t finish. Try again.' }, headers);
+        return json(201, await exchangeCode(network, env, url.origin, { code, verifier: typeof body?.verifier === 'string' ? body.verifier : undefined }), headers);
+      }
+      if (!await allowed(env.MAIL_SEND_RATE_LIMITER, session.userId)) return rateLimited(headers);
+      let current = parseSession(body?.session);
+      if (current.expiresAt && current.expiresAt < Date.now() + 60_000) current = await refreshSession(network, env, current);
+      const published = await publishSocial(network, current, parsePost(body?.post));
+      return json(201, { ...published, session: current }, headers);
     }
 
     // Bridged chats (ADR 0011): every call acts only as this person's own Matrix user.

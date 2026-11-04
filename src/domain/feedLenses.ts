@@ -14,7 +14,7 @@ export const lensFormat = 'open-media.feed-lens/1';
 export const lensFormatV2 = 'open-media.feed-lens/2';
 export type LensFormat = typeof lensFormat | typeof lensFormatV2;
 
-export type LensSource = 'open-media' | 'farcaster' | 'lens' | 'hive' | 'deso' | 'events' | 'rss';
+export type LensSource = 'open-media' | 'farcaster' | 'lens' | 'hive' | 'deso' | 'bluesky' | 'mastodon' | 'nostr' | 'events' | 'rss';
 export type LensKind = 'text' | 'image' | 'video' | 'product' | 'service' | 'event' | 'job';
 /** Data about the viewer or the post's audience that a lens must ask for. Post text, time, network and kind are always readable. */
 export type LensPermission = 'follows' | 'interests' | 'public_engagement';
@@ -103,7 +103,7 @@ export interface LensContext {
 /** Never readable by any lens; listed in every “Why this?”. */
 export const forbiddenSignals = ['Private messages', 'Exact location', 'Sensitive-trait inference', 'KYC documents', 'Emotional-state prediction'] as const;
 
-export const lensSources: LensSource[] = ['open-media', 'farcaster', 'lens', 'hive', 'deso', 'events', 'rss'];
+export const lensSources: LensSource[] = ['open-media', 'farcaster', 'lens', 'hive', 'deso', 'bluesky', 'mastodon', 'nostr', 'events', 'rss'];
 export const lensKinds: LensKind[] = ['text', 'image', 'video', 'product', 'service', 'event', 'job'];
 export const lensPermissions: LensPermission[] = ['follows', 'interests', 'public_engagement'];
 
@@ -642,7 +642,7 @@ const kindWords: [RegExp, LensKind[], string][] = [
   [/\b(events?|meetups?|happenings?)\b/gi, ['event'], 'events'],
   [/\b(job (?:posts?|listings?|openings?)|vacanc(?:y|ies)|openings?)\b/gi, ['job'], 'job posts'],
 ];
-const sourceWords: [RegExp, LensSource][] = [[/\b(farcaster|warpcast)\b/gi, 'farcaster'], [/\blens\b(?!\s+(?:called|named))/gi, 'lens'], [/\bhive\b/gi, 'hive'], [/\bdeso\b/gi, 'deso'], [/\bopen media\b/gi, 'open-media'], [/\b(rss|atom feeds?|web ?feeds?|feed reader|blogs and news(?: sites)?)\b/gi, 'rss']];
+const sourceWords: [RegExp, LensSource][] = [[/\b(farcaster|warpcast)\b/gi, 'farcaster'], [/\blens\b(?!\s+(?:called|named))/gi, 'lens'], [/\bhive\b/gi, 'hive'], [/\bdeso\b/gi, 'deso'], [/\b(bluesky|bsky)\b/gi, 'bluesky'], [/\b(mastodon|fediverse)\b/gi, 'mastodon'], [/\bnostr\b/gi, 'nostr'], [/\bopen media\b/gi, 'open-media'], [/\b(rss|atom feeds?|web ?feeds?|feed reader|blogs and news(?: sites)?)\b/gi, 'rss']];
 const negative = /^\s*(?:and\s+|but\s+|also\s+)?(?:no|hide|hiding|without|mute|muting|not|never|skip|exclude|excluding|remove|block|less|fewer|stop showing|don'?t show|do not show|nothing (?:about|from|on))\b/i;
 const filler = new Set(['a', 'an', 'the', 'my', 'me', 'i', 'want', 'show', 'give', 'make', 'create', 'build', 'set', 'up', 'feed', 'lens', 'algorithm', 'timeline', 'only', 'just', 'posts', 'post', 'stuff', 'things', 'content', 'from', 'by', 'on', 'of', 'in', 'to', 'for', 'with', 'and', 'or', 'that', 'is', 'are', 'please', 'which', 'where', 'all', 'any', 'some', 'more', 'less', 'about', 'mentioning', 'covering', 'related', 'like', 'no', 'hide', 'without', 'mute', 'not', 'never', 'skip', 'exclude', 'remove', 'block', 'also', 'but', 'everything', 'anything', 'people', 'accounts', 'follow', 'following', 'follows', 'newest', 'latest', 'first', 'chronological', 'order', 'mostly', 'mainly', 'lot', 'lots', 'can', 'you', 'could', 'would', 'let', 'see', 'into', 'interested', 'am', "i'm", 'im', 'new', 'one', 'called', 'named', 'it', 'them', 'those', 'these', 'what', 'who', 'do', 'don\'t', 'dont', 'stop', 'showing', 'see', 'nothing', 'none']);
 
@@ -974,7 +974,7 @@ function ageLabel(hours: number) {
   return `${hours} ${hours === 1 ? 'hour' : 'hours'}`;
 }
 
-const sourceLabels: Record<LensSource, string> = { 'open-media': 'Open Media', farcaster: 'Farcaster', lens: 'Lens', hive: 'Hive', deso: 'DeSo', events: 'public event listings', rss: 'web feeds' };
+const sourceLabels: Record<LensSource, string> = { 'open-media': 'Open Media', farcaster: 'Farcaster', lens: 'Lens', hive: 'Hive', deso: 'DeSo', bluesky: 'Bluesky', mastodon: 'Mastodon', nostr: 'Nostr', events: 'public event listings', rss: 'web feeds' };
 
 function sourceName(source: string): string {
   return sourceLabels[source as LensSource] ?? source;

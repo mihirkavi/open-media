@@ -17,6 +17,9 @@ export const networkInteractions: Record<NetworkId, readonly InteractionKind[]> 
   lens: ['like', 'comment', 'reshare'],
   hive: ['like', 'comment', 'reshare'],
   deso: ['like', 'comment', 'reshare'],
+  bluesky: ['like', 'comment', 'reshare'],
+  mastodon: ['like', 'comment', 'reshare'],
+  nostr: ['like', 'comment', 'reshare'],
 };
 
 /** The network-side identity of a post, as each network's write API names it. */
@@ -24,7 +27,10 @@ export type InteractionTarget =
   | { network: 'farcaster'; fid: number; hash: string }
   | { network: 'lens'; postId: string }
   | { network: 'hive'; author: string; permlink: string }
-  | { network: 'deso'; postHash: string };
+  | { network: 'deso'; postHash: string }
+  | { network: 'bluesky'; uri: string; cid: string }
+  | { network: 'mastodon'; uri: string }
+  | { network: 'nostr'; id: string; pubkey: string };
 
 export function interactionTarget(post: SocialPost): InteractionTarget | undefined {
   const id = post.provenance.externalId;
@@ -40,6 +46,15 @@ export function interactionTarget(post: SocialPost): InteractionTarget | undefin
       return author && permlink && !rest.length && /^[a-z][a-z0-9.-]{2,15}$/.test(author) && /^[a-z0-9-]+$/.test(permlink) ? { network: 'hive', author, permlink } : undefined;
     }
     case 'deso': return /^[0-9a-f]{64}$/i.test(id) ? { network: 'deso', postHash: id.toLowerCase() } : undefined;
+    case 'bluesky': {
+      const [uri, cid, ...rest] = id.split(' ');
+      return uri?.startsWith('at://') && cid && /^[a-z0-9]{20,}$/i.test(cid) && !rest.length ? { network: 'bluesky', uri, cid } : undefined;
+    }
+    case 'mastodon': return safeHttpsUrl(id) ? { network: 'mastodon', uri: id } : undefined;
+    case 'nostr': {
+      const [eventId, pubkey, ...rest] = id.split(' ');
+      return /^[0-9a-f]{64}$/.test(eventId ?? '') && /^[0-9a-f]{64}$/.test(pubkey ?? '') && !rest.length ? { network: 'nostr', id: eventId, pubkey } : undefined;
+    }
     default: return undefined;
   }
 }

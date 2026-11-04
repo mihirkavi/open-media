@@ -2,11 +2,10 @@ import { useCallback, useEffect, useSyncExternalStore } from 'react';
 
 import { ApprovalPrompt, NetworkAccount, PublishAvailability, PublishingError, TextRequest } from '../connectors/publishing/types';
 import { loadCrossPostPreferences, publishingConnector, saveCrossPostPreferences } from '../data/crossPostService';
-import { CrossPostPreferences, crossPostNetworks, defaultCrossPostPreferences, defaultDestinations } from '../domain/crossPosting';
-import { NetworkId } from '../domain/networkPosts';
+import { CrossPostPreferences, crossPostNetworks, defaultCrossPostPreferences, defaultDestinations, DestinationId } from '../domain/crossPosting';
 
 export interface CrossPostNetworkState {
-  network: NetworkId;
+  network: DestinationId;
   availability: PublishAvailability;
   account?: NetworkAccount;
   busy: boolean;
@@ -29,15 +28,15 @@ let snapshot: Snapshot = {
 };
 const listeners = new Set<() => void>();
 let loading: Promise<void> | undefined;
-const pendingConnections = new Map<NetworkId, AbortController>();
-const pendingText = new Map<NetworkId, { resolve: (value: string) => void; reject: (reason: Error) => void }>();
+const pendingConnections = new Map<DestinationId, AbortController>();
+const pendingText = new Map<DestinationId, { resolve: (value: string) => void; reject: (reason: Error) => void }>();
 
 function update(change: (current: Snapshot) => Snapshot) {
   snapshot = change(snapshot);
   listeners.forEach((listener) => listener());
 }
 
-function updateNetwork(network: NetworkId, change: Partial<CrossPostNetworkState>) {
+function updateNetwork(network: DestinationId, change: Partial<CrossPostNetworkState>) {
   update((current) => ({ ...current, networks: current.networks.map((item) => item.network === network ? { ...item, ...change } : item) }));
 }
 
@@ -59,7 +58,7 @@ export function useCrossPosting() {
   const state = useSyncExternalStore((listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; }, () => snapshot, () => snapshot);
   useEffect(() => { load(); }, []);
 
-  const connect = useCallback(async (network: NetworkId) => {
+  const connect = useCallback(async (network: DestinationId) => {
     pendingConnections.get(network)?.abort();
     const controller = new AbortController();
     pendingConnections.set(network, controller);
@@ -80,13 +79,13 @@ export function useCrossPosting() {
   }, []);
 
   /** Loads what a network's Connect button needs before it is tapped (see PublishingConnector.prepareConnect). */
-  const prepareConnect = useCallback((network: NetworkId) => {
+  const prepareConnect = useCallback((network: DestinationId) => {
     publishingConnector(network).then((connector) => connector.prepareConnect?.()).catch(() => undefined);
   }, []);
-  const cancelConnect = useCallback((network: NetworkId) => { pendingConnections.get(network)?.abort(); }, []);
-  const submitText = useCallback((network: NetworkId, value: string) => { pendingText.get(network)?.resolve(value); }, []);
+  const cancelConnect = useCallback((network: DestinationId) => { pendingConnections.get(network)?.abort(); }, []);
+  const submitText = useCallback((network: DestinationId, value: string) => { pendingText.get(network)?.resolve(value); }, []);
 
-  const disconnect = useCallback(async (network: NetworkId) => {
+  const disconnect = useCallback(async (network: DestinationId) => {
     updateNetwork(network, { busy: true, error: '' });
     try {
       await (await publishingConnector(network)).disconnect();
@@ -96,7 +95,7 @@ export function useCrossPosting() {
     }
   }, []);
 
-  const setIncludedByDefault = useCallback(async (network: NetworkId, included: boolean) => {
+  const setIncludedByDefault = useCallback(async (network: DestinationId, included: boolean) => {
     const excluded = new Set(snapshot.preferences.excludedByDefault);
     if (included) excluded.delete(network); else excluded.add(network);
     const preferences = { excludedByDefault: crossPostNetworks.filter((item) => excluded.has(item)) };

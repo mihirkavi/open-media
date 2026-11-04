@@ -10,7 +10,7 @@
 
 export const defaultBaseUrl = 'https://api.openmedia.site';
 
-export type Network = 'open-media' | 'farcaster' | 'lens' | 'hive' | 'deso';
+export type Network = 'open-media' | 'farcaster' | 'lens' | 'hive' | 'deso' | 'bluesky' | 'mastodon' | 'nostr';
 export type FeedMode = 'raw' | 'relevant';
 
 export interface Post {

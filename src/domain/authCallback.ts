@@ -29,6 +29,8 @@ export function parseAuthCallbackURL(value: string): AuthCallback | undefined {
   if (!nativeAuth && !webAuth) return undefined;
 
   const parameters = new URLSearchParams(url.search);
+  // Another network's connect window (Mastodon OAuth) also returns to /auth; it isn't a sign-in.
+  if (parameters.get('state')?.startsWith('omc_')) return undefined;
   const fragment = new URLSearchParams(url.hash.replace(/^#/, ''));
   const error = parameters.get('error_description') ?? fragment.get('error_description') ?? parameters.get('error') ?? fragment.get('error');
   if (error) return { error };
