@@ -852,14 +852,15 @@ export function IconButton({
   );
 }
 
-function MobileTabs({
+export function MobileTabs({
   destination,
   onNavigate,
   onCompose,
 }: {
   destination: PrimaryDestination;
   onNavigate: (value: Destination) => void;
-  onCompose: () => void;
+  /** Left out for guests, who have nothing to post with. */
+  onCompose?: () => void;
 }) {
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -888,7 +889,7 @@ function MobileTabs({
           </Text>
         </Pressable>
       ))}
-      {destination !== "messages" ? (
+      {onCompose && destination !== "messages" ? (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Create"

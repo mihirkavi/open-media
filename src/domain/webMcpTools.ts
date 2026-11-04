@@ -25,14 +25,15 @@ export const webMcpTools: WebMcpToolDefinition[] = [
   },
   {
     name: 'get_open_media_feed', title: 'Read the Open Media feed',
-    description: 'The mixed public feed from Open Media and the open networks through a feed lens: raw (newest first), relevant (transparently ranked), work (jobs and professional posts) or a shared lens id, with source links and "why" reasons. Pass nextCursor back as cursor to read further.',
+    description: 'The mixed public feed from Open Media and the open networks through a feed lens: raw (newest first), relevant (transparently ranked), work (jobs and professional posts) or a shared lens id, with source links and "why" reasons. kind=clips returns only short videos, the same stream as the Clips tab. Pass nextCursor back as cursor to read further.',
     inputSchema: { type: 'object', properties: {
       sources: { type: 'string', description: 'Comma-separated networks: open-media, farcaster, lens, hive, deso' },
+      kind: { type: 'string', enum: ['feed', 'clips'], description: 'clips = short videos only' },
       lens: { type: 'string', description: 'raw, relevant, work, or a shared lens id from list_open_media_feed_lenses' },
       mode: { type: 'string', enum: ['raw', 'relevant'], description: 'Older name for the built-in lenses; prefer lens' },
       cursor: { type: 'string', description: 'nextCursor from the previous page' },
     } },
-    path: '/v1/feed', query: { sources: 'sources', lens: 'lens', mode: 'mode', cursor: 'cursor' },
+    path: '/v1/feed', query: { sources: 'sources', kind: 'kind', lens: 'lens', mode: 'mode', cursor: 'cursor' },
   },
   {
     name: 'list_open_media_feed_lenses', title: 'List Open Media feed lenses',

@@ -9,7 +9,7 @@ import { BrandMark } from './BrandMark';
 import { LandingFilm } from './LandingFilm';
 import { Text } from './Text';
 
-export type PublicPage = 'landing' | 'feed' | 'mission' | 'developers';
+export type PublicPage = 'landing' | 'feed' | 'clips' | 'mission' | 'developers';
 
 /**
  * The website's front page for people who aren't signed in. It explains the idea in the order the
@@ -161,7 +161,7 @@ export function PublicNav({ current, onNavigate, onSignIn }: { current: PublicPa
   const { colors } = useOpenMediaTheme();
   const { width } = useWindowDimensions();
   const styles = useMemo(() => createStyles(colors, width >= 960, width >= 640), [colors, width]);
-  const links: { page: PublicPage; label: string }[] = [{ page: 'feed', label: 'Feed' }, { page: 'mission', label: 'Mission' }, { page: 'developers', label: 'Developers' }];
+  const links: { page: PublicPage; label: string }[] = [{ page: 'feed', label: 'Feed' }, { page: 'clips', label: 'Clips' }, { page: 'mission', label: 'Mission' }, { page: 'developers', label: 'Developers' }];
   return <View role="navigation" style={styles.nav}>
     <Pressable accessibilityRole="link" accessibilityLabel="Open Media home" onPress={() => onNavigate('landing')}><BrandMark compact /></Pressable>
     <View style={styles.navLinks}>
@@ -179,7 +179,7 @@ export function PublicFooter({ onNavigate }: { onNavigate: (page: PublicPage) =>
     <View style={styles.footerTop}>
       <BrandMark compact />
       <View style={styles.footerLinks}>
-        {(['feed', 'mission', 'developers'] as PublicPage[]).map((page) => <Pressable key={page} accessibilityRole="link" onPress={() => onNavigate(page)}><Text style={styles.footerLink}>{page === 'feed' ? 'Feed' : page === 'mission' ? 'Mission' : 'Developers and agents'}</Text></Pressable>)}
+        {(['feed', 'clips', 'mission', 'developers'] as PublicPage[]).map((page) => <Pressable key={page} accessibilityRole="link" onPress={() => onNavigate(page)}><Text style={styles.footerLink}>{page === 'feed' ? 'Feed' : page === 'clips' ? 'Clips' : page === 'mission' ? 'Mission' : 'Developers and agents'}</Text></Pressable>)}
         <Pressable accessibilityRole="link" onPress={() => { Linking.openURL(sourceRepository).catch(() => undefined); }}><Text style={styles.footerLink}>Source code</Text></Pressable>
       </View>
     </View>

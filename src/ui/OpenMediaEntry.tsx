@@ -15,7 +15,9 @@ import { LandingPage, PublicPage } from './LandingPage';
 import { MissionPage } from './MissionPage';
 import { PeopleProvider, PersonTarget, usePeople } from './people';
 import { PersonProfile } from './PersonProfile';
-import { OpenMediaApp } from './OpenMediaApp';
+import { MobileTabs, OpenMediaApp } from './OpenMediaApp';
+import { ClipsView } from './ClipsView';
+import { SocialPost } from '../domain/posts';
 import { FeedView } from './OpenMediaFeed';
 import { SearchView } from './SearchView';
 import { useFeedLenses } from './useFeedLenses';
@@ -100,7 +102,7 @@ export function OpenMediaEntry() {
   return <OpenMediaApp currentUserId={session.user.id} profile={profile} onSignOut={async () => { await signOut(); setSession(undefined); setProfile(undefined); }} onAccountDeleted={() => { setSession(undefined); setProfile(undefined); }} onProfileChange={setProfile} />;
 }
 
-const publicPages: PublicPage[] = ['landing', 'feed', 'mission', 'developers'];
+const publicPages: PublicPage[] = ['landing', 'feed', 'clips', 'mission', 'developers'];
 
 /** Shows /@handle in the address bar while an Open Media profile is open, so it can be copied and shared. */
 export function showProfileAddress(target: PersonTarget) {
@@ -121,8 +123,8 @@ function pageFromHash(): PublicPage {
 }
 
 /**
- * Signed out. On the web this is the website: the landing page at /, then #feed, #mission and
- * #developers, each a real link that survives reloads. The phone apps open straight to the feed.
+ * Signed out. On the web this is the website: the landing page at /, then #feed, #clips, #mission
+ * and #developers, each a real link that survives reloads. The phone apps open straight to the feed.
  */
 function PublicSite({ onSignIn }: { onSignIn: () => void }) {
   const [page, setPage] = useState<PublicPage>(pageFromHash);
@@ -151,25 +153,38 @@ function PublicSite({ onSignIn }: { onSignIn: () => void }) {
   if (page === 'landing') return <LandingPage onNavigate={navigate} onSignIn={onSignIn} />;
   if (page === 'mission') return <MissionPage chrome={Platform.OS === 'web' ? 'public' : 'app'} onNavigate={navigate} onSignIn={onSignIn} onBack={() => navigate('feed')} />;
   if (page === 'developers') return <DevelopersPage chrome={Platform.OS === 'web' ? 'public' : 'app'} onNavigate={navigate} onSignIn={onSignIn} onBack={() => navigate('feed')} />;
-  return <PeopleProvider value={people}><PublicHome onSignIn={onSignIn} onNavigate={navigate} /></PeopleProvider>;
+  return <PeopleProvider value={people}><PublicHome kind={page === 'clips' ? 'clips' : 'feed'} onSignIn={onSignIn} onNavigate={navigate} /></PeopleProvider>;
 }
 
-/** Signed-out feed: public posts are readable by anyone, without an account. */
-function PublicHome({ onSignIn, onNavigate }: { onSignIn: () => void; onNavigate: (page: PublicPage) => void }) {
+/**
+ * Signed out: Feed and Clips are public posts, readable by anyone without an account, under the
+ * same tabs the app has. Messages needs an account, so that tab asks to sign in.
+ */
+function PublicHome({ kind, onSignIn, onNavigate }: { kind: 'feed' | 'clips'; onSignIn: () => void; onNavigate: (page: PublicPage) => void }) {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
-  const feed = useMixedFeed();
-  const lenses = useFeedLenses(undefined, 'raw');
   const [searching, setSearching] = useState<string | false>(false);
+  const [feedPosts, setFeedPosts] = useState<SocialPost[]>([]);
+  const lenses = useFeedLenses(undefined, 'raw');
   // Hashtags in signed-out posts open this screen's Search too.
   const parent = usePeople();
   const people = useMemo(() => parent ? { ...parent, search: (query: string) => setSearching(query) } : null, [parent]);
-  if (searching !== false) return <View style={styles.screen}><SearchView posts={feed.posts} conversations={[]} lenses={lenses} initialQuery={searching} onClose={() => setSearching(false)} /></View>;
+  if (searching !== false) return <View style={styles.screen}><SearchView posts={kind === 'feed' ? feedPosts : []} conversations={[]} lenses={lenses} initialQuery={searching} onClose={() => setSearching(false)} /></View>;
   const page = <View style={styles.screen}>
     <View style={styles.publicBar}><Pressable accessibilityRole="link" accessibilityLabel={Platform.OS === 'web' ? 'Open Media home' : 'About Open Media'} onPress={() => onNavigate(Platform.OS === 'web' ? 'landing' : 'mission')}><BrandMark compact /></Pressable><View style={styles.publicActions}>{Platform.OS !== 'web' ? <Pressable accessibilityRole="button" accessibilityLabel="Our mission" onPress={() => onNavigate('mission')} style={styles.publicSearch}><Ionicons name="information-circle-outline" size={22} color={colors.text} /></Pressable> : null}<Pressable accessibilityRole="search" accessibilityLabel="Search everything" onPress={() => setSearching("")} style={styles.publicSearch}><Ionicons name="search" size={20} color={colors.text} /></Pressable><Pressable accessibilityRole="button" onPress={onSignIn} style={styles.signInButton}><Text style={styles.signInText}>Sign in</Text></Pressable></View></View>
-    <FeedView lens={lenses.lens} lenses={lenses.lenses} onLensChange={lenses.choose} lensContext={lenses.context} posts={feed.posts} loading={feed.loading} error={feed.error} hasMore={feed.hasMore} onRetry={feed.refresh} onLoadMore={feed.loadMore} sources={feed.sources} loadingMore={feed.loadingMore} pendingCount={feed.pendingCount} onShowPending={feed.showPending} />
-    <Pressable accessibilityRole="link" onPress={() => onNavigate('developers')} style={styles.apiLink}><Ionicons name="code-slash-outline" size={14} color={colors.textSecondary} /><Text style={styles.apiLinkText}>Open data · APIs and MCP for developers and agents</Text></Pressable>
+    {kind === 'clips' ? <ClipsView /> : <PublicFeed lenses={lenses} onPosts={setFeedPosts} onDevelopers={() => onNavigate('developers')} />}
+    <MobileTabs destination={kind} onNavigate={(next) => next === 'feed' || next === 'clips' ? onNavigate(next) : onSignIn()} />
   </View>;
   return people ? <PeopleProvider value={people}>{page}</PeopleProvider> : page;
+}
+
+function PublicFeed({ lenses, onPosts, onDevelopers }: { lenses: ReturnType<typeof useFeedLenses>; onPosts: (posts: SocialPost[]) => void; onDevelopers: () => void }) {
+  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
+  const feed = useMixedFeed();
+  useEffect(() => { onPosts(feed.posts); }, [feed.posts, onPosts]);
+  return <>
+    <FeedView lens={lenses.lens} lenses={lenses.lenses} onLensChange={lenses.choose} lensContext={lenses.context} posts={feed.posts} loading={feed.loading} error={feed.error} hasMore={feed.hasMore} onRetry={feed.refresh} onLoadMore={feed.loadMore} sources={feed.sources} loadingMore={feed.loadingMore} pendingCount={feed.pendingCount} onShowPending={feed.showPending} />
+    <Pressable accessibilityRole="link" onPress={onDevelopers} style={styles.apiLink}><Ionicons name="code-slash-outline" size={14} color={colors.textSecondary} /><Text style={styles.apiLinkText}>Open data · APIs and MCP for developers and agents</Text></Pressable>
+  </>;
 }
 
 function SignInScreen({ error, onError, onBack, onMatrixDemo }: { error: string; onError: (value: string) => void; onBack: () => void; onMatrixDemo?: () => void }) {
