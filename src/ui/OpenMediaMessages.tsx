@@ -11,8 +11,9 @@ import { Text, TextInput } from "./Text";
 import { bridgedSourceOf } from "../connectors/bridgesConnector";
 import { attachmentURL } from "../connectors/mailApiConnector";
 import { formatEmailBody } from "../domain/emailBody";
-import { formatClockTime, formatListTime, layoutThread } from "../domain/threadLayout";
+import { formatClockTime, formatListTime, formatThreadTime, layoutThread } from "../domain/threadLayout";
 import { applyMyReaction, myReaction } from "../domain/reactions";
+import { replyCountLabel, replyCounts, replyThread } from "../domain/replyThreads";
 import { ReactionBadges, TapbackBar } from "./MessageReactions";
 import { Conversation, Message, MessageAttachment, MessageReaction, PeopleFilter, Person } from "../domain/models";
 import { encounterForConversation } from "../domain/people";
@@ -677,6 +678,35 @@ function MessageThread({
     setFlashId(messageId);
     setTimeout(() => setFlashId((current) => (current === messageId ? undefined : current)), 1100);
   };
+  // Tapping a reply (or "2 Replies") focuses its thread, as in iMessage: the original and every
+  // reply to it, lifted over the blurred conversation, and the composer answers in that thread.
+  const replyTotals = useMemo(() => replyCounts(shownMessages), [shownMessages]);
+  const [threadFor, setThreadFor] = useState<string>();
+  const focusedThread = useMemo(() => (threadFor ? replyThread(shownMessages, threadFor) : []), [shownMessages, threadFor]);
+  const focusedIds = useMemo(() => new Set(focusedThread.map((message) => message.id)), [focusedThread]);
+  const lastInThread = focusedThread[focusedThread.length - 1];
+  const openThread = (messageId: string) => {
+    setTapbackFor(undefined);
+    setThreadFor(messageId);
+  };
+  const closeThread = () => {
+    setThreadFor(undefined);
+    setReplyTo(undefined);
+  };
+  // While a thread is focused, what you type answers its latest message.
+  useEffect(() => {
+    if (!threadFor || !lastInThread || !canSend) return;
+    if (!replyTo || !focusedIds.has(replyTo.id)) startReply(lastInThread);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadFor, lastInThread?.id, replyTo?.id]);
+  useEffect(() => {
+    if (!threadFor || Platform.OS !== "web") return;
+    // Capture, so Escape works while the cursor is in the message box too.
+    const close = (event: KeyboardEvent) => event.key === "Escape" && closeThread();
+    window.addEventListener("keydown", close, true);
+    return () => window.removeEventListener("keydown", close, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadFor]);
   // Phones: swipe left to see every message's time (iMessage).
   const timeReveal = useRef(new Animated.Value(0)).current;
   const swipePan = useMemo(
@@ -794,7 +824,7 @@ function MessageThread({
                     name={senderLabel(byId.get(item.message.replyToMessageId)!)}
                     text={quoteText(byId.get(item.message.replyToMessageId)!)}
                     reacted={Boolean(item.message.reactions?.length)}
-                    onPress={() => jumpTo(item.message.replyToMessageId!)}
+                    onPress={() => openThread(item.message.id)}
                   />
                 ) : null}
                 <MessageBubble
@@ -841,6 +871,16 @@ function MessageThread({
                   )}
                 </MessageBubble>
                 <MessageMedia message={item.message} />
+                {replyTotals.get(item.message.id) ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityHint="Shows this message with its replies"
+                    onPress={() => openThread(item.message.id)}
+                    style={({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) => [styles.replyCount, item.message.direction === "outbound" && styles.replyCountOutbound, hovered && styles.replyCountHover, pressed && styles.ghostPressed]}
+                  >
+                    <Text style={styles.replyCountText}>{replyCountLabel(replyTotals.get(item.message.id)!)}</Text>
+                  </Pressable>
+                ) : null}
                 {item.message.ai?.byline ? (
                   <View style={[styles.aiByline, item.message.direction === "outbound" && styles.outboundWrap]}>
                     {item.message.ai.search ? <Ionicons name="search" size={11} color={colors.textTertiary} /> : <AiMark size={11} color={colors.textTertiary} />}
@@ -900,6 +940,18 @@ function MessageThread({
           </View>
         )}
       </ScrollView>
+      {focusedThread.length ? (
+        <ThreadFocus
+          messages={focusedThread}
+          pending={waiting.filter((item) => item.replyTo && focusedIds.has(item.replyTo.id))}
+          reduceMotion={reduceMotion}
+          isGroup={isGroup}
+          senderLabel={senderLabel}
+          nameOf={nameOf}
+          onClose={closeThread}
+          onShowInChat={(messageId) => { closeThread(); setTimeout(() => jumpTo(messageId), 60); }}
+        />
+      ) : null}
       </View>
       {channels.length > 1 ? (
         <View style={styles.channelBar}>
@@ -952,7 +1004,11 @@ function MessageThread({
               </View>
               <View style={styles.replyBannerCopy}>
                 <Text numberOfLines={1} style={styles.replyBannerTitle}>
-                  Replying to <Text style={styles.replyBannerName}>{senderLabel(replyTo) === "You" ? "yourself" : senderLabel(replyTo)}</Text>
+                  {threadFor ? (
+                    <Text style={styles.replyBannerName}>Replying in thread</Text>
+                  ) : (
+                    <>Replying to <Text style={styles.replyBannerName}>{senderLabel(replyTo) === "You" ? "yourself" : senderLabel(replyTo)}</Text></>
+                  )}
                 </Text>
                 <Text numberOfLines={1} style={styles.replyBannerText}>{quoteText(replyTo)}</Text>
               </View>
@@ -1638,32 +1694,155 @@ function SwipeTime({ reveal, outbound, sentAt, onLayout, style, children }: Reac
 
 const swipeTimeWidth = 68;
 
+/** "#FFFFFF" at 0.7 → "rgba(255,255,255,0.7)"; other colour formats come back as they are. */
+function withAlpha(color: string, alpha: number): string {
+  const hex = color.match(/^#([0-9a-f]{6})$/i)?.[1];
+  if (!hex) return color;
+  const [r, g, b] = [0, 2, 4].map((at) => parseInt(hex.slice(at, at + 2), 16));
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+/** The space a reply's ghost is set in from the bubble's outer edge, where its line runs. */
+const replyGutter = 22;
+
 /** A double-click on the web selects a word; opening the tapback bar shouldn't leave it highlighted. */
 function clearSelection() {
   if (Platform.OS === "web") window.getSelection?.()?.removeAllRanges();
 }
 
 /**
- * What a reply answers, the iMessage way: the original as a faint ghost bubble above, with a thin
- * line curving down into the reply. Tapping it jumps back to the original message.
+ * What a reply answers, the iMessage way: the original as a faint ghost bubble above, set in from
+ * the bubble's outer edge, and a thin line curving from it down into the reply. Tapping it focuses
+ * the whole reply thread.
  */
 function ReplyContext({ outbound, name, text, reacted, onPress }: { outbound: boolean; name: string; text: string; reacted?: boolean; onPress?: () => void }) {
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   return (
     <View style={[styles.replyContext, outbound && styles.replyContextOutbound, reacted && styles.replyContextReacted]}>
-      <View style={[styles.replyConnector, outbound ? styles.replyConnectorOutbound : styles.replyConnectorInbound, reacted && styles.replyConnectorReacted]} />
+      <View pointerEvents="none" style={[styles.replyConnector, outbound ? styles.replyConnectorOutbound : styles.replyConnectorInbound, reacted && styles.replyConnectorReacted]} />
       <Pressable
         accessibilityRole={onPress ? "button" : undefined}
         accessibilityLabel={`In reply to ${name}: ${text}`}
-        accessibilityHint={onPress ? "Shows the original message" : undefined}
+        accessibilityHint={onPress ? "Shows this reply with the message it answers" : undefined}
         disabled={!onPress}
         onPress={onPress}
-        style={({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) => [styles.ghost, outbound && styles.ghostOutbound, hovered && styles.ghostHover, pressed && styles.ghostPressed]}
+        style={({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) => [styles.ghost, hovered && styles.ghostHover, pressed && styles.ghostPressed]}
       >
-        <Text numberOfLines={1} style={[styles.ghostName, outbound && styles.ghostNameOutbound]}>{name}</Text>
+        <Text numberOfLines={1} style={styles.ghostName}>{name}</Text>
         <Text numberOfLines={2} style={styles.ghostText}>{text}</Text>
       </Pressable>
+    </View>
+  );
+}
+
+/**
+ * A reply thread in focus, like iMessage: the conversation blurs back and the original message
+ * and its replies come forward on their own, newest at the bottom by the composer, which now
+ * answers in this thread. Tap outside, Done or Escape to go back.
+ */
+function ThreadFocus({
+  messages,
+  pending,
+  reduceMotion,
+  isGroup,
+  senderLabel,
+  nameOf,
+  onClose,
+  onShowInChat,
+}: {
+  messages: Message[];
+  pending: PendingMessage[];
+  reduceMotion: boolean;
+  isGroup: boolean;
+  senderLabel: (message: Message) => string;
+  nameOf: (personId: string) => string;
+  onClose: () => void;
+  onShowInChat: (messageId: string) => void;
+}) {
+  const { colors } = useOpenMediaTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const progress = useRef(new Animated.Value(reduceMotion ? 1 : 0)).current;
+  const scroll = useRef<ScrollView>(null);
+  useEffect(() => {
+    if (reduceMotion) return;
+    Animated.timing(progress, { toValue: 1, duration: 260, easing: Easing.bezier(0.2, 0.8, 0.2, 1), useNativeDriver: Platform.OS !== "web" }).start();
+  }, [progress, reduceMotion]);
+  const replies = messages.length - 1 + pending.length;
+  const bodyOf = (message: Message) =>
+    message.channel === "email" ? (
+      <EmailBody message={message} />
+    ) : artOf(message) ? (
+      <MessageArt art={artOf(message)!} outbound={message.direction === "outbound"} />
+    ) : (
+      <MessageText message={message} style={[styles.message, message.direction === "outbound" && styles.outboundMessage]} />
+    );
+  return (
+    // The frosted layer itself never fades: a fading parent turns the browser's blur off.
+    <View accessibilityViewIsModal style={styles.focusLayer}>
+      <Pressable accessibilityRole="button" accessibilityLabel="Close thread" onPress={onClose} style={styles.focusScrim} />
+      <View pointerEvents="box-none" style={styles.focusHeader}>
+        <View style={styles.focusTitleWrap}>
+          <Text style={styles.focusTitle}>Thread</Text>
+          <Text style={styles.focusSubtitle}>{replyCountLabel(replies)}</Text>
+        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Done"
+          onPress={onClose}
+          style={({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) => [styles.focusDone, hovered && styles.focusDoneHover, pressed && styles.ghostPressed]}
+        >
+          <Text style={styles.focusDoneText}>Done</Text>
+        </Pressable>
+      </View>
+      <ScrollView
+        ref={scroll}
+        pointerEvents="box-none"
+        style={styles.focusScroll}
+        contentContainerStyle={styles.focusContent}
+        onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: false })}
+      >
+        <Animated.View
+          pointerEvents="box-none"
+          style={{ opacity: progress, transform: [{ translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [18, 0] }) }, { scale: progress.interpolate({ inputRange: [0, 1], outputRange: [0.97, 1] }) }] }}
+        >
+          {messages.map((message, index) => {
+            const outbound = message.direction === "outbound";
+            const next = messages[index + 1];
+            const runEnd = !next || next.direction !== message.direction || next.senderPersonId !== message.senderPersonId || index === 0;
+            return (
+              <View key={message.id} style={[styles.focusRow, outbound && styles.outboundWrap, index === 1 && styles.focusFirstReply, message.reactions?.length ? styles.messageWrapReacted : null]}>
+                {!outbound && (isGroup || index === 0 || messages[index - 1]?.senderPersonId !== message.senderPersonId) ? (
+                  <Text numberOfLines={1} style={[styles.groupSender, styles.focusSender]}>{senderLabel(message)}</Text>
+                ) : null}
+                <View style={[artOf(message) ? styles.bareBubble : [styles.bubble, outbound && styles.outboundBubble, runEnd && (outbound ? styles.outboundTail : styles.inboundTail)], styles.replyBubble, outbound ? styles.focusBubbleOutbound : styles.focusBubbleInbound]}>
+                  {bodyOf(message)}
+                  <ReactionBadges outbound={outbound} reactions={message.reactions} nameOf={nameOf} />
+                </View>
+                {index === 0 ? (
+                  <View style={[styles.focusMeta, outbound && styles.focusMetaOutbound]}>
+                    <Text style={styles.focusTime}>{formatThreadTime(new Date(message.sentAt))}</Text>
+                    <Text style={styles.focusDot}>·</Text>
+                    <Pressable accessibilityRole="button" onPress={() => onShowInChat(message.id)} style={({ hovered }: { hovered?: boolean; pressed: boolean }) => [styles.focusLink, hovered && styles.focusLinkHover]}>
+                      <Text style={styles.focusLinkText}>Show in chat</Text>
+                    </Pressable>
+                  </View>
+                ) : runEnd ? (
+                  <Text style={[styles.focusTime, styles.focusTimeAlone, outbound && styles.focusTimeOutbound]}>{formatClockTime(new Date(message.sentAt))}</Text>
+                ) : null}
+              </View>
+            );
+          })}
+          {pending.map((item) => (
+            <View key={item.id} style={[styles.focusRow, styles.outboundWrap]}>
+              <View style={[styles.bubble, styles.outboundBubble, styles.outboundTail, styles.focusBubbleOutbound, item.failed ? styles.failedBubble : styles.sendingBubble]}>
+                <Text style={[styles.message, styles.outboundMessage]}>{item.body}</Text>
+              </View>
+              <Text style={[styles.focusTime, styles.focusTimeAlone, styles.focusTimeOutbound]}>{item.failed ? "Not sent" : "Sending…"}</Text>
+            </View>
+          ))}
+        </Animated.View>
+      </ScrollView>
     </View>
   );
 }
@@ -2170,33 +2349,69 @@ function createStyles(colors: ThemeColors) {
     swipeTime: { position: "absolute", top: 0, bottom: 0, right: -4, width: swipeTimeWidth, alignItems: "flex-end", justifyContent: "center" },
     swipeTimeText: { color: colors.textTertiary, fontSize: 11, fontWeight: "500", fontVariant: ["tabular-nums"] },
     messageWrapReacted: { marginTop: 18 },
-    // What a reply answers: a faint ghost of the original, and a thin line curving into the reply.
-    replyContext: { maxWidth: "100%", paddingLeft: 16, marginBottom: 3, alignSelf: "flex-start" },
-    replyContextOutbound: { paddingLeft: 0, paddingRight: 16, alignSelf: "flex-end" },
-    replyConnector: { position: "absolute", top: "50%", bottom: -7, width: 11, borderColor: colors.textTertiary, opacity: 0.45, borderTopWidth: 1.5 },
+    // What a reply answers: a faint ghost of the original, set in from the outer edge, and a thin
+    // line that leaves its side and curves down into the reply bubble.
+    replyContext: { alignSelf: "flex-start", paddingLeft: replyGutter, marginBottom: 5 },
+    replyContextOutbound: { alignSelf: "flex-end", paddingLeft: 0, paddingRight: replyGutter },
+    replyConnector: { position: "absolute", top: "50%", bottom: -12, width: replyGutter - 9, borderColor: colors.textTertiary, opacity: 0.34, borderTopWidth: 1.5 },
+    replyConnectorInbound: { left: 9, borderLeftWidth: 1.5, borderTopLeftRadius: 12 },
+    replyConnectorOutbound: { right: 9, borderRightWidth: 1.5, borderTopRightRadius: 12 },
     // Room for a reaction badge on the reply's top corner.
-    replyContextReacted: { marginBottom: 17 },
-    replyConnectorReacted: { bottom: -21 },
-    replyConnectorInbound: { left: 6, borderLeftWidth: 1.5, borderTopLeftRadius: 10 },
-    replyConnectorOutbound: { right: 6, borderRightWidth: 1.5, borderTopRightRadius: 10 },
+    replyContextReacted: { marginBottom: 19 },
+    replyConnectorReacted: { bottom: -26 },
     ghost: {
-      maxWidth: "92%",
-      paddingHorizontal: 11,
-      paddingTop: 5,
-      paddingBottom: 6,
-      borderRadius: 15,
+      minWidth: 64,
+      paddingHorizontal: 12,
+      paddingTop: 6,
+      paddingBottom: 7,
+      borderRadius: 16,
       borderWidth: 1,
       borderColor: colors.border,
       backgroundColor: colors.surface,
-      transitionProperty: "background-color, transform",
+      transitionProperty: "background-color, transform, border-color",
       transitionDuration: "140ms",
     } as object,
-    ghostOutbound: { alignSelf: "flex-end" },
-    ghostHover: { backgroundColor: colors.chrome },
+    ghostHover: { backgroundColor: colors.chrome, borderColor: colors.textTertiary },
     ghostPressed: { transform: [{ scale: 0.98 }] },
-    ghostName: { color: colors.textTertiary, fontSize: 10.5, lineHeight: 14, fontWeight: "700", letterSpacing: 0.2 },
-    ghostNameOutbound: { textAlign: "right" },
-    ghostText: { color: colors.textTertiary, fontSize: 13, lineHeight: 17 },
+    ghostName: { marginBottom: 1, color: colors.textTertiary, fontSize: 11, lineHeight: 14, fontWeight: "600", letterSpacing: 0.15 },
+    ghostText: { color: colors.textSecondary, fontSize: 13.5, lineHeight: 18 },
+    // "2 Replies" under a message others answered; it opens the thread.
+    replyCount: { alignSelf: "flex-start", marginTop: 3, marginLeft: 8, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 9 },
+    replyCountOutbound: { alignSelf: "flex-end", marginLeft: 0, marginRight: 8 },
+    replyCountHover: { backgroundColor: colors.chrome },
+    replyCountText: { color: colors.textSecondary, fontSize: 12, fontWeight: "600" },
+    // A reply thread in focus, over the blurred conversation.
+    focusLayer: { position: "absolute", top: 0, left: 0, right: 0, bottom: 0, zIndex: 40 },
+    // A frosted pane: the conversation shows only as soft colour behind it.
+    focusScrim: {
+      position: "absolute", top: 0, left: 0, right: 0, bottom: 0, cursor: "default",
+      ...(Platform.OS === "web"
+        ? { backgroundColor: withAlpha(colors.surface, 0.72), backdropFilter: "blur(22px) saturate(140%)", WebkitBackdropFilter: "blur(22px) saturate(140%)" }
+        : { backgroundColor: withAlpha(colors.surface, 0.97) }),
+    } as object,
+    focusHeader: { position: "absolute", top: 0, left: 0, right: 0, zIndex: 2, height: 56, paddingHorizontal: 16, flexDirection: "row", alignItems: "center", justifyContent: "center" },
+    focusTitleWrap: { alignItems: "center" },
+    focusTitle: { color: colors.text, fontSize: 14, fontWeight: "700" },
+    focusSubtitle: { marginTop: 1, color: colors.textTertiary, fontSize: 11.5 },
+    focusDone: { position: "absolute", right: 12, height: 32, paddingHorizontal: 14, alignItems: "center", justifyContent: "center", borderRadius: 16, backgroundColor: colors.chrome, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
+    focusDoneHover: { backgroundColor: colors.bubble },
+    focusDoneText: { color: colors.text, fontSize: 13, fontWeight: "700" },
+    focusScroll: { flex: 1, marginTop: 56 },
+    focusContent: { flexGrow: 1, justifyContent: "flex-end", width: "100%", maxWidth: 760, alignSelf: "center", paddingHorizontal: 16, paddingTop: 12, paddingBottom: 18 },
+    focusRow: { maxWidth: "80%", alignSelf: "flex-start", marginTop: 3 },
+    focusFirstReply: { marginTop: 18 },
+    focusBubbleInbound: { alignSelf: "flex-start" },
+    focusBubbleOutbound: { alignSelf: "flex-end" },
+    focusSender: { marginLeft: 12 },
+    focusMeta: { marginTop: 5, marginLeft: 10, flexDirection: "row", alignItems: "center", gap: 5, alignSelf: "flex-start" },
+    focusMetaOutbound: { alignSelf: "flex-end", marginLeft: 0, marginRight: 10 },
+    focusTime: { color: colors.textTertiary, fontSize: 11, fontWeight: "500", fontVariant: ["tabular-nums"] },
+    focusTimeAlone: { marginTop: 4, marginLeft: 10, alignSelf: "flex-start" },
+    focusTimeOutbound: { alignSelf: "flex-end", marginLeft: 0, marginRight: 10 },
+    focusDot: { color: colors.textTertiary, fontSize: 11 },
+    focusLink: { paddingHorizontal: 4, paddingVertical: 1, borderRadius: 6 },
+    focusLinkHover: { backgroundColor: colors.chrome },
+    focusLinkText: { color: colors.text, fontSize: 11, fontWeight: "600" },
     // The reply banner sits inside the composer, above the text, like a draft's header.
     replyBanner: { marginHorizontal: 4, marginTop: 2, marginBottom: 2, paddingVertical: 7, paddingLeft: 8, paddingRight: 2, flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 18, backgroundColor: colors.bubble },
     replyIcon: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },

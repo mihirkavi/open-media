@@ -1,6 +1,6 @@
 # ADR 0032: Message reactions, iMessage-style replies and times
 
-- Status: **accepted; built and checked on the web locally** (2026-11-04). Not deployed: the migration `20261120120000_message_reactions.sql` is applied to the local database only. iOS and Android are not tested; the phone gestures (long-press, double-tap, swipe left for times) were only checked in a phone-sized browser.
+- Status: **accepted; live on the web** since 2026-11-04 (commit `33e05b3`, Worker `f76eec8a`). The focused reply thread and ghost-bubble fix came after that and are checked on the web locally only. iOS and Android are not tested; the phone gestures (long-press, double-tap, swipe left for times) were only checked in a phone-sized browser.
 
 ## Context
 
@@ -18,7 +18,9 @@ The owner asked for a better-looking reply design in chats, reactions on message
 
 ### Replies
 
-- The message being answered sits above the reply as a faint "ghost" bubble (outlined, smaller grey text, the original sender's name), joined to the reply by a thin line that curves down into it. Tapping the ghost scrolls back to the original, which briefly lights up.
+- The message being answered sits above the reply as a faint "ghost" bubble (outlined, smaller grey text, the original sender's name). It is set in 22 points from the bubble's outer edge, and a thin line leaves its side and curves down into the reply. The ghost sizes to its text, so a short original such as "hello!" never breaks mid-word.
+- **Tapping a reply focuses its thread, like iMessage:** the conversation frosts over and the original and every reply to it (and replies to those) come forward on their own, newest at the bottom. The original shows its date and a "Show in chat" link, which closes the view and scrolls to it. The composer stays and says "Replying in thread", so what you type joins the thread. Done, a tap outside or Escape goes back. Thread logic is in `src/domain/replyThreads.ts`.
+- An original that has replies shows "2 Replies" under it, which opens the same view.
 - The composer shows "Replying to Ben" and the quoted line inside the message box, above the text, with a close button.
 
 ### Times
