@@ -1,6 +1,6 @@
 # ADR 0031: Dictation in every text field, with open-source Whisper
 
-- Status: **accepted; built and tested on the web locally** (2026-11-03). The Worker with the `/v1/dictate` route and the `DICTATION_RATE_LIMITER` binding is not deployed. iOS and Android are not tested. On phones the mic isn't shown, and the keyboard's own dictation stays as it is.
+- Status: **accepted; live on the web** since 2026-11-04 (Worker `34904e9b`). Whisper was checked in production with a recorded clip; a real microphone in a real browser has not been tried yet. iOS and Android are not tested. On phones the mic isn't shown, and the keyboard's own dictation stays as it is.
 
 ## Context
 
@@ -46,6 +46,5 @@ The recorder loads only when a mic is first pressed (`import()`), so the first p
 
 ## Consequences
 
-- Owner step: deploy the Worker (`npm run deploy`) so `/v1/dictate` and the new rate-limit binding (namespace 10008) go live. Until then the production web app uses the browser's own speech engine.
 - Workers AI bills Whisper per audio minute on the owner's Cloudflare account. It costs a fraction of a cent a minute.
 - Phones: a later change could record with a native audio module and send to the same route, once a phone build can be tested.
