@@ -66,6 +66,8 @@ const env: MailEnv & PaymentsEnv & VerificationEnv & { PROFILE_IMPORT_ALLOW_LOCA
   STRIPE_CONNECT_WEBHOOK_SECRET: process.env.STRIPE_CONNECT_WEBHOOK_SECRET,
   PAYMENTS_RETURN_URL: process.env.PAYMENTS_RETURN_URL ?? process.env.CONVO_APP_ORIGIN ?? 'http://localhost:8081',
   BASE_SEPOLIA_RPC_URL: process.env.BASE_SEPOLIA_RPC_URL,
+  // Optional: GIF search in the message media picker (ADR 0029).
+  GIPHY_API_KEY: process.env.GIPHY_API_KEY,
   MAIL_CONNECT_RATE_LIMITER: limiter(5),
   MAIL_SYNC_RATE_LIMITER: limiter(12),
   MAIL_SEND_RATE_LIMITER: limiter(10),

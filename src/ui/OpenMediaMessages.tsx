@@ -27,6 +27,9 @@ import { parseMarkdown } from "../domain/markdown";
 import { MarkdownBody } from "./MarkdownBody";
 import { AiMark } from "./AiMark";
 import { AiThinking } from "./AiThinking";
+import { jumboEmojiCount, mediaPreview, parseMessageMedia } from "../domain/messageMedia";
+import { MediaPicker } from "./MediaPicker";
+import { JumboEmoji, MessageMediaView } from "./MessageMediaView";
 
 interface Props {
   conversations: Conversation[];
@@ -259,7 +262,7 @@ export function OpenMediaMessages({
               >
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`${conversationTitle(conversation)}. ${conversation.preview}`}
+                accessibilityLabel={`${conversationTitle(conversation)}. ${listPreview(conversation.preview)}`}
                 onPress={() => setSelectedId(conversation.id)}
                 style={({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) => [
                   styles.row,
@@ -284,11 +287,11 @@ export function OpenMediaMessages({
                   {conversation.channels ? (
                     <View style={styles.previewLine}>
                       <SourceMarker source={conversation.messages[conversation.messages.length - 1]?.source ?? conversation.sourceSummary[0]} />
-                      <Text numberOfLines={2} style={[styles.preview, styles.previewShrink]}>{conversation.preview}</Text>
+                      <Text numberOfLines={2} style={[styles.preview, styles.previewShrink]}>{listPreview(conversation.preview)}</Text>
                     </View>
                   ) : (
                     <Text numberOfLines={2} style={styles.preview}>
-                      {conversation.preview}
+                      {listPreview(conversation.preview)}
                     </Text>
                   )}
                 </View>
@@ -539,16 +542,44 @@ function MessageThread({
       setPending((items) => items.map((other) => (other.id === item.id ? { ...other, failed } : other)));
     }
   };
-  const submit = () => {
-    if (!body.trim()) return;
+  const send = (text: string) => {
     // A quote only threads within its own channel.
-    const item: PendingMessage = { id: `pending-${Date.now()}`, threadId: conversation.id, conversationId: via.id, body: body.trim(), replyTo: replyTo?.conversationId === via.id || !channels.length ? replyTo : undefined };
+    const item: PendingMessage = { id: `pending-${Date.now()}`, threadId: conversation.id, conversationId: via.id, body: text, replyTo: replyTo?.conversationId === via.id || !channels.length ? replyTo : undefined };
     // The stored copy replaces this bubble in place, without moving in a second time.
     sentBodies.add(item.body);
-    setBody("");
     setReplyTo(undefined);
     setPending((items) => [...items, item]);
     deliver(item);
+  };
+  const submit = () => {
+    if (!body.trim()) return;
+    send(body.trim());
+    setBody("");
+  };
+  // Emoji, GIFs and stickers (ADR 0029). An emoji goes in where the cursor is; a GIF or sticker
+  // sends at once, and what you were typing stays in the box.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const compactThread = useWindowDimensions().width < 760;
+  const selection = useRef({ start: 0, end: 0 });
+  const insertEmoji = (emoji: string) => {
+    const start = Math.min(selection.current.start, body.length);
+    const end = Math.min(Math.max(selection.current.end, start), body.length);
+    const next = body.slice(0, start) + emoji + body.slice(end);
+    const caret = start + emoji.length;
+    selection.current = { start: caret, end: caret };
+    setBody(next);
+    // On the web the cursor stays after the emoji, so a run of them reads in order.
+    if (Platform.OS === "web") requestAnimationFrame(() => (composerInput.current as unknown as { setSelectionRange?: (a: number, b: number) => void } | null)?.setSelectionRange?.(caret, caret));
+  };
+  const togglePicker = () => {
+    setPickerOpen((open) => {
+      // On phones the panel takes the keyboard's place, and the keyboard comes back with it closed.
+      if (Platform.OS !== "web") {
+        if (open) setTimeout(() => composerInput.current?.focus(), 0);
+        else Keyboard.dismiss();
+      }
+      return !open;
+    });
   };
   // A question asked from Search arrives here once and is sent like a typed message.
   const asked = useRef(0);
@@ -582,6 +613,7 @@ function MessageThread({
   // On the web, Enter sends and Shift+Enter starts a new line, like other chat apps.
   const onComposerKey = (event: { nativeEvent: { key: string; shiftKey?: boolean; isComposing?: boolean }; preventDefault: () => void }) => {
     const { key, shiftKey, isComposing } = event.nativeEvent;
+    if (key === "Escape" && pickerOpen) setPickerOpen(false);
     if (Platform.OS === "web" && key === "Enter" && !shiftKey && !isComposing) {
       event.preventDefault();
       submit();
@@ -676,18 +708,18 @@ function MessageThread({
                   outbound={item.message.direction === "outbound"}
                   enabled={canSend && !item.message.ai}
                   onReply={() => startReply(item.message)}
-                  style={[
+                  style={artOf(item.message) ? styles.bareBubble : [
                     styles.bubble,
                     item.message.direction === "outbound" && styles.outboundBubble,
                     item.groupEnd && (item.message.direction === "outbound" ? styles.outboundTail : styles.inboundTail),
                   ]}
                 >
                   {item.message.replyToMessageId && byId.get(item.message.replyToMessageId) ? (
-                    <View style={[styles.quote, item.message.direction === "outbound" && styles.quoteOutbound]}>
-                      <Text style={[styles.quoteName, item.message.direction === "outbound" && styles.quoteNameOutbound]}>
+                    <View style={[styles.quote, item.message.direction === "outbound" && !artOf(item.message) && styles.quoteOutbound]}>
+                      <Text style={[styles.quoteName, item.message.direction === "outbound" && !artOf(item.message) && styles.quoteNameOutbound]}>
                         {senderLabel(byId.get(item.message.replyToMessageId)!)}
                       </Text>
-                      <Text numberOfLines={2} style={[styles.quoteText, item.message.direction === "outbound" && styles.quoteTextOutbound]}>
+                      <Text numberOfLines={2} style={[styles.quoteText, item.message.direction === "outbound" && !artOf(item.message) && styles.quoteTextOutbound]}>
                         {quoteText(byId.get(item.message.replyToMessageId)!)}
                       </Text>
                     </View>
@@ -704,6 +736,8 @@ function MessageThread({
                   ) : null}
                   {item.message.channel === "email" ? (
                     <EmailBody message={item.message} />
+                  ) : artOf(item.message) ? (
+                    <MessageArt art={artOf(item.message)!} outbound={item.message.direction === "outbound"} />
                   ) : (
                     <MessageText
                       message={item.message}
@@ -735,14 +769,18 @@ function MessageThread({
           ).concat(
             waiting.map((item) => (
               <Appear key={item.id} animate={!reduceMotion} style={[styles.messageWrap, styles.outboundWrap, styles.groupStart]}>
-                <View style={[styles.bubble, styles.outboundBubble, styles.outboundTail, item.failed ? styles.failedBubble : !isAiConversation(conversation) && styles.sendingBubble]}>
+                <View style={[artOfBody(item.body) ? styles.bareBubble : [styles.bubble, styles.outboundBubble, styles.outboundTail], item.failed ? styles.failedBubble : !isAiConversation(conversation) && styles.sendingBubble]}>
                   {item.replyTo ? (
-                    <View style={[styles.quote, styles.quoteOutbound]}>
-                      <Text style={[styles.quoteName, styles.quoteNameOutbound]}>{senderLabel(item.replyTo)}</Text>
-                      <Text numberOfLines={2} style={[styles.quoteText, styles.quoteTextOutbound]}>{quoteText(item.replyTo)}</Text>
+                    <View style={[styles.quote, !artOfBody(item.body) && styles.quoteOutbound]}>
+                      <Text style={[styles.quoteName, !artOfBody(item.body) && styles.quoteNameOutbound]}>{senderLabel(item.replyTo)}</Text>
+                      <Text numberOfLines={2} style={[styles.quoteText, !artOfBody(item.body) && styles.quoteTextOutbound]}>{quoteText(item.replyTo)}</Text>
                     </View>
                   ) : null}
-                  <Text style={[styles.message, styles.outboundMessage]}>{isAiConversation(conversation) ? maskKeys(item.body) : item.body}</Text>
+                  {artOfBody(item.body) ? (
+                    <MessageArt art={artOfBody(item.body)!} outbound />
+                  ) : (
+                    <Text style={[styles.message, styles.outboundMessage]}>{isAiConversation(conversation) ? maskKeys(item.body) : item.body}</Text>
+                  )}
                 </View>
                 {item.failed ? (
                   <Pressable accessibilityRole="button" accessibilityHint={item.failed} onPress={() => deliver(item)} style={styles.deliveryLine}>
@@ -809,6 +847,14 @@ function MessageThread({
       ) : null}
       {canSend ? (
         <View style={styles.composerWrap}>
+          {pickerOpen ? (
+            <MediaPicker
+              compact={compactThread}
+              emojiOnly={isAiConversation(conversation)}
+              onEmoji={insertEmoji}
+              onMedia={(url) => { send(url); if (compactThread) setPickerOpen(false); }}
+            />
+          ) : null}
           {replyTo ? (
             <View style={styles.replyBanner}>
               <View style={styles.replyBar} />
@@ -821,7 +867,16 @@ function MessageThread({
               </Pressable>
             </View>
           ) : null}
-          <View style={[styles.composer, focused && styles.composerFocused]}>
+          <View style={[styles.composer, styles.composerWithTools, (focused || pickerOpen) && styles.composerFocused]}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={pickerOpen ? "Close emoji, GIFs and stickers" : "Emoji, GIFs and stickers"}
+              accessibilityState={{ expanded: pickerOpen }}
+              onPress={togglePicker}
+              style={({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) => [styles.mediaToggle, (hovered || pickerOpen) && styles.mediaToggleOn, pressed && styles.mediaTogglePressed]}
+            >
+              <Ionicons name={pickerOpen && Platform.OS !== "web" ? "chatbox-ellipses-outline" : "happy-outline"} size={22} color={pickerOpen ? colors.text : colors.textSecondary} />
+            </Pressable>
             <TextInput
               ref={composerInput}
               accessibilityLabel="Message"
@@ -831,7 +886,8 @@ function MessageThread({
               value={body}
               onChangeText={setBody}
               onKeyPress={onComposerKey}
-              onFocus={() => setFocused(true)}
+              onSelectionChange={(event) => { selection.current = event.nativeEvent.selection; }}
+              onFocus={() => { setFocused(true); if (Platform.OS !== "web") setPickerOpen(false); }}
               onBlur={() => setFocused(false)}
               // Grows with what you type, from one line up to six.
               onContentSizeChange={(event) => Platform.OS !== "web" && fitComposer(event.nativeEvent.contentSize.height)}
@@ -1324,11 +1380,40 @@ function emailMeta(conversation: Conversation, person?: Person): string {
   return `${who} · via ${email.accountEmail}${email.canSend ? "" : " (receive only)"}`;
 }
 
+/** A message that is a GIF, a sticker or a few emoji alone, drawn without a bubble (ADR 0029). */
+type MessageArtKind = { media: ReturnType<typeof parseMessageMedia>; jumbo: number; text: string };
+const artCache = new Map<string, MessageArtKind | null>();
+function artOfBody(body: string): MessageArtKind | undefined {
+  let art = artCache.get(body);
+  if (art === undefined) {
+    const media = parseMessageMedia(body);
+    const jumbo = media ? 0 : jumboEmojiCount(body);
+    art = media || jumbo ? { media, jumbo, text: body } : null;
+    if (artCache.size > 2000) artCache.clear();
+    artCache.set(body, art);
+  }
+  return art ?? undefined;
+}
+function artOf(message: Message): MessageArtKind | undefined {
+  // Email keeps its own rendering, and Open Media AI writes Markdown.
+  return message.channel === "email" || message.ai ? undefined : artOfBody(message.body);
+}
+function MessageArt({ art, outbound }: { art: MessageArtKind; outbound: boolean }) {
+  return art.media ? <MessageMediaView media={art.media} outbound={outbound} /> : <JumboEmoji text={art.text} count={art.jumbo} />;
+}
+
+/** A GIF or sticker reads as “GIF” or “Sticker” in the list, after a group sender’s name. */
+function listPreview(preview: string): string {
+  const match = preview.match(/^([^:\n]{1,80}: )?(https:\/\/\S+)$/);
+  const label = match ? mediaPreview(match[2]) : undefined;
+  return label ? `${match![1] ?? ""}${label}` : preview;
+}
+
 /** One line of a message for quotes and the reply banner. */
 function quoteText(message: Message): string {
   const text = message.channel === "email" ? formatEmailBody(message.body).plain : message.body;
   const line = text.split("\n").map((part) => part.trim()).find(Boolean);
-  if (line) return line;
+  if (line) return (message.channel !== "email" && mediaPreview(line)) || line;
   if (message.attachments?.length) return message.attachments.every((item) => item.contentType.startsWith("image/")) ? "Photo" : "Attachment";
   return message.emailContext?.subject ?? "Message";
 }
@@ -1829,6 +1914,8 @@ function createStyles(colors: ThemeColors) {
       backgroundColor: colors.bubble,
     },
     outboundBubble: { backgroundColor: colors.text },
+    // GIFs, stickers and emoji on their own: no bubble behind them.
+    bareBubble: { paddingVertical: 2 },
     inboundTail: { borderBottomLeftRadius: 6 },
     outboundTail: { borderBottomRightRadius: 6 },
     bubbleSubject: { marginBottom: 3, color: colors.text, fontSize: 15, lineHeight: 21, fontWeight: "700" },
@@ -1934,6 +2021,16 @@ function createStyles(colors: ThemeColors) {
       transitionDuration: "160ms",
     },
     composerFocused: { borderColor: colors.textTertiary, backgroundColor: colors.surface },
+    composerWithTools: { paddingLeft: 4 },
+    mediaToggle: {
+      width: 38,
+      height: 38,
+      borderRadius: 19,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    mediaToggleOn: { backgroundColor: colors.chrome },
+    mediaTogglePressed: { transform: [{ scale: 0.9 }] },
     composerInput: {
       flex: 1,
       marginVertical: 8,

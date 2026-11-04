@@ -19,6 +19,7 @@ import { authenticate } from './session.js';
 import { runSearchAssist, SearchAssistEnv } from './searchAssist.js';
 import { recordSearch } from './aiChat.js';
 import { runTranslate, TranslateEnv } from './translate.js';
+import { parseGifQuery, searchGifs, GifSearchEnv } from './gifSearch.js';
 import { syncPop3, testPop3 } from './pop3.js';
 import { sendSmtp, SmtpConnection, testSmtp } from './smtp.js';
 import { SupabaseRestRepository } from './supabaseRestRepository.js';
@@ -27,7 +28,7 @@ import { describeValidationError } from './validation.js';
 
 export interface Limiter { limit(options: { key: string }): Promise<{ success: boolean }> }
 
-export interface MailEnv extends FarcasterSignerEnv, SearchAssistEnv, TranslateEnv, BridgesEnv {
+export interface MailEnv extends FarcasterSignerEnv, SearchAssistEnv, TranslateEnv, BridgesEnv, GifSearchEnv {
   SUPABASE_URL: string;
   SUPABASE_PUBLISHABLE_KEY: string;
   MAIL_CREDENTIALS_KEY: string;
@@ -133,6 +134,15 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
       if (limiter && !(await limiter.limit({ key: `translate:${caller}` })).success) return rateLimited(headers);
       if (!env.AI) return json(503, { error: 'Translation isn’t available on this server.' }, headers);
       return json(200, await runTranslate(input, env, privacy), { ...headers, 'cache-control': privacy === 'private' ? 'no-store' : 'private, max-age=300' });
+    }
+
+    // GIFs for the message media picker (ADR 0029): GIPHY through this server, so its key stays a secret.
+    if (request.method === 'GET' && url.pathname === '/v1/media/gifs') {
+      const limiter = env.PUBLIC_API_RATE_LIMITER;
+      if (limiter && !(await limiter.limit({ key: `gifs:${request.headers.get('cf-connecting-ip') ?? 'local'}` })).success) return rateLimited(headers);
+      if (!env.GIPHY_API_KEY) return json(503, { error: 'GIF search isn’t set up on this server.' }, headers);
+      const { query, offset, kind } = parseGifQuery(url);
+      return json(200, { gifs: await searchGifs(env, query, offset, kind), attribution: 'Powered by GIPHY' }, { ...headers, 'cache-control': 'public, max-age=600' });
     }
 
     // Sharp company logos for email senders (public site icons, cached; no account data).
