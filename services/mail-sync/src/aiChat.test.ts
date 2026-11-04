@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import test from 'node:test';
 
-import { agrees, AiRecord, AiSettings, AiStore, AiToolkit, builtInModel, chat, chooseRoute, conversationFor, findKeys, intentOf, NewAiRecord, recordSearch, Route, StoredKey, withoutKeys, withoutToolTalk } from './aiChat.js';
+import { agrees, aiKeysSummary, AiRecord, AiSettings, AiStore, AiToolkit, builtInModel, chat, chooseAiModel, chooseRoute, conversationFor, findKeys, intentOf, NewAiRecord, recordSearch, removeAiKey, Route, saveAiKey, StoredKey, withoutKeys, withoutToolTalk } from './aiChat.js';
 
 // Made-up keys in each provider's shape; none is real.
 const fake = {
@@ -95,7 +95,7 @@ test('a provider that fails falls back to the built-in model and says why; forge
   const [, free] = await chat({ text: 'Still there?' }, memory.store, env, run as never);
   assert.equal(free.provider, 'built-in');
   const [, ask] = await chat({ text: '@claude hi' }, memory.store, env, run as never);
-  assert.match(ask.body, /paste your Claude API key/);
+  assert.match(ask.body, /add your Claude API key in Settings → Open Media AI/);
 });
 
 test('AI searches join the conversation the model sees, and are saved with the person’s own token', async () => {
@@ -162,9 +162,42 @@ test('when the free AI’s daily allowance is spent, the chat says so instead of
   const memory = memoryStore();
   const spent = async () => { throw new Error('4006: you have used up your daily free allocation of 10,000 neurons'); };
   const [, reply] = await chat({ text: 'hello' }, memory.store, env, spent as never);
-  assert.match(reply.body, /reached today’s limit.*midnight UTC.*paste an API key/s);
+  assert.match(reply.body, /reached today’s limit.*midnight UTC.*add an API key.*Settings → Open Media AI/s);
   await chat({ text: fake.openai }, memory.store, env, (async () => 'x') as never);
   const failing = async (route: Route) => { if (route.provider === 'openai') throw Object.assign(new Error('nope'), { statusCode: 401 }); return spent(); };
   const [, both] = await chat({ text: 'hello again' }, memory.store, env, failing as never);
   assert.match(both.body, /^GPT didn’t accept the saved key\. The free built-in AI has reached today’s limit/);
+});
+
+test('Settings saves a key without a chat message, checks its shape, and never returns it', async () => {
+  const { store, records, keys, settings } = memoryStore();
+  await assert.rejects(saveAiKey('anthropic', { key: fake.openai }, store, env), /doesn’t look like a Claude key/);
+  await assert.rejects(saveAiKey('anthropic', { key: 'short' }, store, env), /doesn’t look like an API key/);
+  await assert.rejects(saveAiKey('nobody', { key: fake.anthropic }, store, env), /Choose one of/);
+  await assert.rejects(saveAiKey('built-in', { key: fake.anthropic }, store, env), /Choose one of/);
+  const summary = await saveAiKey('anthropic', { key: ` ${fake.anthropic} ` }, store, env);
+  assert.equal(records.length, 0, 'nothing is written to the chat');
+  assert.notEqual(keys.get('anthropic')?.ciphertext, fake.anthropic);
+  assert.ok(!JSON.stringify(summary).includes(fake.anthropic.slice(0, -4)), 'the key never comes back');
+  assert.deepEqual(summary.keys, [{ provider: 'anthropic', name: 'Claude', hint: fake.anthropic.slice(-4), model: 'claude-sonnet-5-5', usable: true }]);
+  assert.equal(summary.answering.provider, 'anthropic');
+  assert.equal(settings().provider, 'anthropic');
+  // Mistral and DeepSeek keys have no prefix, so any key-like value is taken when the provider is chosen.
+  assert.equal((await saveAiKey('mistral', { key: 'M'.repeat(32) }, store, env)).answering.provider, 'mistral');
+});
+
+test('Settings chooses who answers and removes keys; removing the one answering goes back to the free model', async () => {
+  const { store, keys } = memoryStore();
+  await saveAiKey('openai', { key: fake.openai }, store, env);
+  await saveAiKey('google', { key: fake.google }, store, env);
+  await assert.rejects(chooseAiModel({ provider: 'anthropic' }, store, env), /Add a Claude key first/);
+  assert.equal((await chooseAiModel({ provider: 'openai' }, store, env)).answering.provider, 'openai');
+  assert.equal((await chooseAiModel({ provider: 'built-in' }, store, env)).answering.provider, 'built-in');
+  await chooseAiModel({ provider: 'google' }, store, env);
+  const after = await removeAiKey('google', store, env);
+  assert.equal(keys.has('google'), false);
+  assert.deepEqual(after.keys.map((key) => key.provider), ['openai']);
+  assert.equal(after.answering.provider, 'openai', 'the remaining key answers once the chosen one is gone');
+  const other = { MAIL_CREDENTIALS_KEY: randomBytes(32).toString('base64') };
+  assert.equal((await aiKeysSummary(store, other)).keys[0].usable, false, 'a key sealed with an old server key is listed so it can be removed');
 });

@@ -45,7 +45,7 @@ export function aiByline(record: Pick<AiRecord, 'role' | 'source' | 'provider' |
   return from ? `${label} · ${from} ${String(record.meta?.reason ?? 'didn’t answer')}` : label;
 }
 
-const welcome = 'Hi! I’m Open Media AI. Ask me anything, or ask me to do things for you: “set my theme to dark”, “less Hive and more videos in my feed”, “help me connect my email”, or “give me a tour”. I’m one chat for every AI you use: a free model answers by default, and you can paste an API key from ChatGPT, Claude, Gemini or OpenRouter to use your own. Your AI searches are saved here too.';
+const welcome = 'Hi! I’m Open Media AI. Ask me anything, or ask me to do things for you: “set my theme to dark”, “less Hive and more videos in my feed”, “help me connect my email”, or “give me a tour”. I’m one chat for every AI you use: a free model answers by default, and you can add your own API key for ChatGPT, Claude, Gemini or OpenRouter in Settings → Open Media AI. Your AI searches are saved here too.';
 
 /** The AI conversation, built from its saved messages. A new one opens with a short welcome. */
 export function aiConversation(records: AiRecord[], currentUserId: string): Conversation {

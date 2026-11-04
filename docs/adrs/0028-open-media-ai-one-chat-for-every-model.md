@@ -37,7 +37,7 @@ Options for routing, researched on 2026-11-03:
    4. otherwise the free model.
 
    If a provider fails (rejected key, no credit, timeout), the free model answers, and the line under the answer says why. Nothing is retried silently with another paid provider.
-4. **Keys without a settings screen.**
+4. **Keys in the chat** (superseded as the main way by §9: Settings → Open Media AI).
    - Pasting a key into the chat saves it. The provider is recognised by the key's shape, or by the message naming it (Mistral and DeepSeek keys have no prefix).
    - The key is encrypted in the Worker with a key derived from `MAIL_CREDENTIALS_KEY` (or `AI_KEYS_KEY`), which the database never sees. Only the ciphertext and the last four characters are stored.
    - The message holding the key is stored, and shown, as "…Ab12". It is never sent to a model. The app also masks it while it is being sent.
@@ -130,4 +130,30 @@ own yes.
 Cost: the built-in model runs on Workers AI's free daily allowance (10,000 neurons). Tool
 descriptions and message text make each agentic answer far larger than a plain one, so on the
 free plan the allowance runs out after a modest number of answers. When it does, the chat says so
-and suggests pasting a key, instead of failing.
+and suggests adding a key in Settings → Open Media AI, instead of failing.
+
+## 9. Keys in Settings (added 2026-11-03)
+
+The owner asked for a safer place than the chat to add keys. Settings now has an **Open Media AI**
+section (found by searching Settings for "api key", "claude", "openai" and similar, or opened by
+the assistant).
+
+- **Who answers:** radio rows for Llama (free) and each saved key, shown only as its provider,
+  last four characters and model. A key sealed with an old server key is marked so it can be
+  removed.
+- **Add a key:** choose the provider, type the key in a masked field (no autocorrect, autofill or
+  spell check) and save. The field is cleared at once. The Worker checks the key against that
+  provider's shape where it has one (Mistral and DeepSeek have none), encrypts it exactly as in §4
+  and makes that provider answer. Nothing is written to the chat. A link opens the provider's own
+  key page.
+- **Remove:** removes the key; if it was answering, the next saved key or the free model answers.
+- **API:** `GET /v1/me/ai/keys`, `PUT` and `DELETE /v1/me/ai/keys/{provider}` (the key only in the
+  request body) and `PUT /v1/me/ai/model`, documented in OpenAPI. Saving is rate limited.
+  Responses never contain a key.
+- The chat replies, the free-model limit message, the assistant's instructions, the `ask_ai` tool
+  and the agent skill now send people to Settings for keys. Pasting a key into the chat still works
+  and is still masked, for people who do that anyway.
+- **Verified:** `aiChat.test.ts` (shape check per provider, nothing written to the chat, key never
+  returned, choosing and removing). Web at desktop width and 375 px. iOS and Android not run, and
+  no real provider key was used.
+
