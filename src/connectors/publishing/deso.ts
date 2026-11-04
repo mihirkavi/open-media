@@ -64,9 +64,13 @@ export const desoPublisher: PublishingConnector = {
   revokeHint: 'Open Media’s DeSo key can only post and spend at most 0.01 DESO in fees. You can remove it in any DeSo app’s settings.',
 
   async availability() {
-    // Preload so Connect opens DeSo's window right on the tap (browsers block late pop-ups).
-    desoSdk().catch(() => { sdk = undefined; });
     return { available: true };
+  },
+
+  prepareConnect() {
+    // The SDK is large (about 700 KB), so it loads only where Connect is shown, but before the tap:
+    // DeSo's window must open right on it, or browsers block the pop-up.
+    desoSdk().catch(() => { sdk = undefined; });
   },
 
   async account() {

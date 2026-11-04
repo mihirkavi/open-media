@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "./Icon";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Image, Platform, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import { Text } from "./Text";
@@ -45,12 +45,14 @@ import { ClipsView } from "./ClipsView";
 import { AskMark } from "./AiMark";
 import { SearchView } from "./SearchView";
 import { FeedView } from "./OpenMediaFeed";
-import { OpenMediaMessages } from "./OpenMediaMessages";
+import { lazyComponent, whenIdle } from "./lazyComponent";
 import { useMixedFeed } from "./useMixedFeed";
-import {
-  OpenMediaProfile,
-  OpenMediaSettings,
-} from "./OpenMediaUtilities";
+
+// Screens that aren't the first thing people see load on demand, keeping the first page small on
+// the web. Messages is preloaded as soon as the app is idle, since it is a main tab.
+const OpenMediaMessages = lazyComponent(() => import("./OpenMediaMessages").then((module) => module.OpenMediaMessages));
+const OpenMediaProfile = lazyComponent(() => import("./OpenMediaUtilities").then((module) => module.OpenMediaProfile));
+const OpenMediaSettings = lazyComponent(() => import("./OpenMediaUtilities").then((module) => module.OpenMediaSettings));
 import { PeopleProvider, PersonTarget, useContactsStore } from "./people";
 import { PersonProfile } from "./PersonProfile";
 import { encounterForConversation, ownEmails } from "../domain/people";
@@ -123,6 +125,8 @@ export function OpenMediaApp({
       ? (initialDestination as PrimaryDestination)
       : "feed",
   );
+  // Messages is one tap away, so fetch its code once the first screen is up.
+  useEffect(() => whenIdle(() => { OpenMediaMessages.preload().catch(() => undefined); }), []);
   // Browser back/forward moves between sections.
   useEffect(() => {
     if (Platform.OS !== "web" || typeof window === "undefined") return;

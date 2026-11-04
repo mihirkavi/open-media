@@ -1,6 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { publishingConnectors } from '../connectors/publishing';
 import { PublishedCopy, PublishingConnector, PublishingError } from '../connectors/publishing/types';
 import { CrossPostOutcome, CrossPostPreferences, crossPostNetworks, CrossPostVideo, defaultCrossPostPreferences, prepareCrossPost } from '../domain/crossPosting';
 import { NetworkId, networks } from '../domain/networkPosts';
@@ -9,7 +8,12 @@ const preferencesKey = 'open-media.cross-posting.preferences';
 const ledgerKey = 'open-media.cross-posting.ledger';
 const ledgerLimit = 300;
 
-export function publishingConnector(network: NetworkId): PublishingConnector {
+/**
+ * The publishing client for a network. The clients carry signing code (curves, hashes, QR codes),
+ * so they load on first use rather than with the app.
+ */
+export async function publishingConnector(network: NetworkId): Promise<PublishingConnector> {
+  const { publishingConnectors } = await import('../connectors/publishing');
   return publishingConnectors.find((connector) => connector.id === network)!;
 }
 
@@ -54,7 +58,7 @@ export async function crossPost(body: string, destinations: NetworkId[], postId:
     if (existing) return { network, status: 'published', url: existing.url, externalId: existing.externalId };
     const prepared = prepareCrossPost(body, network, video);
     if (!prepared.ok) return { network, status: 'skipped', message: prepared.reason };
-    const connector = publishingConnector(network);
+    const connector = await publishingConnector(network);
     const availability = await connector.availability();
     if (!availability.available) return { network, status: 'skipped', message: availability.reason };
     try {

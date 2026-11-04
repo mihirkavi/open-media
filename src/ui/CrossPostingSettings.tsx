@@ -1,10 +1,9 @@
-import { Ionicons } from '@expo/vector-icons';
-import { useMemo, useState } from 'react';
+import Ionicons from './Icon';
+import { useEffect, useMemo, useState } from 'react';
 import { Image, Linking, Pressable, StyleSheet, Switch, View } from 'react-native';
 import { Text, TextInput } from './Text';
 
-import { publishingConnector } from '../data/crossPostService';
-import { networks } from '../domain/networkPosts';
+import { NetworkId, networks } from '../domain/networkPosts';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { useCrossPosting } from './useCrossPosting';
@@ -17,6 +16,10 @@ import { Loader } from './Loader';
 export function CrossPostingSettings() {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
   const crossPosting = useCrossPosting();
+  const { prepareConnect } = crossPosting;
+  // Connect buttons are on screen: load what they need now, so a tap opens the network right away.
+  const unconnected = crossPosting.loaded ? crossPosting.networks.filter((item) => !item.account && item.availability.available).map((item) => item.network).join(',') : '';
+  useEffect(() => { for (const network of unconnected.split(',').filter(Boolean)) prepareConnect(network as NetworkId); }, [unconnected, prepareConnect]);
   return <View>
     <Text style={styles.intro}>Every Open Media post also goes to each network you connect here. Open Media never asks for your seed phrase or main keys: each network approves a separate key you can revoke there at any time.</Text>
     {crossPosting.networks.map((item) => {
@@ -36,7 +39,7 @@ export function CrossPostingSettings() {
           <Text style={[styles.detail, styles.copy]}>Include in every post by default</Text>
           <Switch accessibilityLabel={`Include ${name} in every post by default`} value={included} onValueChange={(value) => crossPosting.setIncludedByDefault(item.network, value)} />
         </View> : null}
-        {item.account ? <Text style={styles.hint}>{publishingConnector(item.network).revokeHint}</Text> : null}
+        {item.account && item.revokeHint ? <Text style={styles.hint}>{item.revokeHint}</Text> : null}
         {item.textRequest ? <TextRequestCard request={item.textRequest} onSubmit={(value) => crossPosting.submitText(item.network, value)} onCancel={() => crossPosting.cancelConnect(item.network)} /> : null}
         {item.approval ? <View accessibilityLiveRegion="polite" style={styles.approval}>
           <Text style={styles.name}>{item.approval.title}</Text>

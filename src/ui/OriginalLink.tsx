@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from './Icon';
 import { useMemo } from 'react';
 import { Linking, Pressable, StyleSheet } from 'react-native';
 

@@ -3,14 +3,15 @@
  * panel that opens from the composer's smile. Emoji go into what you're writing; a GIF or sticker
  * sends the moment you choose it, as in other chat apps.
  */
-import Ionicons from "@expo/vector-icons/Ionicons";
+import Ionicons from "./Icon";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, Animated, Easing, FlatList, Image, LayoutChangeEvent, Platform, Pressable, ScrollView, StyleSheet, View, ViewToken } from "react-native";
 import { GifsUnavailable, MediaPreferences, loadMediaPreferences, saveMediaPreferences, searchGifs, withRecentEmoji } from "../data/messageMediaService";
 import {
-  EmojiRow, GifResult, SkinTone, StickerRow, avatarExpressions, avatarStickerURL, emojiGroups, gifPreviewURL, gifURL, newAvatarSeed,
-  searchEmoji, searchStickers, skinToneSwatches, stickerCategories, stickerURL, withSkinTone,
+  EmojiRow, GifResult, SkinTone, StickerRow, avatarExpressions, avatarStickerURL, gifPreviewURL, gifURL, newAvatarSeed,
+  skinToneSwatches, stickerURL, withSkinTone,
 } from "../domain/messageMedia";
+import { emojiGroups, searchEmoji, searchStickers, stickerCategories } from "../domain/messageMediaCatalog";
 import { ThemeColors } from "../theme";
 import { useOpenMediaTheme } from "../themeContext";
 import { Loader } from "./Loader";

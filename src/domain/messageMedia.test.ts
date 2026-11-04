@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  avatarExpressions, avatarStickerURL, emojiGroups, fluentCommit, gifURL, jumboEmojiCount, mediaPreview, newAvatarSeed, parseMessageMedia,
-  searchEmoji, searchStickers, stickerCategories, stickerURL, withSkinTone,
+  avatarExpressions, avatarStickerURL, fluentCommit, gifURL, jumboEmojiCount, mediaPreview, newAvatarSeed, parseMessageMedia,
+  stickerURL, withSkinTone,
 } from './messageMedia';
+import { emojiGroups, searchEmoji, searchStickers, stickerCategories } from './messageMediaCatalog';
 
 test('the emoji catalog covers every group with skin tones where they apply', () => {
   assert.deepEqual(emojiGroups.map((group) => group.name), ['Smileys', 'People', 'Animals & nature', 'Food & drink', 'Travel & places', 'Activities', 'Objects', 'Symbols', 'Flags']);

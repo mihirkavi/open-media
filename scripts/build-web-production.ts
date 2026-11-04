@@ -6,7 +6,7 @@
  * Run with `npm run build:web`.
  */
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -35,4 +35,32 @@ if (result.status !== 0) process.exit(result.status ?? 1);
 // The logos the sign-in emails show, served from openmedia.site/brand/.
 mkdirSync(join(root, '.web-dist', 'brand'), { recursive: true });
 for (const file of ['logo-light.png', 'logo-dark.png']) copyFileSync(join(root, 'assets', 'brand', file), join(root, '.web-dist', 'brand', file));
+addStartupHints(join(root, '.web-dist'), [env.EXPO_PUBLIC_SUPABASE_URL, env.EXPO_PUBLIC_OPEN_MEDIA_API_URL]);
 console.log(`Built .web-dist for ${env.EXPO_PUBLIC_OPEN_MEDIA_API_URL}`);
+
+/**
+ * The app draws nothing until its headline font has loaded (App.tsx), and icons need the icon
+ * font, but a browser would only discover both after downloading and running the JavaScript. This
+ * tells it about them in the page itself, so they download alongside the JavaScript, and opens the
+ * connections to Supabase and the API that the app makes first.
+ */
+function addStartupHints(dist: string, origins: string[]) {
+  const fonts: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (/^(?:InstrumentSerif_400Regular(?:_Italic)?|OpenMediaIcons)\.[0-9a-f]{32}\.ttf$/.test(entry.name)) fonts.push(path.slice(dist.length).split('\\').join('/'));
+    }
+  };
+  walk(join(dist, 'assets'));
+  if (fonts.length !== 3) throw new Error(`Expected the two Instrument Serif fonts and the icon font in the build, found: ${fonts.join(', ') || 'none'}`);
+  const hints = [
+    ...new Set(origins.map((origin) => new URL(origin).origin)).values(),
+  ].map((origin) => `<link rel="preconnect" href="${origin}" crossorigin />`)
+    .concat(fonts.sort().map((font) => `<link rel="preload" href="${encodeURI(font)}" as="font" type="font/ttf" crossorigin />`));
+  const page = join(dist, 'index.html');
+  const html = readFileSync(page, 'utf8');
+  if (!html.includes('</head>')) throw new Error('index.html has no </head> to add startup hints to.');
+  writeFileSync(page, html.replace('</head>', `${hints.join('')}</head>`));
+}

@@ -12,9 +12,10 @@
  * - Avatar stickers: DiceBear's Avataaars style (free for personal and commercial use), drawn
  *   from a random seed kept on the device, never from an account id.
  * - GIFs and animated stickers: GIPHY, searched through the Open Media server.
+ *
+ * The emoji and sticker catalogs (about 320 KB) live in messageMediaCatalog.ts, which only the
+ * picker loads, so showing a message never downloads them.
  */
-import emojiCatalogData from "./emojiCatalog.json";
-import stickerCatalogData from "./stickerCatalog.json";
 
 export type MessageMediaKind = "gif" | "sticker" | "avatar";
 
@@ -36,8 +37,6 @@ export interface MessageMedia {
 export type EmojiRow = [string, string, string] | [string, string, string, string[]];
 export interface EmojiGroup { name: string; emoji: EmojiRow[] }
 
-export const emojiGroups: EmojiGroup[] = (emojiCatalogData as unknown as { groups: EmojiGroup[] }).groups;
-
 /** 0 is the yellow default; 1–5 are light to dark (Fitzpatrick 1–2 to 6). */
 export type SkinTone = 0 | 1 | 2 | 3 | 4 | 5;
 export const skinToneSwatches = ["✋", "✋🏻", "✋🏼", "✋🏽", "✋🏾", "✋🏿"] as const;
@@ -46,26 +45,8 @@ export function withSkinTone(row: EmojiRow, tone: SkinTone): string {
   return tone && row[3] ? row[3][tone - 1] ?? row[0] : row[0];
 }
 
-function words(query: string): string[] {
+export function words(query: string): string[] {
   return query.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, " ").split(/\s+/).filter(Boolean);
-}
-
-/** Every typed word must start a word of the emoji's name or keywords ("hea" finds hearts). */
-export function searchEmoji(query: string, limit = 120): EmojiRow[] {
-  const wanted = words(query);
-  if (!wanted.length) return [];
-  const results: Array<{ row: EmojiRow; score: number }> = [];
-  for (const group of emojiGroups) {
-    for (const row of group.emoji) {
-      const name = words(row[1]);
-      const keywords = words(row[2]);
-      if (!wanted.every((word) => name.some((part) => part.startsWith(word)) || keywords.some((part) => part.startsWith(word)))) continue;
-      // Names before keywords, and exact names first.
-      const score = (row[1].toLowerCase() === query.trim().toLowerCase() ? 0 : 2) + (wanted.every((word) => name.some((part) => part.startsWith(word))) ? 0 : 1);
-      results.push({ row, score });
-    }
-  }
-  return results.sort((a, b) => a.score - b.score).slice(0, limit).map((item) => item.row);
 }
 
 const emojiUnit = /(?:\p{Regional_Indicator}\p{Regional_Indicator})|(?:[#*0-9]\uFE0F?\u20E3)|(?:\p{Extended_Pictographic}(?:\uFE0F|[\u{1F3FB}-\u{1F3FF}])?(?:[\u{E0020}-\u{E007F}]+)?(?:\u200D\p{Extended_Pictographic}(?:\uFE0F|[\u{1F3FB}-\u{1F3FF}])?)*)/gu;
@@ -88,18 +69,8 @@ const fluentBase = `https://cdn.jsdelivr.net/gh/microsoft/fluentui-emoji@${fluen
 /** [path inside the Fluent assets folder, name and keywords] */
 export type StickerRow = [string, string];
 export interface StickerCategory { name: string; stickers: StickerRow[] }
-export const stickerCategories: StickerCategory[] = (stickerCatalogData as unknown as { categories: StickerCategory[] }).categories;
-
 export function stickerURL(path: string): string {
   return fluentBase + path.split("/").map(encodeURIComponent).join("/");
-}
-
-export function searchStickers(query: string, limit = 90): StickerRow[] {
-  const wanted = words(query);
-  if (!wanted.length) return [];
-  return stickerCategories.flatMap((category) => category.stickers)
-    .filter((row) => { const own = words(row[1]); return wanted.every((word) => own.some((part) => part.startsWith(word))); })
-    .slice(0, limit);
 }
 
 // ── Avatar stickers (DiceBear Avataaars) ─────────────────────────────────────────────────────

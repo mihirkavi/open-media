@@ -16,6 +16,12 @@ Open Media ships as one app on web, iOS, and Android. A change is not done until
 - **Shared logic**: add or update unit tests (`npm run check` covers the typecheck, app and Worker tests, and the web export), and run `npm run test:db` for database changes.
 - **Report honestly**: say which platforms were verified and how, and name anything not verified (for example, a feature that needs a real network account, a physical device, or production-only services) instead of implying it works.
 
+## Web performance
+
+- Icons come from `src/ui/Icon.tsx` (Ionicons cut down to the icons used). Never import `@expo/vector-icons` or its barrel directly: the barrel alone adds about 450 KB. After using a new icon, run `npm run icons:subset`; the typecheck fails until you do.
+- Screens and heavy features that aren't on the first page load with `lazyComponent` (`src/ui/lazyComponent.tsx`) or `import()`, so the web build splits them into their own files. Keep large data (catalogs, SDKs, signing code) out of modules the first page imports.
+- Content-hashed build files are served with a one-year immutable cache (`services/mail-sync/src/webApp.ts`), and `npm run build:web` adds font preloads and preconnects to the page.
+
 ## Agent plugin and agent site
 
 - Skills live in `src/domain/agentSkills.ts`; run `npm run agent-plugin:sync` after changing them (a test fails if `agent-plugin/skills` drifts). Never edit the generated `SKILL.md` files.

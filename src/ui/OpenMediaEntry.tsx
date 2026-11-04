@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from './Icon';
 import { Session } from '@supabase/supabase-js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Image, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
@@ -10,9 +10,7 @@ import { profileHandleFromPath } from '../domain/profileFields';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { BrandMark } from './BrandMark';
-import { DevelopersPage } from './DevelopersPage';
 import { LandingPage, PublicPage } from './LandingPage';
-import { MissionPage } from './MissionPage';
 import { PeopleProvider, PersonTarget, usePeople } from './people';
 import { PersonProfile } from './PersonProfile';
 import { MobileTabs, OpenMediaApp } from './OpenMediaApp';
@@ -24,6 +22,11 @@ import { SearchView } from './SearchView';
 import { useFeedLenses } from './useFeedLenses';
 import { useMixedFeed } from './useMixedFeed';
 import { Loader } from './Loader';
+import { lazyComponent } from './lazyComponent';
+
+// Reached from links on the landing page, so their code loads only when opened.
+const MissionPage = lazyComponent(() => import('./MissionPage').then((module) => module.MissionPage));
+const DevelopersPage = lazyComponent(() => import('./DevelopersPage').then((module) => module.DevelopersPage));
 
 export function OpenMediaEntry() {
   const client = getSupabaseClient();

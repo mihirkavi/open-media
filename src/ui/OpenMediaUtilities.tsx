@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from './Icon';
 import { useEffect, useMemo, useState } from 'react';
 import { Image, Linking, Modal, Platform, Pressable, ScrollView, Share, StyleSheet, Switch, useWindowDimensions, View } from 'react-native';
 import { Text, TextInput } from './Text';
@@ -17,20 +17,23 @@ import { Destination } from './OpenMediaApp';
 import { FeedPicker } from './OpenMediaFeed';
 import { AiModelsSettings } from './AiModelsSettings';
 import { CrossPostingSettings } from './CrossPostingSettings';
-import { DevelopersPage } from './DevelopersPage';
-import { EditProfile } from './EditProfile';
-import { MissionPage } from './MissionPage';
+import { lazyComponent } from './lazyComponent';
 import { IdentitySettings } from './IdentitySettings';
 import { PaymentsSettings } from './PaymentsSettings';
 import { OndcStoreSettings } from './OndcStoreSettings';
 import { PeopleSettings } from './PeopleSettings';
 import { ProfessionalLines } from './ProfessionalLines';
-import { SettingsView as ConnectionSettings } from './SettingsView';
 import { FeedAlgorithmSettings } from './FeedAlgorithmSettings';
 import type { FeedLenses } from './useFeedLenses';
 import type { SocialPost } from '../domain/posts';
 import { useTranslationPreferences } from './useTranslation';
 import { Loader } from './Loader';
+
+// Opened from a row in Settings or Profile, so their code loads only then.
+const EditProfile = lazyComponent(() => import('./EditProfile').then((module) => module.EditProfile));
+const ConnectionSettings = lazyComponent(() => import('./SettingsView').then((module) => module.SettingsView));
+const MissionPage = lazyComponent(() => import('./MissionPage').then((module) => module.MissionPage));
+const DevelopersPage = lazyComponent(() => import('./DevelopersPage').then((module) => module.DevelopersPage));
 
 export function OpenMediaSettings({ lenses, signedIn, posts, onMailSynced, focus }: { lenses: FeedLenses; signedIn: boolean; posts?: SocialPost[]; onMailSynced: () => void; focus?: { section: string; at: number } }) {
   const { colors, appearance, setAppearance } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]); const [query, setQuery] = useState('');

@@ -16,6 +16,17 @@ test('browsers on openmedia.site get the web app at / and at the sign-in callbac
   assert.deepEqual(served, ['/', '/', '/_expo/static/js/web/index.js']);
 });
 
+test('content-hashed build files are cached for a year; the page and unhashed files are not', async () => {
+  const cacheControl = async (path: string) => (await ask(`https://openmedia.site${path}`, {}))!.headers.get('cache-control');
+  assert.equal(await cacheControl('/_expo/static/js/web/index-7bbf390c0e2070ae0b7468b5d83b780d.js'), 'public, max-age=31536000, immutable');
+  assert.equal(await cacheControl('/assets/node_modules/@expo/vector-icons/build/vendor/react-native-vector-icons/Fonts/Ionicons.b4eb097d35f44ed943676fd56f6bdc51.ttf'), 'public, max-age=31536000, immutable');
+  assert.equal(await cacheControl('/assets/assets/landing/film.169c34a975cb1cd523f68f5da0eb56ee.mp4'), 'public, max-age=31536000, immutable');
+  for (const path of ['/favicon.ico', '/brand/logo-light.png', '/metadata.json', '/_expo/static/js/web/index.js']) assert.equal(await cacheControl(path), null, path);
+  const missing = await handleWebAppRequest(new Request('https://openmedia.site/_expo/static/js/web/index-7bbf390c0e2070ae0b7468b5d83b780d.js'), { ...env, ASSETS: { fetch: async () => new Response('missing', { status: 404 }) } });
+  assert.equal(missing!.headers.get('cache-control'), null, 'a missing file is never cached for a year');
+  assert.equal(await (await ask('https://openmedia.site/', html))!.headers.get('cache-control'), null);
+});
+
 test('www redirects to the apex; the API, agents and other hosts are left to the Worker', async () => {
   const redirect = await ask('https://www.openmedia.site/auth?code=1');
   assert.equal(redirect!.status, 301);

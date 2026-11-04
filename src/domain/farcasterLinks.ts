@@ -2,6 +2,14 @@ import { FarcasterCastMessage, FarcasterProfile, farcasterTimestamp, safeHttpsUr
 import { PostComment } from './postInteractions';
 import { PostEngagement } from './posts';
 
+/** Farcaster's limit on a link used as a reaction target or a reply's parent, in bytes. */
+export const farcasterMaxLinkBytes = 256;
+
+/** Whether Farcaster can take a link as a reaction target or a reply's parent (at most 256 bytes). */
+export function fitsFarcasterLink(url: string): boolean {
+  return new TextEncoder().encode(url).length <= farcasterMaxLinkBytes;
+}
+
 /**
  * Likes, recasts and replies on a web link (an article or an event's page), read from Farcaster
  * (ADR 0024 addendum 2). Farcaster is the one connected network whose protocol can like, recast and

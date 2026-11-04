@@ -42,7 +42,7 @@ export type ReactionTarget = CastId | { url: string };
 export interface ReactionInput { fid: number; type: FarcasterReaction; target: ReactionTarget; timestampMs?: number }
 
 /** Farcaster limits a reaction's target link and a cast's parent link to 256 bytes. */
-export const farcasterMaxUrlBytes = 256;
+export { farcasterMaxLinkBytes as farcasterMaxUrlBytes } from '../../domain/farcasterLinks';
 
 export interface SignedFarcasterMessage { bytes: Uint8Array; hash: `0x${string}` }
 

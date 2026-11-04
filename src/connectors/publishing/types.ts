@@ -54,6 +54,11 @@ export interface PublishingConnector {
   account(): Promise<NetworkAccount | undefined>;
   /** Interactive: sends the person to the network (or their wallet) to approve Open Media. */
   connect(context: ConnectContext): Promise<NetworkAccount>;
+  /**
+   * Called while a Connect button is on screen, for connectors that must load code before the tap
+   * (browsers block pop-ups opened after a wait). Never called just because the feed is open.
+   */
+  prepareConnect?(): void;
   /** Forgets this device’s delegated key. `revokeHint` says how to revoke it on the network too. */
   disconnect(): Promise<void>;
   revokeHint: string;

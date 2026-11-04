@@ -1,4 +1,4 @@
-import { Ionicons } from '@expo/vector-icons';
+import Ionicons from './Icon';
 
 /**
  * The blue tick (ADR 0013): this Open Media account was verified by the identity provider. It is

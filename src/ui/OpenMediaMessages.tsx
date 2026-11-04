@@ -1,4 +1,4 @@
-import { Ionicons } from "@expo/vector-icons";
+import Ionicons from "./Icon";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, Animated, Easing, Image, Keyboard, Linking, Modal, Platform, Pressable, ScrollView, StyleProp, StyleSheet, TextStyle, View, useWindowDimensions } from "react-native";
 import { Loader } from "./Loader";
@@ -28,7 +28,7 @@ import { MarkdownBody } from "./MarkdownBody";
 import { AiMark } from "./AiMark";
 import { AiThinking } from "./AiThinking";
 import { jumboEmojiCount, mediaPreview, parseMessageMedia } from "../domain/messageMedia";
-import { MediaPicker } from "./MediaPicker";
+import { lazyComponent, whenIdle } from "./lazyComponent";
 import { JumboEmoji, MessageMediaView } from "./MessageMediaView";
 
 interface Props {
@@ -63,6 +63,9 @@ interface Props {
     messageId?: string,
   ) => Promise<void>;
 }
+
+// The picker carries the emoji and sticker catalogs (~320 KB), so it loads on demand.
+const MediaPicker = lazyComponent(() => import("./MediaPicker").then((module) => module.MediaPicker), "none");
 
 export function OpenMediaMessages({
   conversations,
@@ -521,6 +524,8 @@ function MessageThread({
     const timer = setTimeout(() => composerInput.current?.focus(), 0);
     return () => clearTimeout(timer);
   }, [focusOnOpen, canSend]);
+  // Fetch the picker's code while the person reads, so the smile opens it instantly.
+  useEffect(() => (canSend ? whenIdle(() => { MediaPicker.preload().catch(() => undefined); }) : undefined), [canSend]);
   const startReply = (message: Message) => {
     setReplyTo(message);
     // Replying to a message answers it where it came from.

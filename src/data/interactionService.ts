@@ -6,11 +6,14 @@ import { prepareCrossPost } from '../domain/crossPosting';
 import { networks } from '../domain/networkPosts';
 import { engagementFromRecord, InteractionTarget, maxCommentLength, PostComment, postCommentFromRecord } from '../domain/postInteractions';
 import { PostEngagement } from '../domain/posts';
-import { actOnFarcasterLink, farcasterAccountFid, fitsFarcasterLink } from '../connectors/publishing/farcaster';
 import { farcasterProfile, snapchain } from '../connectors/networkFeeds';
-import { combineLinkEngagement, emptyLinkActivity, FarcasterCopies, farcasterCopiesFromRecord, FarcasterLinkActivity, farcasterLinkComments, linkReplies, reactionFids, withOwnAction } from '../domain/farcasterLinks';
+import { combineLinkEngagement, emptyLinkActivity, fitsFarcasterLink, FarcasterCopies, farcasterCopiesFromRecord, FarcasterLinkActivity, farcasterLinkComments, linkReplies, reactionFids, withOwnAction } from '../domain/farcasterLinks';
 import { FarcasterCastMessage } from '../domain/networkPosts';
 import { loadCrossPostPreferences, publishingConnector } from './crossPostService';
+
+// The Farcaster client carries signing code, so it loads the first time it is needed.
+const farcasterAccountFid = async () => (await import('../connectors/publishing/farcaster')).farcasterAccountFid();
+const actOnFarcasterLink: typeof import('../connectors/publishing/farcaster').actOnFarcasterLink = async (...args) => (await import('../connectors/publishing/farcaster')).actOnFarcasterLink(...args);
 
 function requireClient() {
   const client = getSupabaseClient();
@@ -75,7 +78,7 @@ const linkRecord = (data: unknown): OpenMediaLinkRecord => ({ engagement: engage
 
 /** The Farcaster account actions on links are copied to: connected, and not turned off in Cross-posting. */
 async function farcasterMirror(): Promise<{ fid: number; handle: string } | undefined> {
-  const connector = publishingConnector('farcaster');
+  const connector = await publishingConnector('farcaster');
   const [account, fid, preferences] = await Promise.all([connector.account().catch(() => undefined), farcasterAccountFid(), loadCrossPostPreferences()]);
   if (!account || !fid || preferences.excludedByDefault.includes('farcaster')) return undefined;
   return { fid, handle: account.handle };
@@ -224,7 +227,7 @@ export async function networkInteractionsDone(postId: string): Promise<{ liked: 
  * `idempotencyKey` identifies one comment draft, so a retry never replies twice.
  */
 export async function interactOnNetwork(postId: string, target: InteractionTarget, interaction: { kind: 'like' } | { kind: 'reshare' } | { kind: 'comment'; text: string; idempotencyKey: string }): Promise<PublishedCopy | undefined> {
-  const connector = publishingConnector(target.network);
+  const connector = await publishingConnector(target.network);
   const name = networks[target.network].displayName;
   const availability = await connector.availability();
   if (!availability.available) throw new PublishingError(availability.reason);

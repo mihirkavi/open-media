@@ -5,7 +5,8 @@ import { Linking, Platform } from 'react-native';
 
 import { deviceSecretStorage, getAPIAccessToken } from '../../auth/supabase';
 import { farcasterProfileFromUserData } from '../../domain/networkPosts';
-import { farcasterMaxUrlBytes, fromHex, signCastAdd, signReactionAdd, signReactionRemove, SignedFarcasterMessage, toHex } from './farcasterMessage';
+import { fromHex, signCastAdd, signReactionAdd, signReactionRemove, SignedFarcasterMessage, toHex } from './farcasterMessage';
+import { fitsFarcasterLink } from '../../domain/farcasterLinks';
 import { NetworkAccount, PublishingConnector, PublishingError } from './types';
 
 /**
@@ -140,10 +141,7 @@ export async function farcasterAccountFid(): Promise<number | undefined> {
   return (await load())?.fid;
 }
 
-/** Whether Farcaster can take a link as a reaction target or a reply's parent (at most 256 bytes). */
-export function fitsFarcasterLink(url: string): boolean {
-  return new TextEncoder().encode(url).length <= farcasterMaxUrlBytes;
-}
+export { fitsFarcasterLink };
 
 /** What Open Media sends to Farcaster for a web link: a like or recast (or taking it back), or a reply. */
 export type FarcasterLinkAction = { kind: 'like' | 'reshare'; on: boolean } | { kind: 'comment'; text: string };

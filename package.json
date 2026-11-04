@@ -73,6 +73,7 @@
     "mail:check": "npm run check-mailbox --prefix services/mail-sync",
     "agent-plugin:sync": "node --import tsx scripts/sync-agent-plugin.ts",
     "media:catalogs": "node --import tsx scripts/generate-message-media.ts",
+    "icons:subset": "python3 scripts/subset-icons.py",
     "packages:test": "node --import tsx --test packages/sdk/src/*.test.ts packages/cli/src/*.test.ts && cd packages/python && python3 -m unittest discover -s tests -t . -q"
   },
   "private": true,
