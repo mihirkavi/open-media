@@ -22,7 +22,7 @@ import { createWorkersAI } from 'workers-ai-provider';
 
 import { decryptSecret, encryptSecret } from './crypto.js';
 import { UserFacingError } from './errors.js';
-import type { AiBinding } from './searchAssist.js';
+import { usedUp, type AiBinding, type AssistMessage, type OwnModel } from './searchAssist.js';
 
 export interface AiChatEnv {
   AI?: AiBinding;
@@ -186,6 +186,16 @@ export function intentOf(text: string): Intent {
 
 export interface Route { provider: ProviderId; model: string; apiKey?: string }
 
+/** Saved keys that can be opened. A key sealed with an old server key is skipped; it's still listed so it can be removed. */
+export function openKeys(stored: StoredKey[], env: AiChatEnv): Map<ProviderId, string> {
+  const keys = new Map<ProviderId, string>();
+  for (const key of stored) {
+    if (!(key.provider in providers) || key.provider === 'built-in') continue;
+    try { keys.set(key.provider, decryptSecret(key.ciphertext, aiKeysKey(env))); } catch { /* unusable */ }
+  }
+  return keys;
+}
+
 /** Who answers: the model named in the message, else the person's choice, else their newest key, else the built-in model. */
 export function chooseRoute(asked: ProviderId | undefined, settings: AiSettings, keys: Map<ProviderId, string>): Route | { missing: ProviderId } {
   const pick = (provider: ProviderId, model?: string): Route | { missing: ProviderId } => {
@@ -290,12 +300,8 @@ export async function chat(input: unknown, store: AiStore, env: AiChatEnv, run: 
 
   const intent = intentOf(raw);
   const stored = await store.keys();
-  const keys = new Map<ProviderId, string>();
-  const hints = new Map<ProviderId, string>();
-  for (const key of stored) {
-    hints.set(key.provider, key.hint);
-    try { keys.set(key.provider, decryptSecret(key.ciphertext, aiKeysKey(env))); } catch { /* A key sealed with an old server key can't be used; it's listed so it can be removed. */ }
-  }
+  const keys = openKeys(stored, env);
+  const hints = new Map<ProviderId, string>(stored.map((key) => [key.provider, key.hint]));
   const settings = await store.settings();
   const asked: NewAiRecord = { role: 'user', body: raw.trim(), source: 'chat' };
 
@@ -363,11 +369,6 @@ export async function chat(input: unknown, store: AiStore, env: AiChatEnv, run: 
     if (!text) throw new UserFacingError(`${providers[route.provider].name} ${providerProblem(error)}, and the built-in AI didn’t answer either. Try again.`);
     return store.append([asked, reply(text, { provider: 'built-in', model: builtInModel, meta: { fallbackFrom: route.provider, reason: providerProblem(error), ...done(second) } })]);
   }
-}
-
-/** Workers AI's daily free allowance is spent (error 4006); it comes back at 00:00 UTC. */
-function usedUp(error: unknown): boolean {
-  return /\b4006\b|daily free allocation/i.test(String((error as Error)?.message ?? error));
 }
 
 /** The changes an earlier answer proposed; answers saved before several were allowed hold one. */
@@ -449,11 +450,40 @@ export async function chooseAiModel(input: unknown, store: AiStore, env: AiChatE
   return aiKeysSummary(store, env);
 }
 
+/**
+ * The model that writes a signed-in person's AI search summaries: the one answering their AI chat
+ * when it uses their own key, read with their own token (row-level security decides whose).
+ * Undefined means the free built-in model.
+ */
+export async function ownSearchModel(env: AiChatEnv & { SUPABASE_URL: string; SUPABASE_PUBLISHABLE_KEY: string }, token: string, fetchImpl: typeof fetch = fetch): Promise<OwnModel | undefined> {
+  const get = async <T>(path: string): Promise<T> => {
+    const response = await fetchImpl(`${env.SUPABASE_URL.replace(/\/$/, '')}${path}`, { headers: { apikey: env.SUPABASE_PUBLISHABLE_KEY, authorization: `Bearer ${token}` } });
+    if (!response.ok) throw new Error(`AI settings not read (${response.status})`);
+    return response.json() as Promise<T>;
+  };
+  const [stored, rows] = await Promise.all([
+    get<StoredKey[]>('/rest/v1/ai_provider_keys?select=provider,ciphertext,hint&order=created_at.asc'),
+    get<{ provider: ProviderId | null; model: string | null }[]>('/rest/v1/ai_settings?select=provider,model'),
+  ]);
+  const keys = openKeys(stored, env);
+  if (!keys.size) return undefined;
+  const route = chooseRoute(undefined, { provider: rows[0]?.provider ?? undefined, model: rows[0]?.model ?? undefined }, keys);
+  if ('missing' in route || route.provider === 'built-in') return undefined;
+  return { provider: route.provider, model: route.model, name: providers[route.provider].name, ask: (messages) => summarize(route, messages, env) };
+}
+
+/** One short answer with the caller's own prompt, from the person's own model. */
+export async function summarize(route: Route, messages: AssistMessage[], env: AiChatEnv): Promise<string> {
+  // Room for reasoning models to think before the two or three sentences asked for.
+  const result = await generateText({ model: modelFor(route, env), messages, maxOutputTokens: 1500, maxRetries: 1, abortSignal: AbortSignal.timeout(30_000) });
+  return result.text;
+}
+
 /** An AI search, recorded in the AI chat as the search and its summary. */
-export function searchRecords(result: { query: string; answer: string; citations: string[]; model: string }): NewAiRecord[] {
+export function searchRecords(result: { query: string; answer: string; citations: string[]; model: string; provider?: string }): NewAiRecord[] {
   return [
     { role: 'user', body: result.query, source: 'search' },
-    { role: 'assistant', body: result.answer, source: 'search', provider: 'built-in', model: result.model, meta: { citations: result.citations } },
+    { role: 'assistant', body: result.answer, source: 'search', provider: result.provider ?? 'built-in', model: result.model, meta: { citations: result.citations } },
   ];
 }
 

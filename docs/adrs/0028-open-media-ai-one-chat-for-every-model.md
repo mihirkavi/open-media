@@ -157,3 +157,24 @@ the assistant).
   returned, choosing and removing). Web at desktop width and 375 px. iOS and Android not run, and
   no real provider key was used.
 
+
+## 10. AI search summaries use the person's own key (added 2026-11-03)
+
+Before this, search summaries always ran on the free built-in model, even for people with a saved
+key. Once Cloudflare's free daily allowance was used up, every summary failed, and the raw Workers
+AI error ("4006: you have used up your daily free allocation…") was shown in Search.
+
+- Signed in, `POST /v1/search/assist` reads the person's saved keys and chosen model with their own
+  token (row-level security decides whose) and picks the model the same way the chat does
+  (`chooseRoute`). That model writes the summary, from the same search text and public post
+  snippets as before. Nothing else is sent to it.
+- If their model fails, the built-in model writes the summary. Signed out, without a key, or after
+  choosing the free model, the built-in model writes it as before.
+- When the free allowance is used up, Search says so plainly and points to Settings → Open Media
+  AI. It never shows the raw error. The recorded search in the AI chat names the model that
+  actually wrote the summary.
+- **Verified:** `searchAssist.test.ts` and `aiChat.test.ts` (own model first, fallback, spent
+  allowance, keys read with the person's token, unusable or absent keys). A second local API
+  server was run against the local database: signed out it returned 503, as before. With a
+  made-up OpenAI key saved, the summary went to OpenAI and came back as "GPT didn't answer. Try
+  again." No real provider key was used. The app's UI didn't change. iOS and Android were not run.

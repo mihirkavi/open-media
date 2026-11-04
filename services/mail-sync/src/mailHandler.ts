@@ -17,7 +17,7 @@ import { handleAgentRequest, isAgentPath } from './agentApi.js';
 import { handlePublicApiRequest, isPublicApiPath } from './publicApi.js';
 import { authenticate } from './session.js';
 import { runSearchAssist, SearchAssistEnv } from './searchAssist.js';
-import { recordSearch } from './aiChat.js';
+import { AiChatEnv, ownSearchModel, recordSearch } from './aiChat.js';
 import { runTranslate, TranslateEnv } from './translate.js';
 import { parseGifQuery, searchGifs, GifSearchEnv } from './gifSearch.js';
 import { syncPop3, testPop3 } from './pop3.js';
@@ -28,7 +28,7 @@ import { describeValidationError } from './validation.js';
 
 export interface Limiter { limit(options: { key: string }): Promise<{ success: boolean }> }
 
-export interface MailEnv extends FarcasterSignerEnv, SearchAssistEnv, TranslateEnv, BridgesEnv, GifSearchEnv {
+export interface MailEnv extends FarcasterSignerEnv, SearchAssistEnv, AiChatEnv, TranslateEnv, BridgesEnv, GifSearchEnv {
   SUPABASE_URL: string;
   SUPABASE_PUBLISHABLE_KEY: string;
   MAIL_CREDENTIALS_KEY: string;
@@ -114,10 +114,12 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
     if (request.method === 'POST' && url.pathname === '/v1/search/assist') {
       const limiter = env.PUBLIC_API_RATE_LIMITER;
       if (limiter && !(await limiter.limit({ key: `assist:${request.headers.get('cf-connecting-ip') ?? 'local'}` })).success) return rateLimited(headers);
-      if (!env.AI) return json(503, { error: 'AI summaries aren’t available on this server.' }, headers);
-      const result = await runSearchAssist(await readJSON(request), env);
-      // Signed in, the search and its summary also go into the person's AI chat (ADR 0028).
+      // Signed in, the person's own AI key writes the summary, and the search and its summary also
+      // go into their AI chat (ADR 0028). Without a usable key the free built-in model writes it.
       const bearer = request.headers.get('authorization')?.match(/^Bearer (\S+)$/)?.[1];
+      const own = bearer ? await ownSearchModel(env, bearer).catch(() => undefined) : undefined;
+      if (!env.AI && !own) return json(503, { error: 'AI summaries aren’t available on this server.' }, headers);
+      const result = await runSearchAssist(await readJSON(request), env, own);
       const recorded = bearer ? await recordSearch(env, bearer, result).then(() => true, () => false) : false;
       return json(200, { ...result, recorded }, headers);
     }

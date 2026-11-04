@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import test from 'node:test';
 
-import { agrees, aiKeysSummary, AiRecord, AiSettings, AiStore, AiToolkit, builtInModel, chat, chooseAiModel, chooseRoute, conversationFor, findKeys, intentOf, NewAiRecord, pendingOf, recordSearch, removeAiKey, Route, saveAiKey, StoredKey, withoutKeys, withoutToolTalk } from './aiChat.js';
+import { encryptSecret } from './crypto.js';
+import { aiKeysKey, agrees, aiKeysSummary, AiRecord, AiSettings, AiStore, AiToolkit, builtInModel, chat, chooseAiModel, chooseRoute, conversationFor, findKeys, intentOf, NewAiRecord, ownSearchModel, pendingOf, recordSearch, removeAiKey, Route, saveAiKey, StoredKey, withoutKeys, withoutToolTalk } from './aiChat.js';
 
 // Made-up keys in each provider's shape; none is real.
 const fake = {
@@ -222,4 +223,23 @@ test('Settings chooses who answers and removes keys; removing the one answering 
   assert.equal(after.answering.provider, 'openai', 'the remaining key answers once the chosen one is gone');
   const other = { MAIL_CREDENTIALS_KEY: randomBytes(32).toString('base64') };
   assert.equal((await aiKeysSummary(store, other)).keys[0].usable, false, 'a key sealed with an old server key is listed so it can be removed');
+});
+
+test('Search summaries use the model answering the person’s AI chat, read with their own token', async () => {
+  const seen: string[] = [];
+  const supabase = (stored: StoredKey[], settings: AiSettings[] = [], status = 200) => (async (url: string, init?: RequestInit) => {
+    seen.push((init?.headers as Record<string, string>).authorization);
+    if (status !== 200) return new Response('{}', { status });
+    return Response.json(url.includes('ai_provider_keys') ? stored : settings);
+  }) as never;
+  const sealed = (provider: StoredKey['provider'], key: string): StoredKey => ({ provider, ciphertext: encryptSecret(key, aiKeysKey(env)), hint: key.slice(-4) });
+  const config = { ...env, SUPABASE_URL: 'https://db.test/', SUPABASE_PUBLISHABLE_KEY: 'pk' };
+
+  const own = await ownSearchModel(config, 'person-token', supabase([sealed('openai', fake.openai), sealed('anthropic', fake.anthropic)], [{ provider: 'openai', model: 'gpt-5.6-mini' }]));
+  assert.deepEqual([own?.provider, own?.model, own?.name], ['openai', 'gpt-5.6-mini', 'GPT'], 'the chosen model, not just the newest key');
+  assert.ok(seen.every((value) => value === 'Bearer person-token'));
+  assert.equal(await ownSearchModel(config, 't', supabase([])), undefined, 'no key: the free model');
+  assert.equal(await ownSearchModel(config, 't', supabase([sealed('openai', fake.openai)], [{ provider: 'built-in', model: null } as never])), undefined, 'chose the free model');
+  assert.equal(await ownSearchModel({ ...config, MAIL_CREDENTIALS_KEY: randomBytes(32).toString('base64') }, 't', supabase([sealed('openai', fake.openai)])), undefined, 'a key that can’t be opened');
+  await assert.rejects(ownSearchModel(config, 'expired', supabase([], [], 401)), /not read \(401\)/);
 });

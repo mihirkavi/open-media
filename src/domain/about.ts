@@ -182,7 +182,7 @@ export const agentInterfaces = {
     { method: 'GET', path: '/v1/bridges/{network}/flows', description: 'How a chat network can be connected.' },
     { method: 'POST', path: '/v1/bridges/{network}/login/start', description: 'Start connecting a chat network (then login/step, login/cancel, logout).' },
     { method: 'GET', path: '/v1/cross-posting/status', description: 'Which networks this server helps cross-post to. Cross-posting itself is signed on your device.' },
-    { method: 'POST', path: '/v1/search/assist', description: 'A short AI summary, with citations, of public posts you pass in. No account needed.' },
+    { method: 'POST', path: '/v1/search/assist', description: 'A short AI summary, with citations, of public posts you pass in. No account needed; signed in, your own AI key from Settings → Open Media AI writes it.' },
     { method: 'POST', path: '/v1/translate', description: 'Translate up to 20 texts into English (or another language), detecting each one’s language. Public text is cached by its hash; with private: true and your token, messages and email are translated without being stored.' },
   ],
   mcp: [

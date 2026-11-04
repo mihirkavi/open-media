@@ -36,3 +36,20 @@ test('Summaries come from Workers AI, and are refused without it', async () => {
   assert.deepEqual(result.citations, ['lens:1']);
   assert.equal((seen as { messages: unknown[] }).messages.length, 2);
 });
+
+test('The person’s own model writes the summary, and the built-in model steps in when it fails', async () => {
+  const builtIn = { AI: { run: async () => ({ response: 'Built-in summary [1].' }) } };
+  const own = (ask: () => Promise<string>) => ({ provider: 'anthropic', model: 'claude-sonnet-5-5', name: 'Claude', ask });
+  const mine = await runSearchAssist({ query: 'eth', posts }, builtIn, own(async () => 'Claude summary [1].'));
+  assert.deepEqual([mine.answer, mine.provider, mine.model, mine.citations], ['Claude summary [1].', 'anthropic', 'claude-sonnet-5-5', ['lens:1']]);
+  // Works without Workers AI, too.
+  assert.equal((await runSearchAssist({ query: 'eth', posts }, {}, own(async () => 'Mine.'))).answer, 'Mine.');
+  const fallback = await runSearchAssist({ query: 'eth', posts }, builtIn, own(async () => { throw Object.assign(new Error('bad key'), { statusCode: 401 }); }));
+  assert.deepEqual([fallback.answer, fallback.provider], ['Built-in summary [1].', 'built-in']);
+});
+
+test('A spent free allowance is said plainly, never as the raw Workers AI error', async () => {
+  const spent = { AI: { run: async () => { throw new Error('4006: you have used up your daily free allocation of 10,000 neurons'); } } };
+  await assert.rejects(runSearchAssist({ query: 'eth', posts }, spent), (error: Error) => /today’s limit/.test(error.message) && /Settings → Open Media AI/.test(error.message) && !/neurons|4006/.test(error.message));
+  await assert.rejects(runSearchAssist({ query: 'eth', posts }, spent, { provider: 'openai', model: 'gpt-5.6', name: 'GPT', ask: async () => { throw new Error('down'); } }), /GPT didn’t answer, and the free built-in AI has reached today’s limit/);
+});
