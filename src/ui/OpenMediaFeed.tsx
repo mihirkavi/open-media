@@ -13,7 +13,7 @@ import { Text, TextInput } from './Text';
 
 import { createClientId } from '../data/openMediaService';
 import { crossPost } from '../data/crossPostService';
-import { interleaveEvents, loadUpcomingEvents } from '../data/eventsService';
+import { loadUpcomingEvents } from '../data/eventsService';
 import { PostReportReason, publishListing, publishPaidPost, publishPost, rateListing } from '../data/postService';
 import { loadPaidContent } from '../data/paymentsService';
 import { eventRegistration, ListingInput, listingLine, parsePrice, validateListing } from '../domain/listings';
@@ -22,7 +22,7 @@ import { cleanPostMarkdown, looksLikeMarkdown, parseMarkdown, previewBlocks, tid
 import { crossPostVideo, discardPreparedVideo, draftCrossPostVideo, prepareVideo, PreparedVideo, uploadPostVideo, UploadedVideo, VideoError } from '../data/videoUpload';
 import { CrossPostOutcome, CrossPostVideo, destinationSummary, outcomeSummary, prepareCrossPost } from '../domain/crossPosting';
 import { NetworkId, networks, safeHttpsUrl, sourceName } from '../domain/networkPosts';
-import { FeedLens, LensContext, lensKeeps, ownCopyId, relevantLens } from '../domain/feedLenses';
+import { FeedLens, LensContext, ownCopyId, relevantLens } from '../domain/feedLenses';
 import { explainFeedPost, FeedMode, selectFeed, SocialPost } from '../domain/posts';
 import { formatBytes, formatDuration, maxVideoBytes, maxVideoSeconds } from '../domain/postVideo';
 import { formatRelativeTime, maxPostLength } from '../domain/publicPosts';
@@ -70,10 +70,10 @@ export interface FeedViewProps {
 
 export function FeedView({ lens, lenses, onLensChange, lensContext, posts, loading, error, hasMore, onRetry, onLoadMore, sources, loadingMore = false, pendingCount = 0, onShowPending, viewer, composing = false, onComposingChange, onPublished, onDeletePost, onReportPost }: FeedViewProps) {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
-  // Upcoming public events sit among posts in the mixed Feed; they never push posts out.
+  // Upcoming public events are part of the mixed Feed: the lens filters and ranks them with every
+  // other post, so the person's own algorithm decides where (and whether) they appear.
   const events = useUpcomingEvents(Boolean(sources));
-  // Events keep their own soonest-first order but still obey the lens's filters.
-  const ordered = useMemo(() => interleaveEvents(selectFeed(posts, lens, lensContext), events.filter((event) => lensKeeps(event, lens, lensContext).kept)), [posts, lens, lensContext, events]);
+  const ordered = useMemo(() => selectFeed(events.length ? [...posts, ...events.filter((event) => !posts.some((post) => post.id === event.id))] : posts, lens, lensContext), [posts, lens, lensContext, events]);
   const unreachable = (sources ?? []).filter((item) => item.error);
   const sourceNames = sources ? sources.map((item) => sourceName(item.id)) : ['Open Media'];
   const subtitle = `Public posts from ${listFormat(sourceNames)}.${viewer ? '' : ' No account needed to read.'}`;

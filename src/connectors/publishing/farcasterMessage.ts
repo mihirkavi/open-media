@@ -10,6 +10,7 @@ import { blake3 } from '@noble/hashes/blake3';
  */
 const MESSAGE_TYPE_CAST_ADD = 1;
 const MESSAGE_TYPE_REACTION_ADD = 3;
+const MESSAGE_TYPE_REACTION_REMOVE = 4;
 const FARCASTER_NETWORK_MAINNET = 1;
 const HASH_SCHEME_BLAKE3 = 1;
 const SIGNATURE_SCHEME_ED25519 = 1;
@@ -32,7 +33,16 @@ export interface CastId { fid: number; hash: `0x${string}` }
 /** Farcaster's ReactionType: a like or a recast (reshare). */
 export type FarcasterReaction = 'like' | 'recast';
 
-export interface ReactionInput { fid: number; type: FarcasterReaction; target: CastId; timestampMs?: number }
+/**
+ * A reaction's target: a cast, or any web link (ReactionBody.target_url). Link reactions are how
+ * Farcaster likes and recasts a web page, so every Farcaster app can count them.
+ */
+export type ReactionTarget = CastId | { url: string };
+
+export interface ReactionInput { fid: number; type: FarcasterReaction; target: ReactionTarget; timestampMs?: number }
+
+/** Farcaster limits a reaction's target link and a cast's parent link to 256 bytes. */
+export const farcasterMaxUrlBytes = 256;
 
 export interface SignedFarcasterMessage { bytes: Uint8Array; hash: `0x${string}` }
 
@@ -58,9 +68,20 @@ export function encodeCastAddData(input: CastInput): Uint8Array {
 }
 
 export function encodeReactionAddData(input: ReactionInput): Uint8Array {
-  const body = new ProtoWriter().varint(1, input.type === 'like' ? 1 : 2).message(2, castId(input.target));
+  return encodeReactionData(input, MESSAGE_TYPE_REACTION_ADD);
+}
+
+/** Takes a reaction back. Same body as the add; Farcaster keeps whichever came last. */
+export function encodeReactionRemoveData(input: ReactionInput): Uint8Array {
+  return encodeReactionData(input, MESSAGE_TYPE_REACTION_REMOVE);
+}
+
+function encodeReactionData(input: ReactionInput, type: number): Uint8Array {
+  const body = new ProtoWriter().varint(1, input.type === 'like' ? 1 : 2);
+  if ('url' in input.target) body.string(3, input.target.url);
+  else body.message(2, castId(input.target));
   const data = new ProtoWriter();
-  data.varint(1, MESSAGE_TYPE_REACTION_ADD);
+  data.varint(1, type);
   data.varint(2, input.fid);
   data.varint(3, farcasterTime(input.timestampMs ?? Date.now()));
   data.varint(4, FARCASTER_NETWORK_MAINNET);
@@ -78,6 +99,10 @@ export function signCastAdd(input: CastInput, privateKey: Uint8Array): SignedFar
 
 export function signReactionAdd(input: ReactionInput, privateKey: Uint8Array): SignedFarcasterMessage {
   return signMessageData(encodeReactionAddData(input), privateKey);
+}
+
+export function signReactionRemove(input: ReactionInput, privateKey: Uint8Array): SignedFarcasterMessage {
+  return signMessageData(encodeReactionRemoveData(input), privateKey);
 }
 
 function signMessageData(dataBytes: Uint8Array, privateKey: Uint8Array): SignedFarcasterMessage {

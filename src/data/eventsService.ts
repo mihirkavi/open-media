@@ -2,8 +2,6 @@ import { apiConfigured, getAPIURL } from '../connectors/mailApiConnector';
 import { PublicEvent, socialPostFromEvent } from '../domain/listings';
 import { SocialPost } from '../domain/posts';
 
-export { interleaveEvents } from '../domain/listings';
-
 /**
  * Upcoming public events for the Feed (ADR 0013, phase 3), read from the Open Media service. No
  * account is needed and nothing personal is sent; when the service is unreachable the Feed simply
@@ -19,5 +17,5 @@ export async function loadUpcomingEvents(options: { area?: string; days?: number
   const response = await fetch(`${getAPIURL()}/v1/events/upcoming?${params}`);
   if (!response.ok) throw new Error('Events are unavailable right now.');
   const body = await response.json() as { area: string; data: PublicEvent[] };
-  return { area: body.area, posts: (body.data ?? []).map(socialPostFromEvent) };
+  return { area: body.area, posts: (body.data ?? []).map((event) => socialPostFromEvent(event)) };
 }

@@ -5,6 +5,7 @@ import { PersonLink, targetForPost } from './people';
 import { Text } from './Text';
 
 import { networks, safeHttpsUrl, sourceName } from '../domain/networkPosts';
+import { FeedLens, LensContext, rawLens } from '../domain/feedLenses';
 import { explainFeedPost, selectFeed, SocialPost } from '../domain/posts';
 import { formatRelativeTime } from '../domain/publicPosts';
 import { ClipVideo } from './ClipVideo';
@@ -17,9 +18,10 @@ import { Loader } from './Loader';
  * Clips: the same canonical posts as Feed, shown as an immersive vertical stream of short videos
  * from Open Media, Farcaster, Lens, Hive, and DeSo. One clip per screen; swipe or scroll to the next. It is
  * continuous (more clips load near the end) and live: new clips are announced by a pill and added on
- * top when tapped, so the clip someone is watching never moves or gets interrupted.
+ * top when tapped, so the clip someone is watching never moves or gets interrupted. Clips are
+ * filtered and ordered by the same lens as the Feed (ADR 0021): the person's own algorithm.
  */
-export function ClipsView({ sessionKey }: { sessionKey?: string }) {
+export function ClipsView({ sessionKey, lens = rawLens, lensContext }: { sessionKey?: string; lens?: FeedLens; lensContext?: LensContext }) {
   const clips = useMixedFeed(sessionKey, 'clips');
   // Stable where it matters: the clip being watched and the next one never move. Clips from later
   // pages and slower networks merge newest-first below them; tapped-in new clips go on top.
@@ -31,21 +33,26 @@ export function ClipsView({ sessionKey }: { sessionKey?: string }) {
   const allLoaded = clips.sources.every((source) => !source.loading);
   useEffect(() => { const timer = setTimeout(() => setSettled(true), 3000); return () => clearTimeout(timer); }, []);
   useEffect(() => { if (allLoaded) setSettled(true); }, [allLoaded]);
+  // A different lens (or a tuned one) reorders everything below the clip being watched.
+  const lastLens = useRef(lens);
   useEffect(() => {
     if (!settled) return;
+    const lensChanged = lastLens.current !== lens; lastLens.current = lens;
+    // Only clips the lens keeps are shown; the watched clip and the next stay put even if a new lens drops them.
+    const allowed = new Set(selectFeed(clips.posts, lens, lensContext).map((post) => post.id));
     const available = new Set(clips.posts.map((post) => post.id));
     setOrder((current) => {
       const known = new Set(current);
-      const fresh = selectFeed(clips.posts.filter((post) => !known.has(post.id)), 'raw').map((post) => post.id);
+      const fresh = selectFeed(clips.posts.filter((post) => !known.has(post.id)), lens, lensContext).map((post) => post.id);
       const kept = current.filter((id) => available.has(id));
-      if (!fresh.length && kept.length === current.length) return current;
+      if (!fresh.length && kept.length === current.length && !lensChanged) return current;
       const onTop = mergeOnTop.current; mergeOnTop.current = false;
-      if (onTop) return [...fresh, ...kept];
+      if (onTop) return [...fresh, ...kept.filter((id) => allowed.has(id))];
       const fixed = kept.slice(0, activeRef.current + 2);
       const below = new Set([...kept.slice(activeRef.current + 2), ...fresh]);
-      return [...fixed, ...selectFeed(clips.posts.filter((post) => below.has(post.id)), 'raw').map((post) => post.id)];
+      return [...fixed, ...selectFeed(clips.posts.filter((post) => below.has(post.id)), lens, lensContext).map((post) => post.id)];
     });
-  }, [clips.posts, settled]);
+  }, [clips.posts, settled, lens, lensContext]);
   const byId = useMemo(() => new Map(clips.posts.map((post) => [post.id, post])), [clips.posts]);
   const ordered = useMemo(() => order.map((id) => byId.get(id)).filter((post): post is SocialPost => Boolean(post)), [order, byId]);
   const scroller = useRef<ScrollView>(null);
@@ -69,20 +76,20 @@ export function ClipsView({ sessionKey }: { sessionKey?: string }) {
 
   return <View style={styles.screen} onLayout={onLayout}>
     {height ? <ScrollView ref={scroller} pagingEnabled showsVerticalScrollIndicator={false} onScroll={onScroll} scrollEventThrottle={32} style={styles.screen}>
-      {visible.map((post, index) => <Clip key={post.id} post={post} height={height} active={index === active} mounted={Math.abs(index - active) <= 1} muted={muted} onToggleMute={() => setMuted((value) => !value)} onFailed={markFailed} />)}
+      {visible.map((post, index) => <Clip key={post.id} post={post} lens={lens} lensContext={lensContext} height={height} active={index === active} mounted={Math.abs(index - active) <= 1} muted={muted} onToggleMute={() => setMuted((value) => !value)} onFailed={markFailed} />)}
       {clips.loadingMore ? <View style={[styles.status, { height: height / 3 }]}><Loader color="#FFFFFF" /></View> : null}
     </ScrollView> : null}
     {clips.pendingCount > 0 ? <Pressable accessibilityRole="button" accessibilityLabel={`Show ${clips.pendingCount} new ${clips.pendingCount === 1 ? 'clip' : 'clips'}`} onPress={jumpToNew} style={styles.newClips}><Ionicons name="arrow-up" size={14} color="#111111" /><Text style={styles.newClipsText}>{clips.pendingCount} new {clips.pendingCount === 1 ? 'clip' : 'clips'}</Text></Pressable> : null}
     {(clips.loading || !settled) && !visible.length ? <View style={[StyleSheet.absoluteFill, styles.status]}><Loader color="#FFFFFF" /><Text style={styles.statusText}>Finding new clips…</Text></View> : null}
     {!clips.loading && settled && !visible.length ? <View style={[StyleSheet.absoluteFill, styles.status]}>
       <Ionicons name="film-outline" size={28} color="#B9B9B4" />
-      <Text style={styles.statusText}>{clips.error || 'No clips right now.'}</Text>
+      <Text style={styles.statusText}>{clips.error || (clips.posts.length ? `Nothing here fits ${lens.name}. Choose Relevant or Raw in Feed to see every clip.` : 'No clips right now.')}</Text>
       <Pressable accessibilityRole="button" onPress={clips.refresh} style={styles.retry}><Text style={styles.retryText}>Try again</Text></Pressable>
     </View> : null}
   </View>;
 }
 
-function Clip({ post, height, active, mounted, muted, onToggleMute, onFailed }: { post: SocialPost; height: number; active: boolean; mounted: boolean; muted: boolean; onToggleMute: () => void; onFailed: (id: string) => void }) {
+function Clip({ post, lens, lensContext, height, active, mounted, muted, onToggleMute, onFailed }: { post: SocialPost; lens: FeedLens; lensContext?: LensContext; height: number; active: boolean; mounted: boolean; muted: boolean; onToggleMute: () => void; onFailed: (id: string) => void }) {
   const media = post.media?.find((item) => item.kind === 'video');
   const [why, setWhy] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -90,7 +97,7 @@ function Clip({ post, height, active, mounted, muted, onToggleMute, onFailed }: 
   const original = safeHttpsUrl(post.provenance.canonicalURL);
   const network = sourceName(post.provenance.connectorId);
   const translation = useTranslation(post.id, [post.title ?? post.body]);
-  const explanation = explainFeedPost(post, 'raw');
+  const explanation = explainFeedPost(post, lens, lensContext);
   const fail = useCallback(() => onFailed(post.id), [onFailed, post.id]);
   if (!media?.url) return null;
   return <View style={[styles.clip, { height }]}>
@@ -112,6 +119,8 @@ function Clip({ post, height, active, mounted, muted, onToggleMute, onFailed }: 
       </View>
       {why ? <View style={styles.why}>
         {explanation.used.map((item) => <Text key={item} style={styles.whyText}>✓ {item}</Text>)}
+        <Text style={styles.whyText}>{explanation.lens}: {explanation.rules.join(' · ')}</Text>
+        {explanation.scoring.map((item) => <Text key={item} style={styles.whyText}>{item}</Text>)}
         {explanation.filters.map((item) => <Text key={item} style={styles.whyText}>· {item}</Text>)}
         <Text style={styles.whyNote}>Filtered clips stay on {network}; Open Media only leaves them out of Clips.{networks[post.provenance.connectorId as keyof typeof networks] ? ` ${networks[post.provenance.connectorId as keyof typeof networks].about}` : ''}</Text>
       </View> : null}

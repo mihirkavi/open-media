@@ -5,7 +5,7 @@ import { Linking, Platform } from 'react-native';
 
 import { deviceSecretStorage, getAPIAccessToken } from '../../auth/supabase';
 import { farcasterProfileFromUserData } from '../../domain/networkPosts';
-import { fromHex, signCastAdd, signReactionAdd, SignedFarcasterMessage, toHex } from './farcasterMessage';
+import { farcasterMaxUrlBytes, fromHex, signCastAdd, signReactionAdd, signReactionRemove, SignedFarcasterMessage, toHex } from './farcasterMessage';
 import { NetworkAccount, PublishingConnector, PublishingError } from './types';
 
 /**
@@ -134,6 +134,39 @@ export const farcasterPublisher: PublishingConnector = {
     return undefined;
   },
 };
+
+/** The connected Farcaster account's number (fid) on this device, if any. */
+export async function farcasterAccountFid(): Promise<number | undefined> {
+  return (await load())?.fid;
+}
+
+/** Whether Farcaster can take a link as a reaction target or a reply's parent (at most 256 bytes). */
+export function fitsFarcasterLink(url: string): boolean {
+  return new TextEncoder().encode(url).length <= farcasterMaxUrlBytes;
+}
+
+/** What Open Media sends to Farcaster for a web link: a like or recast (or taking it back), or a reply. */
+export type FarcasterLinkAction = { kind: 'like' | 'reshare'; on: boolean } | { kind: 'comment'; text: string };
+
+/**
+ * Likes, recasts or replies to a web link (an article or an event's page) as the connected account,
+ * in Farcaster's own form for links: a reaction whose target is the URL, or a cast whose parent is
+ * the URL. Every Farcaster app reads these, so the action is visible beyond Open Media. Returns the
+ * reply's hash; reactions return nothing.
+ */
+export async function actOnFarcasterLink(url: string, action: FarcasterLinkAction): Promise<{ fid: number; hash?: `0x${string}` }> {
+  const stored = await load();
+  if (!stored) throw new PublishingError('Connect Farcaster in Settings → Cross-posting.');
+  if (!fitsFarcasterLink(url)) throw new PublishingError('That link is too long for Farcaster.');
+  if (action.kind === 'comment') {
+    const hash = await submit(stored, (key) => signCastAdd({ fid: stored.fid, text: action.text, parentUrl: url }, key));
+    return { fid: stored.fid, hash: hash as `0x${string}` };
+  }
+  const reaction = { fid: stored.fid, type: action.kind === 'like' ? 'like' as const : 'recast' as const, target: { url } };
+  // Farcaster keeps one reaction per account and link, so repeating an add or a remove is already done.
+  await submit(stored, (key) => (action.on ? signReactionAdd : signReactionRemove)(reaction, key), true);
+  return { fid: stored.fid };
+}
 
 /** Signs on this device and relays only the signed bytes through Open Media's server. */
 async function submit(stored: StoredFarcaster, sign: (key: Uint8Array) => SignedFarcasterMessage, duplicateIsDone = false): Promise<string> {

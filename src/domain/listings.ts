@@ -329,7 +329,21 @@ export interface PublicEvent extends PostEvent {
 }
 
 /** Turns an event into a Feed post that keeps its source, link and reason for being shown. */
-export function socialPostFromEvent(event: PublicEvent): import('./posts').SocialPost {
+/**
+ * An event's place in time for the Feed's lens. Events have no real “posted” time (the listing's
+ * update time is when Open Media last read it), so an event counts as a quarter as old as it is far
+ * away: one that starts in a day ranks like a post from six hours ago. Soon events rise, later ones
+ * sink, and every lens (Raw, Relevant or the person's own) mixes them with posts by the same rule.
+ */
+/** How many hours away an event is for each hour of “age” it gets in the Feed. */
+export const eventDistanceToAge = 4;
+
+export function eventFeedTime(event: Pick<PublicEvent, 'startsAt'>, now = Date.now()): string {
+  const starts = Date.parse(event.startsAt);
+  return new Date(Number.isFinite(starts) ? now - Math.max(0, starts - now) / eventDistanceToAge : now).toISOString();
+}
+
+export function socialPostFromEvent(event: PublicEvent, now = Date.now()): import('./posts').SocialPost {
   const provider = event.sources[0]?.provider ?? 'events';
   const organizer = event.organizer ?? providerName(provider);
   const image = event.imageUrl?.startsWith('https://') ? event.imageUrl : undefined;
@@ -341,13 +355,13 @@ export function socialPostFromEvent(event: PublicEvent): import('./posts').Socia
     body: event.description?.trim() ?? '',
     kind: image ? 'image' : 'link',
     ...(image ? { media: [{ kind: 'image' as const, url: image, aspectRatio: 16 / 9, altText: `Cover image for ${event.title}` }] } : {}),
-    createdAt: event.updatedAt,
+    createdAt: eventFeedTime(event, now),
     topics: ['events'],
     provenance: { connectorId: 'events', externalId: event.id, canonicalURL: event.sources[0]?.url ?? event.registrationUrl },
     relevance: { followsAuthor: false, selectedInterestMatches: [] },
     eligibility: {
       selection: `Upcoming public event in the ${event.area}, from ${[...new Set(event.sources.map((source) => providerName(source.provider)))].join(', ')}`,
-      filters: ['Only events that have not started', 'Cancelled events are left out', 'The same event on several platforms is shown once'],
+      filters: ['Only events that have not started', 'Cancelled events are left out', 'The same event on several platforms is shown once', 'Placed by how soon it starts: an event a day away ranks like a post from six hours ago'],
     },
     event: {
       title: event.title, startsAt: event.startsAt, endsAt: event.endsAt, dateOnly: event.dateOnly, timezone: event.timezone, place: event.place,
@@ -355,17 +369,4 @@ export function socialPostFromEvent(event: PublicEvent): import('./posts').Socia
       registrationUrl: event.registrationUrl, sources: event.sources,
     },
   };
-}
-
-/** Places one event after every `every` posts, so events sit among posts without taking over. */
-export function interleaveEvents(posts: import('./posts').SocialPost[], events: import('./posts').SocialPost[], every = 6): import('./posts').SocialPost[] {
-  if (!events.length) return posts;
-  const result: import('./posts').SocialPost[] = [];
-  let next = 0;
-  posts.forEach((post, index) => {
-    result.push(post);
-    if ((index + 1) % every === 0 && next < events.length) result.push(events[next++]);
-  });
-  if (posts.length < every && next < events.length) result.push(events[next]);
-  return result;
 }

@@ -95,3 +95,32 @@ readable signed out; comments are 1 to 1,000 characters, idempotent per draft, a
 out. A reshare is counted, as for posts; it doesn't place the item in anyone's Feed. Following a
 feed of your own stays in Search ("follow theverge.com", a pasted feed address, or OPML), now
 also suggested on the empty Search page.
+
+## Addendum 2 (2026-11-03): the same likes, comments and reshares on Farcaster
+
+The owner asked for these actions to be visible to other platforms, the way a DeSo like is visible
+to every DeSo app. Following the builder prompt (canonical Open Media record → connector gateway →
+the networks the person authorized; official protocols; no blockchain where a signed record is
+enough), an action on an article or event link is now also published in Farcaster's own form for
+links. Farcaster is the one connected network whose protocol can act on any link:
+
+- **Like / reshare** → `ReactionAdd` with `target_url` (Like or Recast); taking it back sends
+  `ReactionRemove`. **Comment** → `CastAdd` with `parent_url` set to the link, fitted to 320 bytes.
+  Links longer than Farcaster's 256-byte limit stay in Open Media only.
+- It goes out only when the person has Farcaster connected for cross-posting and hasn't turned it
+  off there, signed on the device with the same delegated key as their posts (`actOnFarcasterLink`
+  in `src/connectors/publishing/farcaster.ts`; bytes tested against `@farcaster/core`). Open Media's
+  own record is written first, so a Farcaster failure never loses the action; the person sees
+  “Saved in Open Media. …” instead of “Also on Farcaster as @name.”
+- **Read back:** counts and comments include what any Farcaster app did on the link (Snapchain
+  `reactionsByTarget` and `castsByParent`, first page of 100 each, cached two minutes). Migration
+  `20261118120000_web_item_farcaster_copies.sql` records which Open Media rows have a Farcaster copy
+  (the public fid and cast hash only), so a mirrored like or comment is counted and shown once
+  (`src/domain/farcasterLinks.ts`). Farcaster replies are marked “on Farcaster”; Open Media's
+  mirrored ones “also on Farcaster”. Blocks in Open Media don't apply to Farcaster accounts.
+- **Not possible elsewhere today:** Lens, Hive and DeSo can only like, comment on or repost their
+  own posts, not a web link, so nothing is sent to them. ActivityPub, AT Protocol and Nostr (whose
+  NIP-22 and NIP-25 cover comments and reactions on web links) are planned connectors, not built.
+- **Not verified:** a live write. Farcaster cross-posting still shows “Coming soon” until the owner
+  creates Open Media's Farcaster app account (see ADR 0007). Reading was verified on the web against
+  real Farcaster link activity.

@@ -49,7 +49,6 @@ test('network posts use the connected account, and otherwise open the post on it
   assert.deepEqual(interactionRoute(hive, 'like', { signedIn: true, connected }), { via: 'open', url: 'https://peakd.com/@ada/my-first-post', name: 'Hive' });
   assert.deepEqual(interactionRoute(farcaster, 'comment', { signedIn: false, connected }), { via: 'open', url: farcaster.provenance.canonicalURL, name: 'Farcaster' }, 'signed out never posts to a network');
   assert.deepEqual(interactionRoute({ ...hive, provenance: { ...hive.provenance, canonicalURL: 'javascript:alert(1)' } }, 'like', { signedIn: true, connected }), { via: 'none' }, 'only HTTPS links are opened');
-  assert.deepEqual(interactionRoute({ ...hive, event: { title: 'x' } as SocialPost['event'] }, 'like', { signedIn: true, connected: { hive: '@me' } }), { via: 'none' });
 });
 
 test('likes and reshares change the counts once, and can be taken back', () => {
@@ -92,4 +91,13 @@ test('web feed items are acted on in Open Media, keyed by their article link wit
   assert.equal(interactionRoute(item, 'comment', { signedIn: false, connected: {} }).via, 'web', 'comments can be read signed out');
   assert.equal(webItemUrl(post('rss', 'guid-2', 'rss:x', 'http://insecure.example.test/a')), undefined, 'only https links');
   assert.equal(webItemUrl(post('farcaster', '0x' + 'a'.repeat(40), 'farcaster:1', 'https://warpcast.com/x')), undefined, 'only web feed items');
+});
+
+test('public events are acted on in Open Media too, keyed by their official page', () => {
+  const event = { ...post('events', 'luma-1', 'event-organizer:Confluent', 'https://lu.ma/golden-gate-run'), event: { registrationUrl: 'https://www.Confluent.io/run?utm_campaign=x#join' } as SocialPost['event'] };
+  assert.equal(webItemUrl(event), 'https://www.confluent.io/run');
+  assert.deepEqual(interactionRoute(event, 'reshare', { signedIn: true, connected: {} }), { via: 'web', url: 'https://www.confluent.io/run' });
+  assert.deepEqual(interactionRoute(event, 'like', { signedIn: false, connected: {} }), { via: 'sign-in' });
+  assert.equal(interactionRoute(event, 'comment', { signedIn: false, connected: {} }).via, 'web', 'comments can be read signed out');
+  assert.equal(webItemUrl({ ...event, event: { ...event.event!, registrationUrl: 'http://insecure.example.test/e' } }), undefined, 'only https pages');
 });

@@ -19,10 +19,11 @@ import { Loader } from './Loader';
 const zero: PostEngagement = { replies: 0, reposts: 0, likes: 0, liked: false, reshared: false };
 
 /**
- * The comment, reshare, and like icons under a post. Open Media posts and web feed items are acted
- * on in Open Media; posts from another network through the person's connected cross-posting
- * account, or, without one, the icon opens the post on its network. `children` (the post's links)
- * follow the icons.
+ * The comment, reshare, and like icons under a post. Open Media posts, web feed items and events are
+ * acted on in Open Media; links (web feed items and events) also on Farcaster through the person's
+ * connected cross-posting account, with Farcaster's own likes, recasts and replies counted in. Posts
+ * from another network go through the connected account there, or, without one, the icon opens the
+ * post on its network. `children` (the post's links) follow the icons.
  */
 export function PostActions({ post, signedIn, children }: { post: SocialPost; signedIn: boolean; children?: ReactNode }) {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
@@ -69,7 +70,12 @@ export function PostActions({ post, signedIn, children }: { post: SocialPost; si
     setEngagement(applyInteraction(engagement, kind, !active)); setNotice(''); setBusy(kind);
     try {
       if (route.via === 'open-media') setEngagement(await (kind === 'like' ? setPostLike(post.id, !active) : setPostReshare(post.id, !active)));
-      else if (route.via === 'web') setEngagement(await (kind === 'like' ? setWebItemLike(route.url, !active) : setWebItemReshare(route.url, !active)));
+      else if (route.via === 'web') {
+        // Kept in Open Media, and also sent to Farcaster when the person connected it for cross-posting.
+        const result = await (kind === 'like' ? setWebItemLike(route.url, !active) : setWebItemReshare(route.url, !active));
+        setEngagement(result.engagement);
+        if (result.note) setNotice(result.note);
+      }
       else {
         await interactOnNetwork(post.id, route.target, { kind });
         setNotice(`${kind === 'like' ? 'Liked' : 'Reshared'} on ${networks[route.network].displayName} as ${route.handle}.`);
@@ -155,8 +161,14 @@ function Comments({ post, route, signedIn, onCommented }: { post: SocialPost; ro
     setSending(true); setError(''); setSent('');
     try {
       if (route.via === 'open-media' || route.via === 'web') {
-        const comment = await (route.via === 'web' ? addWebItemComment(route.url, clientId.current, text) : addPostComment(post.id, clientId.current, text));
-        setComments((current) => [...(current ?? []), comment]);
+        if (route.via === 'web') {
+          const result = await addWebItemComment(route.url, clientId.current, text);
+          setComments((current) => [...(current ?? []), result.comment]);
+          if (result.note) setSent(result.note);
+        } else {
+          const comment = await addPostComment(post.id, clientId.current, text);
+          setComments((current) => [...(current ?? []), comment]);
+        }
       } else if (route.via === 'network') {
         await interactOnNetwork(post.id, route.target, { kind: 'comment', text, idempotencyKey: clientId.current });
         setSent(`Your reply is on ${networks[route.network].displayName}, posted as ${route.handle}.`);
@@ -173,8 +185,8 @@ function Comments({ post, route, signedIn, onCommented }: { post: SocialPost; ro
     {native && comments === undefined && !error ? <Loader color={colors.textSecondary} /> : null}
     {native && comments?.length === 0 ? <Text style={styles.commentMeta}>No comments yet.</Text> : null}
     {comments?.map((comment) => <View key={comment.id} style={styles.comment}>
-      <Text numberOfLines={1} style={styles.commentMeta}><Text style={styles.commentAuthor}>{comment.author.displayName}</Text> {comment.author.handle} · {formatRelativeTime(comment.createdAt)}</Text>
-      <CommentBody comment={comment} source={post.provenance.connectorId} style={styles.commentBody} />
+      <Text numberOfLines={1} style={styles.commentMeta}><Text style={styles.commentAuthor}>{comment.author.displayName}</Text> {comment.author.handle} · {formatRelativeTime(comment.createdAt)}{comment.network === 'farcaster' ? ' · on Farcaster' : comment.farcasterHash ? ' · also on Farcaster' : ''}</Text>
+      <CommentBody comment={comment} source={comment.network ?? post.provenance.connectorId} style={styles.commentBody} />
     </View>)}
     {!native && route.via === 'network' ? <Text style={styles.commentMeta}>Other replies are on {networks[route.network].displayName}.</Text> : null}
     {error ? <Text accessibilityLiveRegion="assertive" style={styles.error}>{error}</Text> : null}

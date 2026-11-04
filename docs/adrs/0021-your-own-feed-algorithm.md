@@ -190,3 +190,13 @@ The owner said the algorithm "is not saving" and "not showing the difference", a
   - At 375 px, tuning from Search and the “Why this?” panel fit without horizontal scrolling.
 - Found and fixed while testing: the device copy of the lenses could load after the account copy and overwrite an agent's newer version. Lenses now merge by version.
 - Not verified: iOS, Android, production, and signed-out tuning in the browser (covered by unit tests only).
+
+## Addendum (2026-11-03): one algorithm for everything — events and Clips
+
+At the owner's request, the person's lens is the only algorithm on the platform:
+
+- **Events are ranked with posts.** Upcoming public events no longer sit in a fixed slot after every sixth post in their own soonest-first order. They join the posts and go through the same lens: its filters can leave them out (“no events”), its boosts can lean toward or away from them (“more events”). Events have no real posting time (the listing's update time is just when Open Media last read it, which made every event look brand new), so an event counts as a quarter as old as it is far away: one starting in a day ranks like a six-hour-old post (`eventFeedTime` in `src/domain/listings.ts`). A full one-to-one mapping was tried first and pushed tomorrow's events below a busy day's first page. Raw and recency then mix soon events in near the top and later ones further down. “Why this?” explains an event's place with the lens's own score, as for any post.
+- **Clips use the Feed's lens.** Clips were always ordered newest first (Raw). They now use the lens chosen in Feed, filters and weights included; “Why this?” on a clip shows the lens's rules and score. Changing or tuning the lens reorders the clips below the one being watched; the watched clip and the next never move. A lens that keeps no videos shows “Nothing here fits …”.
+- **Events get likes, comments and reshares.** They are kept in Open Media like web feed items (ADR 0024 addendum), keyed by the event's official registration page with tracking parameters removed, under the same rules. No migration: the web item tables accept any https link.
+- Not done: Clips still have no like, comment or reshare icons, and the Worker's `get_my_feed` for agents does not include events.
+

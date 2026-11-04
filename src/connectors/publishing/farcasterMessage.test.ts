@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { CastType, FarcasterNetwork, makeCastAdd, makeReactionAdd, Message, MessageData, NobleEd25519Signer, ReactionType } from '@farcaster/core';
+import { CastType, FarcasterNetwork, makeCastAdd, makeReactionAdd, makeReactionRemove, Message, MessageData, NobleEd25519Signer, ReactionType } from '@farcaster/core';
 
-import { encodeCastAddData, encodeReactionAddData, fromHex, signCastAdd, signReactionAdd, toHex } from './farcasterMessage';
+import { encodeCastAddData, encodeReactionAddData, encodeReactionRemoveData, fromHex, signCastAdd, signReactionAdd, signReactionRemove, toHex } from './farcasterMessage';
 
 // Fixed test key: never a real account's key.
 const privateKey = fromHex('1f'.repeat(32));
@@ -65,3 +65,34 @@ for (const [type, reference] of [['like', ReactionType.LIKE], ['recast', Reactio
     assert.equal(toHex(Message.decode(ours.bytes).signature), toHex(result.value.signature));
   });
 }
+
+// Likes and recasts of a web link (an event's page, a news article), and taking them back.
+for (const [type, reference] of [['like', ReactionType.LIKE], ['recast', ReactionType.RECAST]] as const) {
+  const url = 'https://lu.ma/golden-gate-run';
+  const meta = { fid: 123456, network: FarcasterNetwork.MAINNET, timestamp: Math.round(timestampMs / 1000 - Date.UTC(2021, 0, 1) / 1000) };
+  test(`ReactionAdd (${type}) of a link matches @farcaster/core`, async () => {
+    const result = await makeReactionAdd({ type: reference, targetUrl: url }, meta, new NobleEd25519Signer(privateKey));
+    if (result.isErr()) throw result.error;
+    assert.equal(toHex(encodeReactionAddData({ fid: 123456, type, target: { url }, timestampMs })), toHex(MessageData.encode(result.value.data!).finish()));
+    const ours = signReactionAdd({ fid: 123456, type, target: { url }, timestampMs }, privateKey);
+    assert.equal(ours.hash, `0x${toHex(result.value.hash)}`);
+    assert.equal(toHex(Message.decode(ours.bytes).signature), toHex(result.value.signature));
+  });
+  test(`ReactionRemove (${type}) of a link matches @farcaster/core`, async () => {
+    const result = await makeReactionRemove({ type: reference, targetUrl: url }, meta, new NobleEd25519Signer(privateKey));
+    if (result.isErr()) throw result.error;
+    assert.equal(toHex(encodeReactionRemoveData({ fid: 123456, type, target: { url }, timestampMs })), toHex(MessageData.encode(result.value.data!).finish()));
+    assert.equal(signReactionRemove({ fid: 123456, type, target: { url }, timestampMs }, privateKey).hash, `0x${toHex(result.value.hash)}`);
+  });
+}
+
+test('a comment on a link is a CastAdd whose parent is the link', async () => {
+  const parentUrl = 'https://lu.ma/golden-gate-run';
+  const result = await makeCastAdd(
+    { text: 'See you there', embeds: [], embedsDeprecated: [], mentions: [], mentionsPositions: [], type: CastType.CAST, parentUrl },
+    { fid: 123456, network: FarcasterNetwork.MAINNET, timestamp: Math.round(timestampMs / 1000 - Date.UTC(2021, 0, 1) / 1000) },
+    new NobleEd25519Signer(privateKey),
+  );
+  if (result.isErr()) throw result.error;
+  assert.equal(signCastAdd({ fid: 123456, text: 'See you there', parentUrl, timestampMs }, privateKey).hash, `0x${toHex(result.value.hash)}`);
+});

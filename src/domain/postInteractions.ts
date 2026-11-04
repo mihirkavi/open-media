@@ -45,13 +45,15 @@ export function interactionTarget(post: SocialPost): InteractionTarget | undefin
 }
 
 /**
- * The key a web feed item's likes and comments are kept under (ADR 0024 §8): its article link,
- * https only, with the #fragment and tracking parameters (utm_*, fbclid and the like) removed, so
- * the same article shared with different tracking still meets in one place.
+ * The key a web feed item's or public event's likes and comments are kept under (ADR 0024 §8): an
+ * article's link, or an event's official page, https only, with the #fragment and tracking
+ * parameters (utm_*, fbclid and the like) removed, so the same article or event shared with
+ * different tracking still meets in one place.
  */
 export function webItemUrl(post: SocialPost): string | undefined {
-  if (post.provenance.connectorId !== 'rss') return undefined;
-  const url = safeHttpsUrl(post.provenance.canonicalURL);
+  const source = post.provenance.connectorId;
+  if (source !== 'rss' && !(source === 'events' && post.event)) return undefined;
+  const url = safeHttpsUrl(source === 'events' ? post.event!.registrationUrl : post.provenance.canonicalURL);
   if (!url) return undefined;
   try {
     const parsed = new URL(url);
@@ -77,8 +79,8 @@ export function interactionRoute(post: SocialPost, kind: InteractionKind, viewer
   const source = post.provenance.connectorId;
   // Comments on Open Media posts can be read signed out; writing one needs an account.
   if (source === 'open-media') return viewer.signedIn || kind === 'comment' ? { via: 'open-media' } : { via: 'sign-in' };
-  if (post.event) return { via: 'none' };
-  // Web feed items are liked, commented on and reshared in Open Media, keyed by their article link.
+  // Web feed items and public events are liked, commented on and reshared in Open Media, keyed by
+  // their article link or the event's official page.
   const item = webItemUrl(post);
   if (item) return viewer.signedIn || kind === 'comment' ? { via: 'web', url: item } : { via: 'sign-in' };
   const network = source in networks ? source as NetworkId : undefined;
@@ -111,11 +113,15 @@ export interface PostComment {
   body: string;
   createdAt: string;
   author: { id: string; handle: string; displayName: string; initials: string; avatarUrl?: string; verified?: boolean };
+  /** Written on another network and read from there (a Farcaster reply to a link). */
+  network?: 'farcaster';
+  /** The Farcaster cast that copies this Open Media comment, when it was also sent there. */
+  farcasterHash?: string;
 }
 
 export function postCommentFromRecord(value: unknown): PostComment | undefined {
   if (!value || typeof value !== 'object') return undefined;
-  const record = value as { id?: unknown; body?: unknown; createdAt?: unknown; author?: { id?: unknown; handle?: unknown; displayName?: unknown; avatarUrl?: unknown; verified?: unknown } };
+  const record = value as { id?: unknown; body?: unknown; createdAt?: unknown; farcasterHash?: unknown; author?: { id?: unknown; handle?: unknown; displayName?: unknown; avatarUrl?: unknown; verified?: unknown } };
   const author = record.author;
   if (typeof record.id !== 'string' || typeof record.body !== 'string' || typeof record.createdAt !== 'string' || typeof author?.id !== 'string' || typeof author.handle !== 'string' || typeof author.displayName !== 'string') return undefined;
   return {
@@ -130,6 +136,7 @@ export function postCommentFromRecord(value: unknown): PostComment | undefined {
       ...(typeof author.avatarUrl === 'string' ? { avatarUrl: author.avatarUrl } : {}),
       ...(author.verified === true ? { verified: true } : {}),
     },
+    ...(typeof record.farcasterHash === 'string' && /^0x[0-9a-f]{40}$/.test(record.farcasterHash) ? { farcasterHash: record.farcasterHash } : {}),
   };
 }
 

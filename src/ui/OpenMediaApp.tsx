@@ -602,7 +602,7 @@ export function OpenMediaApp({
             onReportPost={canPost ? reportPost : undefined}
           />
         ) : null}
-        {!person && destination === "clips" ? <ClipsView sessionKey={currentUserId} /> : null}
+        {!person && destination === "clips" ? <ClipsView sessionKey={currentUserId} lens={lenses.lens} lensContext={lenses.context} /> : null}
         {!person && destination === "messages" ? (
           <OpenMediaMessages
             conversations={personConversations}

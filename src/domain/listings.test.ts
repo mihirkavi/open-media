@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { eventMetaLine, eventRegistration, eventWhen, interleaveEvents, formatPrice, listingLine, parsePrice, PublicEvent, socialPostFromEvent, validateListing } from './listings';
+import { eventFeedTime, eventMetaLine, eventRegistration, eventWhen, formatPrice, listingLine, parsePrice, PublicEvent, socialPostFromEvent, validateListing } from './listings';
+import { parseLens, rawLens, runLens } from './feedLenses';
 import { SocialPost } from './posts';
 import { parseSearchQuery, postMatchesSearch } from './searchQuery';
 
@@ -58,15 +59,18 @@ test('an event reads as one meta line, and its one action says what the official
   assert.deepEqual(eventRegistration({ ...event, availability: 'sold_out' }), { url: 'https://lu.ma/abc', label: 'See on Luma', short: 'Sold out' });
 });
 
-test('events sit among posts without pushing any out', () => {
-  const posts = Array.from({ length: 13 }, (_, index) => ({ id: `p${index}` }) as SocialPost);
-  const events = [{ id: 'e1' }, { id: 'e2' }, { id: 'e3' }] as SocialPost[];
-  const mixed = interleaveEvents(posts, events, 6).map((post) => post.id);
-  assert.deepEqual(mixed.filter((id) => id.startsWith('p')), posts.map((post) => post.id));
-  assert.equal(mixed.indexOf('e1'), 6);
-  assert.equal(mixed.indexOf('e2'), 13);
-  assert.equal(mixed.includes('e3'), false);
-  assert.deepEqual(interleaveEvents([], events).map((post) => post.id), ['e1']);
+test('events are ranked by the person’s own lens like every other post', () => {
+  const now = Date.parse('2026-10-26T00:00:00.000Z');
+  const text = (id: string, createdAt: string) => ({ id, author: { id: `a-${id}`, displayName: id, handle: `@${id}`, initials: 'A' }, body: 'Hello', kind: 'text', createdAt, topics: [], provenance: { connectorId: 'farcaster' }, relevance: { followsAuthor: false, selectedInterestMatches: [] } }) as SocialPost;
+  // e1 starts 2026-11-01T16:30Z, 6.7 days after `now`, so it ranks like a post from about 40 hours ago.
+  const soon = { ...event, id: 'e2', startsAt: '2026-10-27T00:00:00.000Z' };
+  const posts = [text('older', '2026-10-24T00:00:00.000Z'), text('newer', '2026-10-25T21:00:00.000Z'), socialPostFromEvent(event, now), socialPostFromEvent(soon, now)];
+  assert.equal(eventFeedTime(soon, now), '2026-10-25T18:00:00.000Z', 'a day away counts as six hours old');
+  assert.deepEqual(runLens(posts, rawLens, { now }).map((post) => post.id), ['newer', 'event:e2', 'event:e1', 'older'], 'Raw places events by how soon they start');
+  const noEvents = parseLens({ name: 'No events', filters: { hideSources: ['events'] }, order: 'newest' });
+  assert.equal(runLens(posts, noEvents, { now }).some((post) => post.event), false, 'a lens can leave events out');
+  const moreEvents = parseLens({ format: 'open-media.feed-lens/2', name: 'More events', order: 'ranked', objectives: { recency: 1 }, boosts: [{ source: 'events', weight: 1 }] });
+  assert.equal(runLens(posts, moreEvents, { now })[0].id, 'event:e2', 'a lens can lean toward events');
 });
 
 test('search understands products, services and events', () => {
