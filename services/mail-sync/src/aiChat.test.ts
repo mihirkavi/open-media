@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import test from 'node:test';
 
-import { agrees, aiKeysSummary, AiRecord, AiSettings, AiStore, AiToolkit, builtInModel, chat, chooseAiModel, chooseRoute, conversationFor, findKeys, intentOf, NewAiRecord, recordSearch, removeAiKey, Route, saveAiKey, StoredKey, withoutKeys, withoutToolTalk } from './aiChat.js';
+import { agrees, aiKeysSummary, AiRecord, AiSettings, AiStore, AiToolkit, builtInModel, chat, chooseAiModel, chooseRoute, conversationFor, findKeys, intentOf, NewAiRecord, pendingOf, recordSearch, removeAiKey, Route, saveAiKey, StoredKey, withoutKeys, withoutToolTalk } from './aiChat.js';
 
 // Made-up keys in each provider's shape; none is real.
 const fake = {
@@ -135,9 +135,9 @@ test('a proposed change waits for the person, and their yes carries out exactly 
   // The model proposes (the toolkit records what it would do) and asks.
   const proposing = async () => { memory.store.toolkit!('x'); return 'I’ll make Hive much less common. Shall I?'; };
   const wrapped = memory.store.toolkit;
-  memory.store.toolkit = (latest) => { const kit = wrapped(latest); kit.pending = { name: 'tune_feed_lens', args: { key: 'relevant', request: 'less hive' } }; return kit; };
+  memory.store.toolkit = (latest) => { const kit = wrapped(latest); kit.pending = [{ name: 'tune_feed_lens', args: { key: 'relevant', request: 'less hive' } }]; return kit; };
   const [, proposal] = await chat({ text: 'less hive please' }, memory.store, env, proposing as never);
-  assert.deepEqual(proposal.meta?.pending, { name: 'tune_feed_lens', args: { key: 'relevant', request: 'less hive' } });
+  assert.deepEqual(proposal.meta?.pending, [{ name: 'tune_feed_lens', args: { key: 'relevant', request: 'less hive' } }]);
   assert.deepEqual(ran, [], 'nothing changes before the yes');
 
   memory.store.toolkit = wrapped;
@@ -149,6 +149,28 @@ test('a proposed change waits for the person, and their yes carries out exactly 
   // A second yes has nothing left to approve, so nothing runs again.
   await chat({ text: 'yes' }, memory.store, env, (async () => 'Anything else?') as never);
   assert.equal(ran.length, 1);
+});
+
+test('one yes carries out every change proposed in that answer, and an older single proposal still works', async () => {
+  const memory = memoryStore();
+  const ran: string[] = [];
+  const changes = [{ name: 'tune_feed_lens', args: { key: 'relevant', request: 'more tech, no crypto' } }, { name: 'follow_web_feed', args: { url: 'simonwillison.net' } }, { name: 'follow_web_feed', args: { url: 'nope.invalid' } }];
+  memory.store.toolkit = () => {
+    const kit: AiToolkit = { tools: {}, actions: [], used: [], run: async (name, args) => { if (args.url === 'nope.invalid') throw new Error('No feed there.'); ran.push(`${name}:${String(args.url ?? args.request)}`); kit.used.push(name); return 'ok'; } };
+    return kit;
+  };
+  const plain = memory.store.toolkit;
+  memory.store.toolkit = (latest) => { const kit = plain(latest); kit.pending = changes; return kit; };
+  await chat({ text: 'tech feed and the best tech blogs please' }, memory.store, env, (async () => 'I’ll make three changes. Shall I?') as never);
+  memory.store.toolkit = plain;
+  let told = '';
+  const [, done] = await chat({ text: 'yes' }, memory.store, env, (async (_route: unknown, messages: { content: string }[]) => { told = messages.at(-1)!.content; return 'Done.'; }) as never);
+  assert.deepEqual(ran, ['tune_feed_lens:more tech, no crypto', 'follow_web_feed:simonwillison.net']);
+  assert.match(told, /3 changes/);
+  assert.match(told, /follow_web_feed: It didn’t work: No feed there\./);
+  assert.deepEqual(done.meta?.used, ['tune_feed_lens', 'follow_web_feed']);
+  assert.deepEqual(pendingOf({ name: 'tune_feed_lens', args: { key: 'relevant' } }), [{ name: 'tune_feed_lens', args: { key: 'relevant' } }]);
+  assert.deepEqual(pendingOf('junk'), []);
 });
 
 test('app actions travel with the answer', async () => {

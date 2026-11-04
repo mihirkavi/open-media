@@ -96,12 +96,14 @@ export interface AiToolkit {
   tools: ToolSet;
   actions: AppAction[];
   used: string[];
-  /** A change the model proposed and the person hasn't approved yet. */
-  pending?: PendingChange;
+  /** The changes the model proposed in this answer, which the person hasn't approved yet. */
+  pending?: PendingChange[];
   /** Carries out an approved change. */
   run(name: string, args: Record<string, unknown>): Promise<string>;
 }
 export interface PendingChange { name: string; args: Record<string, unknown> }
+/** At most this many changes wait for one yes. */
+export const maxPending = 12;
 
 /** Where the conversation and keys live; the Worker implements it with the person's own token. */
 export interface AiStore {
@@ -324,18 +326,21 @@ export async function chat(input: unknown, store: AiStore, env: AiChatEnv, run: 
   const history = await store.history(historyTurns);
   const messages = conversationFor(history, intent.text);
   // A yes to the change proposed just before carries out exactly that change (ADR 0028).
-  const proposed = history.at(-1)?.role === 'assistant' ? history.at(-1)?.meta?.pending as PendingChange | undefined : undefined;
-  if (proposed && agrees(raw) && store.toolkit) {
+  const proposed = history.at(-1)?.role === 'assistant' ? pendingOf(history.at(-1)?.meta?.pending) : [];
+  if (proposed.length && agrees(raw) && store.toolkit) {
     const toolkit = store.toolkit(raw);
-    let outcome: string;
-    try { outcome = await toolkit.run(proposed.name, proposed.args); } catch (error) { outcome = `It didn’t work: ${error instanceof Error ? error.message : 'unknown error'}`; }
-    const told = [...messages.slice(0, -1), { role: 'user' as const, content: `${raw}\n\n[Open Media carried out the change you approved. Result: ${outcome.slice(0, 3000)}] Say briefly and plainly what changed, and how to undo it if that’s possible.` }];
+    // Every change proposed in that answer, in order: “add these five feeds” is one yes.
+    const outcomes: string[] = [];
+    for (const change of proposed) {
+      try { outcomes.push(`${change.name}: ${(await toolkit.run(change.name, change.args)).slice(0, 1500)}`); } catch (error) { outcomes.push(`${change.name}: It didn’t work: ${error instanceof Error ? error.message : 'unknown error'}`); }
+    }
+    const told = [...messages.slice(0, -1), { role: 'user' as const, content: `${raw}\n\n[Open Media carried out the ${proposed.length > 1 ? `${proposed.length} changes` : 'change'} you approved. Results:\n${outcomes.join('\n').slice(0, 6000)}] Say briefly and plainly what changed (and anything that didn’t work), and how to undo it if that’s possible.` }];
     const text = await run(route, told, env).catch(() => '') || 'Done.';
     return store.append([asked, reply(text, { provider: route.provider, model: route.model, meta: { used: toolkit.used, actions: toolkit.actions } })]);
   }
   // Fresh tools for each attempt, so a failed attempt's actions never carry over.
   const kit = () => store.toolkit?.(raw);
-  const done = (toolkit: AiToolkit | undefined) => (toolkit && (toolkit.actions.length || toolkit.used.length || toolkit.pending) ? { actions: toolkit.actions, used: [...new Set(toolkit.used)], ...(toolkit.pending ? { pending: toolkit.pending } : {}) } : {});
+  const done = (toolkit: AiToolkit | undefined) => (toolkit && (toolkit.actions.length || toolkit.used.length || toolkit.pending?.length) ? { actions: toolkit.actions, used: [...new Set(toolkit.used)], ...(toolkit.pending?.length ? { pending: toolkit.pending } : {}) } : {});
   const first = kit();
   try {
     const text = (await run(route, messages, env, first?.tools)).slice(0, maxReply * 4);
@@ -363,6 +368,12 @@ export async function chat(input: unknown, store: AiStore, env: AiChatEnv, run: 
 /** Workers AI's daily free allowance is spent (error 4006); it comes back at 00:00 UTC. */
 function usedUp(error: unknown): boolean {
   return /\b4006\b|daily free allocation/i.test(String((error as Error)?.message ?? error));
+}
+
+/** The changes an earlier answer proposed; answers saved before several were allowed hold one. */
+export function pendingOf(value: unknown): PendingChange[] {
+  const list = Array.isArray(value) ? value : value ? [value] : [];
+  return list.filter((item): item is PendingChange => typeof (item as PendingChange)?.name === 'string' && typeof (item as PendingChange)?.args === 'object' && (item as PendingChange).args !== null).slice(0, maxPending);
 }
 
 const usedUpReply = 'The free built-in AI has reached today’s limit. It resets at midnight UTC. To keep going now, add an API key from ChatGPT, Claude, Gemini or OpenRouter in Settings → Open Media AI and your own model answers instead.';

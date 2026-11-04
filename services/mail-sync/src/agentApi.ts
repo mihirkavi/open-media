@@ -54,7 +54,7 @@ import { authenticate } from './session.js';
 import { confirmEvidence, MarketplaceEnv, MarketplaceError, marketplaceConfigured, readEvidence, serviceRpc } from './marketplace.js';
 import { verifyWebBotAuth } from './webBotAuth.js';
 import { runTranslate, TranslateEnv } from './translate.js';
-import { agrees, AiChatEnv, aiKeysSummary, AiRecord, AiSettings, AiStore, AiToolkit, AppAction, chat as aiChat, chooseAiModel, NewAiRecord, ProviderId, removeAiKey, saveAiKey } from './aiChat.js';
+import { agrees, AiChatEnv, aiKeysSummary, AiRecord, AiSettings, AiStore, AiToolkit, AppAction, chat as aiChat, chooseAiModel, maxPending, NewAiRecord, ProviderId, removeAiKey, saveAiKey } from './aiChat.js';
 import { tool as aiTool, type ToolSet } from 'ai';
 import { reportReasons } from '../../../src/domain/listingSafety';
 import { discloseLegalName, handleVerificationWebhook, startVerification, VerificationEnv, VerificationError, verificationConfigured } from './verification.js';
@@ -1620,7 +1620,8 @@ export function assistantToolkit(env: AgentEnv, origin: string, account: Account
       execute: async ({ confirmed, ...args }: Record<string, unknown>) => {
         if (confirmed !== true || !agrees(latest)) {
           // Remembered, so the person's yes carries out exactly this change and nothing else.
-          kit.pending = { name, args };
+          const pending = (kit.pending ??= []);
+          if (!pending.some((other) => other.name === name && JSON.stringify(other.args) === JSON.stringify(args)) && pending.length < maxPending) pending.push({ name, args });
           const preview = name === 'tune_feed_lens' ? brief(output(await found.run({ ...args, save: false }))) : '';
           return `Not changed yet.${preview ? ` Preview of the change: ${preview}` : ''} Tell the person exactly what will change and ask them to say yes.`;
         }

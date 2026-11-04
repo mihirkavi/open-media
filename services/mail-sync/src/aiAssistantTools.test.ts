@@ -22,13 +22,24 @@ test('a change needs the model’s confirmed flag and the person’s own yes; un
   const answer = await run(asking, 'tune_feed_lens', { key: 'relevant', request: 'less hive', confirmed: true });
   assert.match(String(answer), /^Not changed yet\. Preview of the change: understood: Much less Hive/);
   assert.deepEqual(calls, ['tuneLens:[{"key":"relevant","request":"less hive","save":false}]'], 'only a preview, even though the model claimed confirmation');
-  assert.deepEqual(asking.pending, { name: 'tune_feed_lens', args: { key: 'relevant', request: 'less hive' } });
+  assert.deepEqual(asking.pending, [{ name: 'tune_feed_lens', args: { key: 'relevant', request: 'less hive' } }]);
 
   const approved = assistantToolkit({} as AgentEnv, 'https://api.openmedia.site', recordingAccount(calls), 'yes');
   await run(approved, 'tune_feed_lens', { key: 'relevant', request: 'less hive', confirmed: true });
   assert.equal(calls.at(-1), 'tuneLens:[{"key":"relevant","request":"less hive"}]');
   assert.deepEqual(approved.used, ['tune_feed_lens']);
   await assert.rejects(approved.run('delete_my_account', {}), /isn’t available/);
+});
+
+test('every change proposed in one answer waits together, without repeats', async () => {
+  const calls: string[] = [];
+  const kit = assistantToolkit({} as AgentEnv, 'https://api.openmedia.site', recordingAccount(calls), 'make my feed about tech and add the best tech blogs');
+  await run(kit, 'tune_feed_lens', { key: 'relevant', request: 'more technology, no crypto' });
+  await run(kit, 'follow_web_feed', { url: 'simonwillison.net' });
+  await run(kit, 'follow_web_feed', { url: 'simonwillison.net' });
+  await run(kit, 'follow_web_feed', { url: 'theverge.com' });
+  assert.deepEqual(kit.pending?.map((change) => `${change.name}:${String(change.args.url ?? change.args.request)}`), ['tune_feed_lens:more technology, no crypto', 'follow_web_feed:simonwillison.net', 'follow_web_feed:theverge.com']);
+  assert.ok(!calls.some((call) => call.startsWith('followWebFeed')), 'nothing followed before the yes');
 });
 
 test('device settings and Settings sections become app actions, and odd values are refused', async () => {
