@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { handleWebAppRequest } from './webApp.js';
+import { handleWebAppRequest, parseByteRange } from './webApp.js';
 
 const served: string[] = [];
 const env = { WEB_APP_HOSTS: 'openmedia.site,www.openmedia.site', ASSETS: { fetch: async (request: Request) => { served.push(new URL(request.url).pathname); return new Response('app'); } } };
@@ -25,6 +25,63 @@ test('content-hashed build files are cached for a year; the page and unhashed fi
   const missing = await handleWebAppRequest(new Request('https://openmedia.site/_expo/static/js/web/index-7bbf390c0e2070ae0b7468b5d83b780d.js'), { ...env, ASSETS: { fetch: async () => new Response('missing', { status: 404 }) } });
   assert.equal(missing!.headers.get('cache-control'), null, 'a missing file is never cached for a year');
   assert.equal(await (await ask('https://openmedia.site/', html))!.headers.get('cache-control'), null);
+});
+
+test('video and other files answer byte ranges, as Safari needs to play the landing film', async () => {
+  const film = new Uint8Array(1000).map((_, index) => index % 251);
+  const filmPath = 'https://openmedia.site/assets/assets/landing/film.169c34a975cb1cd523f68f5da0eb56ee.mp4';
+  // The static-asset service returns whole files in chunks, as Cloudflare does.
+  const site = { ...env, ASSETS: { fetch: async () => new Response(new ReadableStream({ start(controller) { for (let at = 0; at < film.length; at += 64) controller.enqueue(film.slice(at, at + 64)); controller.close(); } }), { headers: { 'content-type': 'video/mp4', 'content-length': String(film.length), etag: '"film"' } }) } };
+  const get = (headers: Record<string, string>, method = 'GET') => handleWebAppRequest(new Request(filmPath, { method, headers }), site) as Promise<Response>;
+
+  const part = await get({ range: 'bytes=100-299' });
+  assert.equal(part.status, 206);
+  assert.equal(part.headers.get('content-range'), 'bytes 100-299/1000');
+  assert.equal(part.headers.get('content-length'), '200');
+  assert.equal(part.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+  assert.deepEqual(new Uint8Array(await part.arrayBuffer()), film.slice(100, 300));
+
+  const first = await get({ range: 'bytes=0-1' }); // Safari's first probe
+  assert.equal(first.status, 206);
+  assert.deepEqual(new Uint8Array(await first.arrayBuffer()), film.slice(0, 2));
+  assert.deepEqual(new Uint8Array(await (await get({ range: 'bytes=990-' })).arrayBuffer()), film.slice(990));
+  assert.deepEqual(new Uint8Array(await (await get({ range: 'bytes=-5' })).arrayBuffer()), film.slice(995));
+
+  const whole = await get({});
+  assert.equal(whole.status, 200);
+  assert.equal(whole.headers.get('accept-ranges'), 'bytes');
+  assert.equal((await whole.arrayBuffer()).byteLength, 1000);
+  assert.equal((await get({ range: 'bytes=0-9', 'if-range': '"older"' })).status, 200, 'a changed file is sent whole');
+  assert.equal((await get({ range: 'bytes=0-9,20-29' })).status, 200, 'several ranges get the whole file');
+  const beyond = await get({ range: 'bytes=1000-' });
+  assert.equal(beyond.status, 416);
+  assert.equal(beyond.headers.get('content-range'), 'bytes */1000');
+  const head = await get({ range: 'bytes=0-9' }, 'HEAD');
+  assert.equal(head.status, 206);
+  assert.equal(head.headers.get('content-length'), '10');
+
+  // Cloudflare's static-asset service often leaves out the length; the range is still served.
+  const unsized = { ...env, ASSETS: { fetch: async () => new Response(film, { headers: { 'content-type': 'video/mp4', etag: '"film"' } }) } };
+  const fromUnsized = (await handleWebAppRequest(new Request(filmPath, { headers: { range: 'bytes=10-19' } }), unsized))!;
+  assert.equal(fromUnsized.status, 206);
+  assert.equal(fromUnsized.headers.get('content-range'), 'bytes 10-19/1000');
+  assert.deepEqual(new Uint8Array(await fromUnsized.arrayBuffer()), film.slice(10, 20));
+  const unsizedBeyond = (await handleWebAppRequest(new Request(filmPath, { headers: { range: 'bytes=5000-' } }), unsized))!;
+  assert.equal(unsizedBeyond.headers.get('content-range'), 'bytes */1000');
+
+  // Compressed files are never cut: the length would be of the compressed bytes.
+  const compressed = { ...env, ASSETS: { fetch: async () => new Response('x'.repeat(50), { headers: { 'content-length': '20', 'content-encoding': 'br' } }) } };
+  assert.equal((await handleWebAppRequest(new Request('https://openmedia.site/_expo/static/js/web/index-7bbf390c0e2070ae0b7468b5d83b780d.js', { headers: { range: 'bytes=0-9' } }), compressed))!.status, 200);
+});
+
+test('byte ranges are parsed as the HTTP spec says', () => {
+  assert.deepEqual(parseByteRange('bytes=0-0', 10), [0, 0]);
+  assert.deepEqual(parseByteRange('bytes=5-100', 10), [5, 9], 'an end past the file is clamped');
+  assert.deepEqual(parseByteRange('bytes=-100', 10), [0, 9]);
+  assert.equal(parseByteRange('bytes=-0', 10), 'unsatisfiable');
+  assert.equal(parseByteRange('bytes=10-', 10), 'unsatisfiable');
+  assert.equal(parseByteRange('bytes=5-2', 10), 'unsatisfiable');
+  for (const header of [null, '', 'bytes=-', 'items=0-5', 'bytes=0-1,3-4']) assert.equal(parseByteRange(header, 10), undefined, String(header));
 });
 
 test('www redirects to the apex; the API, agents and other hosts are left to the Worker', async () => {
