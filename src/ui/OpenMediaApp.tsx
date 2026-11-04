@@ -9,6 +9,7 @@ import {
   listMailAccounts,
   listStoredMail,
   markMailSeen,
+  markMailUnseen,
   sendMail,
   syncMailAccount,
 } from "../connectors/mailApiConnector";
@@ -20,6 +21,7 @@ import {
   listBlockedUserIds,
   loadOpenMediaConversations,
   markConversationRead,
+  markConversationUnread,
   OpenMediaProfile as OpenMediaProfileData,
   reportConversation,
   searchOpenMediaProfiles,
@@ -30,7 +32,7 @@ import {
   unsubscribeFromOpenMediaMessages,
 } from "../data/openMediaService";
 import { deletePost, reportPost } from "../data/postService";
-import { bridgedSourceOf, loadBridgedConversations, markBridgedChatRead, sendBridgedMessage } from "../connectors/bridgesConnector";
+import { bridgedSourceOf, loadBridgedConversations, markBridgedChatRead, markBridgedChatUnread, sendBridgedMessage } from "../connectors/bridgesConnector";
 import { emailConversationId, normalizeStoredEmail, replySubject, subjectFromBody, unreadMailIn } from "../domain/emailNormalization";
 import { useLiveMail } from "./useLiveMail";
 import { profileHandleFromPath } from "../domain/profileFields";
@@ -54,6 +56,7 @@ import { PersonProfile } from "./PersonProfile";
 import { encounterForConversation, ownEmails } from "../domain/people";
 import { mergeByContact, recipientSuggestions } from "../domain/contactMerge";
 import { AiAction, AiRecord, aiConversation, aiConversationId, isAiConversation } from "../domain/aiChat";
+import { markUnreadTarget } from "../domain/receipts";
 import { loadAiMessages, onAiChatChanged, sendAiMessage } from "../connectors/aiChatConnector";
 import { setTranslationPreferences } from "../data/translationService";
 import { loadPublicPerson } from "../data/peopleService";
@@ -246,11 +249,37 @@ export function OpenMediaApp({
       const roomIds = rooms.map((room) => room.id);
       setBridgedConversations((current) => current.map((item) => (roomIds.includes(item.id) ? { ...item, unreadCount: 0 } : item)));
       for (const room of rooms) {
-        const latest = [...room.messages].reverse().find((message) => message.direction === "inbound" && message.conversationId === room.id);
+        // A chat marked unread may have nothing new from them: its newest message is read instead.
+        const latest = [...room.messages].reverse().find((message) => message.direction === "inbound" && message.conversationId === room.id) ?? room.messages[room.messages.length - 1];
         if (latest) markBridgedChatRead(room.id, latest.sourceMessageId).catch(() => undefined);
       }
     }
   }, [messageMode]);
+  // Swiping a conversation right marks it unread: the channel of the newest message from someone
+  // else, in that channel's own way (the database, \Seen on the mail server, Matrix's marked unread).
+  // It stays the person's own reminder: no read receipt is taken back. Opening it reads it again.
+  const unreadConversation = useCallback((conversation: Conversation) => {
+    if (messageMode !== "open_media" || isAiConversation(conversation)) return;
+    const target = markUnreadTarget(conversation);
+    if (!target) return;
+    const { channel, message } = target;
+    if (channel.email) {
+      const accountId = message.emailContext?.accountId;
+      if (message.direction !== "inbound" || !accountId) return;
+      setMailStore((current) => ({ ...current, stored: current.stored.map((item) => (item.accountId === accountId && item.sourceMessageId === message.sourceMessageId ? { ...item, unread: true } : item)) }));
+      markMailUnseen(accountId, [message.sourceMessageId]).catch(() => undefined);
+    } else if (bridgedSourceOf(channel)) {
+      setBridgedConversations((current) => current.map((item) => (item.id === channel.id ? { ...item, unreadCount: Math.max(1, item.unreadCount) } : item)));
+      markBridgedChatUnread(channel.id).catch(() => undefined);
+    } else if (channel.sourceSummary.includes("open_media")) {
+      setNativeConversations((current) => current.map((item) => (item.id === channel.id ? { ...item, unreadCount: Math.max(1, item.unreadCount) } : item)));
+      markConversationUnread(channel.id).catch(() => undefined);
+    }
+  }, [messageMode]);
+  const toggleRead = useCallback((conversation: Conversation) => {
+    if (conversation.unreadCount > 0) readConversation(conversation);
+    else unreadConversation(conversation);
+  }, [readConversation, unreadConversation]);
   // Pulling down on Messages: every mailbox checks for new mail now, then mail and chats reload.
   const pullMessages = useCallback(async () => {
     const mailboxes = messageMode === "open_media" ? await listMailAccounts().catch(() => []) : [];
@@ -584,6 +613,7 @@ export function OpenMediaApp({
             onRetry={refreshMessages}
             onRefresh={pullMessages}
             onRead={readConversation}
+            onToggleRead={messageMode === "open_media" ? toggleRead : undefined}
             onSend={sendMessage}
             onSearchProfiles={searchProfiles}
             onStartConversation={beginConversation}

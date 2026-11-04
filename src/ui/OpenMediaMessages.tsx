@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, Animated, Easing, Image, Keyboard, Linking, Modal, Platform, Pressable, ScrollView, StyleProp, StyleSheet, TextStyle, View, useWindowDimensions } from "react-native";
 import { Loader } from "./Loader";
 import { PullToRefresh } from "./PullToRefresh";
+import { SwipeToToggleRead } from "./SwipeToToggleRead";
 import { receiptLabel, receiptOf } from "../domain/receipts";
 import { PersonLink, PersonTarget, useSavedName } from "./people";
 import { Text, TextInput } from "./Text";
@@ -50,6 +51,8 @@ interface Props {
   onRefresh?: () => Promise<void>;
   /** The conversation on screen has been seen: record it as read (ADR 0026). */
   onRead?: (conversation: Conversation) => void;
+  /** Swiping a row right: marks it read when unread, unread when read. */
+  onToggleRead?: (conversation: Conversation) => void;
   onSetBlocked: (personId: string, blocked: boolean) => Promise<void>;
   onReport: (
     conversationId: string,
@@ -77,6 +80,7 @@ export function OpenMediaMessages({
   aiAsk,
   onRefresh,
   onRead,
+  onToggleRead,
 }: Props) {
   const { width } = useWindowDimensions();
   const compact = width < 760;
@@ -103,7 +107,8 @@ export function OpenMediaMessages({
   // A conversation on screen is read (ADR 0026) once its latest message is from someone else.
   const latest = selected?.messages[selected.messages.length - 1];
   useEffect(() => {
-    if (selected && latest?.direction === "inbound") onRead?.(selected);
+    // Also when it was marked unread, even if the newest message is the person's own.
+    if (selected && (latest?.direction === "inbound" || selected.unreadCount > 0)) onRead?.(selected);
     // Only when the conversation or its latest message changes, not on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected?.id, latest?.id]);
@@ -247,13 +252,18 @@ export function OpenMediaMessages({
         ) : filtered.length ? (
           <PullToRefresh onRefresh={onRefresh}>
             {filtered.map((conversation) => (
-              <Pressable
+              <SwipeToToggleRead
                 key={conversation.id}
+                unread={conversation.unreadCount > 0}
+                onToggle={onToggleRead && !isAiConversation(conversation) && conversation.messages.length ? () => onToggleRead(conversation) : undefined}
+              >
+              <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={`${conversationTitle(conversation)}. ${conversation.preview}`}
                 onPress={() => setSelectedId(conversation.id)}
                 style={({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) => [
                   styles.row,
+                  onToggleRead && !isAiConversation(conversation) && conversation.messages.length ? styles.rowInSwipe : null,
                   (hovered || pressed) && styles.rowHover,
                   selected?.id === conversation.id && styles.rowActive,
                 ]}
@@ -283,6 +293,7 @@ export function OpenMediaMessages({
                   )}
                 </View>
               </Pressable>
+              </SwipeToToggleRead>
             ))}
           </PullToRefresh>
         ) : unreadOnly && conversations.length ? (
@@ -1731,6 +1742,8 @@ function createStyles(colors: ThemeColors) {
       gap: 12,
       borderRadius: 14,
     },
+    // Inside a swipeable row, the swipe frame holds the margin so the action shows behind the row only.
+    rowInSwipe: { marginHorizontal: 0 },
     rowHover: { backgroundColor: colors.chrome },
     rowActive: { backgroundColor: colors.bubble },
     rowTime: { marginLeft: "auto", paddingLeft: 6, flexShrink: 0, color: colors.textTertiary, fontSize: 12, fontVariant: ["tabular-nums"] },

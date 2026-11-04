@@ -254,6 +254,9 @@ export async function loadOpenMediaConversations(
   // conversations is itself delivery, so it is recorded once this list arrives.
   const { data: receiptData } = await client.rpc("open_media_conversation_receipts", { p_conversation_ids: conversationIds });
   const receipts = (receiptData ?? []) as ReceiptRow[];
+  // Conversations the person marked unread themselves count as unread until opened. Older servers lack it.
+  const { data: markedData } = await client.rpc("open_media_marked_unread");
+  const markedUnread = new Set(((markedData ?? []) as string[]).map(String));
   client.rpc("open_media_mark_delivered").then(() => undefined, () => undefined);
 
   const rows = (membersResult.data ?? []) as MembershipRow[];
@@ -296,7 +299,7 @@ export async function loadOpenMediaConversations(
         sourceSummary: ["open_media"],
         lastMessageAt: lastMessage?.sentAt ?? conversation.created_at,
         preview: lastMessage?.body ?? "Start the conversation.",
-        unreadCount: unreadCount(conversationMessages, own?.read_at ?? undefined),
+        unreadCount: Math.max(markedUnread.has(conversation.id) ? 1 : 0, unreadCount(conversationMessages, own?.read_at ?? undefined)),
         labels: conversation.kind === "group" ? ["Group"] : [],
       } satisfies Conversation;
     })
@@ -314,6 +317,12 @@ export async function markConversationRead(conversationId: string): Promise<stri
   const { data, error } = await requireClient().rpc("open_media_mark_read", { p_conversation_id: conversationId });
   if (error) throw error;
   return (data as string | null) ?? undefined;
+}
+
+/** Marks a conversation unread for the caller only; their read receipt stays as it was. Opening it clears this. */
+export async function markConversationUnread(conversationId: string): Promise<void> {
+  const { error } = await requireClient().rpc("open_media_mark_unread", { p_conversation_id: conversationId });
+  if (error) throw error;
 }
 
 /** Whether the person sends (and so also sees) read receipts. On unless they turned it off. */

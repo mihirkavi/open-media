@@ -40,7 +40,7 @@ export interface MailEnv extends FarcasterSignerEnv, SearchAssistEnv, TranslateE
   PUBLIC_API_RATE_LIMITER?: Limiter;
 }
 
-const seenSchema = z.object({ messageIds: z.array(z.string().min(1).max(998).refine((value) => !/[\r\n]/.test(value))).min(1).max(100) });
+const seenSchema = z.object({ messageIds: z.array(z.string().min(1).max(998).refine((value) => !/[\r\n]/.test(value))).min(1).max(100), unseen: z.boolean().optional() });
 const noNewlines = z.string().min(1).max(1024).refine((value) => !/[\r\n]/.test(value), 'Credentials cannot contain line breaks.');
 const schema = z.object({
   email: z.email(),
@@ -200,14 +200,15 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
       // Reading through emails quickly marks many conversations read, so this has its own, larger
       // budget (120 a minute) instead of sharing the mail sync limit.
       if (!await allowed(env.PUBLIC_API_RATE_LIMITER ?? env.MAIL_SYNC_RATE_LIMITER, `seen:${session.userId}:${seenMatch[1]}`)) return rateLimited(headers);
-      const ids = seenSchema.parse(await readJSON(request)).messageIds;
+      // `unseen: true` is the reverse, swiping a conversation to mark it unread: \Seen comes off.
+      const { messageIds: ids, unseen } = seenSchema.parse(await readJSON(request));
       const account = await repository.findAccount(session.userId, seenMatch[1]);
       if (!account) return json(404, { error: 'Mailbox not found.' }, headers);
-      const changed = await repository.setSeen(account.id, ids);
+      const changed = unseen ? await repository.setSeen(account.id, [], ids) : await repository.setSeen(account.id, ids);
       let server = false;
       if (account.protocol === 'imap') {
         const input = await connectionInput({ ...account, password: decryptSecret(account.encryptedSecret, env.MAIL_CREDENTIALS_KEY) }, env);
-        server = await markSeenImap(input, ids).then(() => true, () => false);
+        server = await markSeenImap(input, ids, !unseen).then(() => true, () => false);
       }
       return json(200, { changed, server }, headers);
     }
@@ -251,6 +252,12 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
         const { eventId } = (await readJSON(request)) as { eventId?: unknown };
         await bridges.markRead(decodeURIComponent(readMatch[1]), eventId, await repository.shareReadReceipts());
         return json(200, { read: true }, headers);
+      }
+      const unreadMatch = request.method === 'POST' && url.pathname.match(/^\/v1\/bridges\/rooms\/([^/]+)\/unread$/);
+      if (unreadMatch) {
+        if (!await allowed(env.MAIL_SYNC_RATE_LIMITER, `${session.userId}:bridge-read`)) return rateLimited(headers);
+        await bridges.markUnread(decodeURIComponent(unreadMatch[1]));
+        return json(200, { unread: true }, headers);
       }
       const roomMatch = request.method === 'POST' && url.pathname.match(/^\/v1\/bridges\/rooms\/([^/]+)\/messages$/);
       if (roomMatch) {

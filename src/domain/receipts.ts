@@ -1,4 +1,4 @@
-import { Message } from './models';
+import { Conversation, Message } from './models';
 
 /**
  * Message receipts (ADR 0026). Each channel says only what it can truly know:
@@ -63,4 +63,22 @@ export function receiptLabel(receipt: Receipt, message: Pick<Message, 'readAt'>,
     case 'sending': return 'Sending…';
     case 'failed': return 'Not sent';
   }
+}
+
+/**
+ * Where "mark unread" lands in a conversation that may merge several channels: the channel of the
+ * newest message from someone else (or the newest message, when they've sent none), as Mail and
+ * Messages mark the latest message unread. Undefined for a conversation with no messages.
+ */
+export function markUnreadTarget(conversation: Conversation): { channel: Conversation; message: Message } | undefined {
+  let best: { channel: Conversation; message: Message } | undefined;
+  for (const channel of conversation.channels ?? [conversation]) {
+    for (const message of channel.messages) {
+      if (!best) { best = { channel, message }; continue; }
+      const inbound = message.direction === 'inbound';
+      const bestInbound = best.message.direction === 'inbound';
+      if ((inbound && !bestInbound) || (inbound === bestInbound && at(message.sentAt) > at(best.message.sentAt))) best = { channel, message };
+    }
+  }
+  return best;
 }

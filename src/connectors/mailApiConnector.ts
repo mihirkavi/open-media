@@ -93,6 +93,13 @@ export async function markMailSeen(accountId: string, sourceMessageIds: string[]
   }
 }
 
+/** Marks mail unread here and, for IMAP, on the mail server: the swipe in Messages. */
+export async function markMailUnseen(accountId: string, sourceMessageIds: string[]): Promise<void> {
+  for (let start = 0; start < sourceMessageIds.length; start += 100) {
+    await request(`/v1/mail-accounts/${encodeURIComponent(accountId)}/seen`, { method: 'POST', body: { messageIds: sourceMessageIds.slice(start, start + 100), unseen: true } }, 'Could not mark mail unread.');
+  }
+}
+
 export async function sendMail(accountId: string, mail: OutgoingMail): Promise<SyncedMailMessage> {
   const payload = await request<{ message: SyncedMailMessage }>(`/v1/mail-accounts/${encodeURIComponent(accountId)}/send`, { method: 'POST', body: mail }, 'The email could not be sent.');
   return payload.message;

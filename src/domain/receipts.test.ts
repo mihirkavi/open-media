@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { Message } from './models';
-import { applyReceipts, receiptLabel, receiptOf, unreadCount } from './receipts';
+import { applyReceipts, markUnreadTarget, receiptLabel, receiptOf, unreadCount } from './receipts';
+import { Conversation } from './models';
 
 const message = (id: string, direction: Message['direction'], sentAt: string, deliveryState: Message['deliveryState'] = direction === 'outbound' ? 'sent' : 'received'): Message => ({
   id, sourceMessageId: id, conversationId: 'c', senderPersonId: direction === 'outbound' ? 'me' : 'them', senderIdentityId: 'x',
@@ -37,4 +38,18 @@ test('unread counts what came in after the last read, or after your last reply b
   assert.equal(unreadCount(messages, '2026-11-03T10:05:00Z'), 1);
   assert.equal(unreadCount(messages), 2, 'never opened: what came after your reply');
   assert.equal(unreadCount([message('a', 'inbound', '2026-11-03T09:00:00Z')]), 1);
+});
+
+test('marking unread lands on the channel of the newest message from someone else', () => {
+  const channel = (id: string, messages: Message[]): Conversation => ({ id, participants: [], messages, sourceSummary: ['open_media'], lastMessageAt: '', preview: '', unreadCount: 0, labels: [] });
+  const chat = channel('chat', [message('c1', 'inbound', '2026-11-03T09:00:00Z'), message('c2', 'outbound', '2026-11-03T12:00:00Z')]);
+  const mail = channel('mail', [message('m1', 'inbound', '2026-11-03T10:00:00Z')]);
+  const merged = { ...channel('merged', []), channels: [chat, mail] };
+  const target = markUnreadTarget(merged);
+  assert.equal(target?.channel.id, 'mail', 'your own newer reply does not count');
+  assert.equal(target?.message.id, 'm1');
+  // With nothing from them, the newest message of all.
+  const mine = channel('mine', [message('o1', 'outbound', '2026-11-03T08:00:00Z'), message('o2', 'outbound', '2026-11-03T09:00:00Z')]);
+  assert.equal(markUnreadTarget(mine)?.message.id, 'o2');
+  assert.equal(markUnreadTarget(channel('empty', [])), undefined);
 });

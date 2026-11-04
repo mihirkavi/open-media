@@ -253,9 +253,9 @@ async function fetchRecent(client: ImapFlow, path: string, mailbox: string, limi
 /**
  * Marks these INBOX messages read (\Seen) on the mail server, as opening them in any mail app
  * would (ADR 0026). Messages are found by Message-ID; ones stored without one by their UID.
- * Returns how many were found.
+ * With `seen` false it takes \Seen off instead: marking the mail unread. Returns how many were found.
  */
-export async function markSeenImap(input: MailAccountInput, sourceMessageIds: string[]): Promise<number> {
+export async function markSeenImap(input: MailAccountInput, sourceMessageIds: string[], seen = true): Promise<number> {
   const client = clientFor(input);
   try {
     await client.connect();
@@ -269,7 +269,11 @@ export async function markSeenImap(input: MailAccountInput, sourceMessageIds: st
       for (const uid of result || []) found.add(uid);
     }
     for (const uid of uids) found.add(Number(uid));
-    if (found.size) await client.messageFlagsAdd([...found].join(','), ['\\Seen'], { uid: true });
+    if (found.size) {
+      const range = [...found].join(',');
+      if (seen) await client.messageFlagsAdd(range, ['\\Seen'], { uid: true });
+      else await client.messageFlagsRemove(range, ['\\Seen'], { uid: true });
+    }
     return found.size;
   } catch (error) {
     throw new UserFacingError(describeMailError(error, input, 'IMAP'));

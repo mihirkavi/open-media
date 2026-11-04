@@ -175,7 +175,7 @@ export class Bridges {
       // Synapse answers an identical sync from its response cache, which kept new messages and
       // receipts out of view for minutes. An event type that never exists, changing every 15 s,
       // keeps answers at most that old without recomputing every poll.
-      room: { timeline: { limit: 30, not_types: [`org.openmedia.fresh.${Math.floor(Date.now() / 15_000)}`] }, ephemeral: { types: ['m.receipt'] }, account_data: { not_types: ['*'] } },
+      room: { timeline: { limit: 30, not_types: [`org.openmedia.fresh.${Math.floor(Date.now() / 15_000)}`] }, ephemeral: { types: ['m.receipt'] }, account_data: { types: markedUnreadTypes } },
     };
     const sync = await this.matrix('GET', `/_matrix/client/v3/sync?timeout=0&filter=${encodeURIComponent(JSON.stringify(filter))}`) as SyncResponse;
     // New chats from a bridge are joined automatically, in case the bridge couldn't join for us.
@@ -196,6 +196,22 @@ export class Bridges {
     if (!roomPattern.test(roomId) || typeof eventId !== 'string' || !/^\$[A-Za-z0-9._~+/=:-]{1,255}$/.test(eventId)) throw new UserFacingError('Chat not found.');
     const type = share ? 'm.read' : 'm.read.private';
     await this.matrix('POST', `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/receipt/${type}/${encodeURIComponent(eventId)}`, {});
+    // Reading a chat also clears a "marked unread", as the Matrix spec asks of clients.
+    await this.setMarkedUnread(roomId, false).catch(() => undefined);
+  }
+
+  /**
+   * Marks a chat unread for this person (Matrix's `m.marked_unread`), the swipe in Messages. It
+   * sends no receipt; bridges that support it, such as WhatsApp's, mark the chat unread there too.
+   */
+  async markUnread(roomId: string): Promise<void> {
+    if (!roomPattern.test(roomId)) throw new UserFacingError('Chat not found.');
+    await this.ensureUser();
+    await this.setMarkedUnread(roomId, true);
+  }
+
+  private async setMarkedUnread(roomId: string, unread: boolean): Promise<void> {
+    await this.matrix('PUT', `/_matrix/client/v3/user/${encodeURIComponent(this.mxid)}/rooms/${encodeURIComponent(roomId)}/account_data/m.marked_unread`, { unread });
   }
 
   async send(roomId: string, body: unknown): Promise<void> {
@@ -260,7 +276,10 @@ export class Bridges {
     const after = timeline.filter((event, index) => index > since && event.type === 'm.room.message' && event.sender !== this.mxid && event.event_id && messageText(event.content ?? {})).length;
     // Nothing of yours among these 30 events: the server's own count, from your receipts, caps it.
     const counted = room.unread_notifications?.notification_count;
-    const unread = since < 0 && typeof counted === 'number' ? Math.min(counted, after) : after;
+    const beforeMark = since < 0 && typeof counted === 'number' ? Math.min(counted, after) : after;
+    // A chat the person marked unread counts as one unread until they open it.
+    const marked = (room.account_data?.events ?? []).some((event) => markedUnreadTypes.includes(event.type ?? '') && event.content?.unread === true);
+    const unread = marked ? Math.max(1, beforeMark) : beforeMark;
     return { id: roomId, network, name, members: others.map(([id, displayName]) => ({ id, displayName })), events, unread };
   }
 
@@ -313,7 +332,10 @@ export class Bridges {
 }
 
 type MatrixEvent = { type: string; state_key?: string; sender?: string; event_id?: string; origin_server_ts?: number; content?: Record<string, unknown> };
-type JoinedRoom = { state?: { events?: MatrixEvent[] }; timeline?: { events?: MatrixEvent[] }; ephemeral?: { events?: MatrixEvent[] }; unread_notifications?: { notification_count?: number } };
+type JoinedRoom = { account_data?: { events?: MatrixEvent[] }; state?: { events?: MatrixEvent[] }; timeline?: { events?: MatrixEvent[] }; ephemeral?: { events?: MatrixEvent[] }; unread_notifications?: { notification_count?: number } };
+
+// The stable name from Matrix 1.12 and the unstable one older clients still write.
+const markedUnreadTypes = ['m.marked_unread', 'com.famedly.marked_unread'];
 
 // Room version 12 ids are a bare hash (`!abc…`); older ones end in the server name (`!abc:server`).
 const roomPattern = /^![A-Za-z0-9._=+/-]{1,255}(:[A-Za-z0-9.:-]+)?$/;

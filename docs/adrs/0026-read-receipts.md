@@ -67,6 +67,18 @@ Unread is now real for Open Media chats: messages from others after your read ti
   - Synapse answered the bridge sync, which is identical on every poll, from its response cache, so new messages and receipts stayed out of view for minutes. The filter now changes every 15 seconds: answers are at most that old, and Synapse still computes at most one sync per 15 s per person.
 - **Reciprocity**: with read receipts shared, that is `m.read`, which the bridge passes on to WhatsApp, Signal and the rest. With them off, it is `m.read.private`: it clears the unread count on our homeserver and tells no one. The service also drops others' read times from bridged chats (delivery stays). It reads the setting through `open_media_message_settings`; if that fails, it treats receipts as off, so nothing is disclosed by mistake.
 
+### Mark as read or unread by swiping (added 2026-11-03)
+
+Swiping a conversation to the right in Messages marks it read when it is unread and unread when it is read, as in Apple Mail and Messages. It is a gesture on the existing row, not a new button: the row slides over a "Read" or "Unread" label and acts when let go past 72 points. A finger drags it on phones and the web, a two-finger trackpad swipe does it on a Mac browser, and screen readers get the same thing as a row action ("Mark as unread"). Vertical scrolling and taps are unchanged. Open Media AI has no read state and doesn't swipe.
+
+Mark unread is the person's own reminder. It never takes back a read receipt the other person already saw. It lands on the channel of the newest message from someone else (the newest message of all when they've sent none), each in that channel's own way:
+
+- **Open Media chats**: `conversation_reads.marked_unread`, set by `open_media_mark_unread(id)` and listed only to the caller by `open_media_marked_unread()`. The conversation counts at least one unread until `open_media_mark_read` clears the flag when it is opened. The read time is left alone.
+- **Email**: `POST /v1/mail-accounts/{id}/seen` with `unseen: true` stores the message as unread and takes `\Seen` off on the IMAP server, so every other mail app shows it unread too.
+- **Bridged chats**: Matrix's `m.marked_unread` room account data (`POST /v1/bridges/rooms/{id}/unread`). The sync reads it (and the older `com.famedly.marked_unread`), so the chat counts at least one unread; reading the chat clears it. Bridges that support it pass it on to the network.
+
+Opening a conversation that was marked unread reads it, even when its newest message is your own.
+
 ## Consequences
 
 - Receipts update when the conversation list reloads (opening Messages, new messages, pull to refresh), not live while both people stare at the thread.

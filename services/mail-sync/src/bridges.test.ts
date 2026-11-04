@@ -184,3 +184,25 @@ test('opening a bridged chat sends m.read, or a private receipt when read receip
   const v12 = await withFetch(() => ({}), () => bridges.markRead('!C26jEaZ600yKt2YrYRwuuFqLX5Br7eYmjKK85Zyu9Sw', '$f', true));
   assert.match(v12[0], /\/rooms\/!C26jEaZ600yKt2YrYRwuuFqLX5Br7eYmjKK85Zyu9Sw\/receipt\/m\.read\//);
 });
+
+test('a chat marked unread (m.marked_unread) counts as one unread until read, and reading clears the mark', async () => {
+  const { sync } = receiptRoom([{ type: 'm.receipt', content: { $f: { 'm.read.private': { '@om_4493a42e416b41d0baeaaed2666f5225:openmedia.test': { ts: 7000 } } } } }]);
+  const room = sync.rooms.join['!w:openmedia.test'] as Record<string, unknown>;
+  let result: Awaited<ReturnType<Bridges['conversations']>> | undefined;
+  await withFetch((url) => url.includes('/sync') ? sync : {}, async () => { result = await new Bridges(env, userId).conversations(); });
+  assert.equal(result!.rooms[0].unread, 0, 'read up to the newest message');
+  room.account_data = { events: [{ type: 'm.marked_unread', content: { unread: true } }] };
+  const calls = await withFetch((url) => url.includes('/sync') ? sync : {}, async () => { result = await new Bridges(env, userId).conversations(); });
+  assert.match(decodeURIComponent(calls.find((call) => call.includes('/sync'))!), /"account_data":\{"types":\["m.marked_unread","com.famedly.marked_unread"\]\}/);
+  assert.equal(result!.rooms[0].unread, 1);
+  room.account_data = { events: [{ type: 'com.famedly.marked_unread', content: { unread: true } }] };
+  await withFetch((url) => url.includes('/sync') ? sync : {}, async () => { result = await new Bridges(env, userId).conversations(); });
+  assert.equal(result!.rooms[0].unread, 1, 'the unstable name older clients write counts too');
+
+  const bridges = new Bridges(env, userId);
+  const marked = await withFetch(() => ({}), () => bridges.markUnread('!w:openmedia.test'));
+  assert.ok(marked.some((call) => /^PUT http:\/\/hs\.test\/_matrix\/client\/v3\/user\/%40om_[^/]+\/rooms\/!w%3Aopenmedia\.test\/account_data\/m\.marked_unread/.test(call)));
+  await assert.rejects(bridges.markUnread('../admin'));
+  const read = await withFetch(() => ({}), () => bridges.markRead('!w:openmedia.test', '$f', true));
+  assert.match(read[1], /^PUT .*\/account_data\/m\.marked_unread/, 'reading clears the mark');
+});

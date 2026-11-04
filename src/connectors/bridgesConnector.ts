@@ -61,6 +61,11 @@ export async function markBridgedChatRead(conversationId: string, eventId: strin
   await request(`/v1/bridges/rooms/${encodeURIComponent(conversationId)}/read`, { method: 'POST', body: { eventId } }, 'Could not mark the chat read.');
 }
 
+/** Marks a bridged chat unread (Matrix's m.marked_unread); bridges that support it pass it on. */
+export async function markBridgedChatUnread(conversationId: string): Promise<void> {
+  await request(`/v1/bridges/rooms/${encodeURIComponent(conversationId)}/unread`, { method: 'POST', body: {} }, 'Could not mark the chat unread.');
+}
+
 export async function sendBridgedMessage(conversationId: string, body: string): Promise<void> {
   await request(`/v1/bridges/rooms/${encodeURIComponent(conversationId)}/messages`, { method: 'POST', body: { body } }, 'The message wasn’t sent.');
 }
