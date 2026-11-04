@@ -257,3 +257,29 @@ test('mail between your own addresses is a note to yourself, shown as “Name (M
   const [shown] = mergeByContact([note], [myCard()], 'Sam Rivera');
   assert.equal(shown.participants[0].name, 'Sam Rivera (Me)');
 });
+
+test('every chat with yourself, from any of your addresses or networks, is one “Name (Me)” conversation', () => {
+  const me = myCard({ emails: ['sam.personal@example.com', 'sam@work.example.com'] });
+  const notes = normalizeStoredEmail([
+    mail({ sourceMessageId: '<n1@x>', from: 'me@example.com', to: ['sam.personal@example.com'], sentAt: '2026-11-01T09:00:00Z', text: 'Book the gym' }),
+    mail({ sourceMessageId: '<n2@x>', from: 'me@example.com', to: ['sam@work.example.com'], sentAt: '2026-11-01T10:00:00Z', text: 'Send the report' }),
+    mail({ sourceMessageId: '<n3@x>', from: 'priya@example.com', to: ['me@example.com'], sentAt: '2026-11-01T11:00:00Z', text: 'Lunch?' }),
+  ], { alsoMine: me.emails });
+  const [self] = whatsapp('15550109999', 'Sam', Date.parse('2026-11-01T12:00:00Z'), 'Passport in the drawer');
+  const shown = mergeByContact([...notes, self], [me], 'Sam Rivera');
+  const mine = shown.filter((conversation) => conversation.participants[0].name === 'Sam Rivera (Me)');
+  assert.equal(mine.length, 1, 'one conversation with yourself');
+  assert.equal(mine[0].id, 'contact:me');
+  assert.equal(mine[0].participants[0].initials, 'SR');
+  assert.deepEqual(mine[0].messages.map((message) => message.body), ['Book the gym', 'Send the report', 'Passport in the drawer']);
+  assert.equal(mine[0].channels?.length, 3, 'each address and network stays a channel to reply through');
+  assert.ok(mine[0].channels?.every((channel) => channel.participants[0].name === 'Sam Rivera (Me)'));
+  assert.equal(shown.length, 2, 'Priya keeps her own conversation');
+});
+
+test('a single chat with yourself keeps its own id', () => {
+  const [note] = normalizeStoredEmail([mail({ from: 'me@example.com', to: ['sam.personal@example.com'], text: 'Book the gym' })], { alsoMine: ['sam.personal@example.com'] });
+  const [shown] = mergeByContact([note], [myCard()], 'Sam Rivera');
+  assert.equal(shown.id, note.id);
+  assert.equal(shown.channels, undefined);
+});

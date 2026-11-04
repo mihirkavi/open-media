@@ -87,10 +87,16 @@ function titleFor(names: string[]): string {
 export function mergeByContact(conversations: Conversation[], cards: ContactCard[], profileName = ''): Conversation[] {
   const byCard = new Map<string, { card: ContactCard; members: Conversation[] }>();
   const out: (Conversation | string)[] = [];
+  const mine: Conversation[] = [];
   for (const conversation of conversations) {
     // A chat with one of your own accounts (a "message yourself" chat) is you, never another person.
     const encounter = conversation.participants.length === 1 && !conversation.groupTitle ? encounterForConversation(conversation) : undefined;
-    if (conversation.email?.toSelf || (encounter && isMine(cards, encounter.ref))) { out.push(asMe(conversation, profileName)); continue; }
+    if (conversation.email?.toSelf || (encounter && isMine(cards, encounter.ref))) {
+      // All of them, from every address and network, are one conversation with yourself.
+      if (!mine.length) out.push(selfKey);
+      mine.push(conversation);
+      continue;
+    }
     const card = contactForConversation(cards, conversation);
     if (!card) { out.push(withContactNames(conversation, cards)); continue; }
     const group = byCard.get(card.id);
@@ -99,8 +105,13 @@ export function mergeByContact(conversations: Conversation[], cards: ContactCard
   }
   return out.map((item) => {
     if (typeof item !== 'string') return item;
+    if (item === selfKey) {
+      if (mine.length === 1) return asMe(mine[0], profileName);
+      const own = selfCard(cards);
+      return merged({ id: own?.id ?? 'me', name: selfLabel(profileName), initials: initialsOf(profileName || 'Me') }, mine.map((conversation) => asMe(conversation, profileName)));
+    }
     const { card, members } = byCard.get(item)!;
-    return members.length === 1 ? named(members[0], card) : merged(card, members);
+    return members.length === 1 ? named(members[0], card) : merged({ id: card.id, name: contactName(card) }, members);
   }).sort((a, b) => Date.parse(b.lastMessageAt) - Date.parse(a.lastMessageAt));
 }
 
@@ -115,17 +126,20 @@ function named(conversation: Conversation, card: ContactCard): Conversation {
   return { ...conversation, contactId: card.id, participants: conversation.participants.map((person) => ({ ...person, name, initials: initialsOf(name) })) };
 }
 
-function merged(card: ContactCard, members: Conversation[]): Conversation {
+/** Marks where the conversation with yourself goes in the list (no card id can look like this). */
+const selfKey = '\u0000self';
+
+function merged(card: { id: string; name: string; initials?: string }, members: Conversation[]): Conversation {
   const channels = [...members].sort((a, b) => Date.parse(b.lastMessageAt) - Date.parse(a.lastMessageAt));
   const latest = channels[0];
   const people = channels.map((channel) => channel.participants[0]).filter(Boolean);
-  const name = contactName(card) || people[0]?.name || 'Someone';
+  const name = card.name || people[0]?.name || 'Someone';
   // A person's picture, not a company's: Open Media and chat pictures before email logos.
   const pictured = people.find((person) => person.avatarUrls?.length && !person.verifiedDomain) ?? people.find((person) => person.avatarUrls?.length);
   const person: Person = {
     ...people[0],
     name,
-    initials: initialsOf(name),
+    initials: card.initials ?? initialsOf(name),
     identities: people.flatMap((item) => item.identities),
     avatarUrls: pictured?.avatarUrls,
     verified: people.some((item) => item.verified),
