@@ -1538,7 +1538,9 @@ export function llmsTxt(origin: string): string {
  * the server card and docs can never fall behind the tools themselves.
  */
 /** What Open Media AI may read for the person (ADR 0028). */
-const assistantReads = ['about_open_media', 'find_setting', 'list_feed_lenses', 'get_feed_lens', 'draft_feed_lens', 'list_my_feed_lenses', 'get_my_feed_lens_history', 'get_me', 'get_profile_fields', 'get_professional_profile', 'list_web_feeds', 'preview_web_feed', 'list_my_follows', 'list_mailboxes', 'list_chat_networks', 'cross_posting_status'];
+// The person's own messages and email are read only on request, within their own chat (ADR 0028 §8).
+const assistantPrivateReads = ['list_conversations', 'list_email', 'list_bridged_chats', 'list_my_contacts'];
+const assistantReads = ['search', 'get_feed', ...assistantPrivateReads, 'about_open_media', 'find_setting', 'list_feed_lenses', 'get_feed_lens', 'draft_feed_lens', 'list_my_feed_lenses', 'get_my_feed_lens_history', 'get_me', 'get_profile_fields', 'get_professional_profile', 'list_web_feeds', 'preview_web_feed', 'list_my_follows', 'list_mailboxes', 'list_chat_networks', 'cross_posting_status'];
 /** What it may change, each only after the person says yes. Publishing, sending, paying, deleting and passwords stay with the person. */
 const assistantChanges = ['tune_feed_lens', 'revert_feed_lens', 'install_feed_lens', 'follow_web_feed', 'unfollow_web_feed', 'follow', 'unfollow', 'set_profile_fields', 'set_professional_profile', 'set_my_privacy', 'set_read_receipts'];
 const settingsSections = ['appearance', 'feed', 'language', 'messages', 'email', 'chat-networks', 'cross-posting', 'privacy', 'data', 'profile', 'about'] as const;
@@ -1558,9 +1560,19 @@ export function assistantToolkit(env: AgentEnv, origin: string, account: Account
   registerAccountTools(recorder, account);
   const actions: AppAction[] = [];
   const used: string[] = [];
-  const output = (value: unknown) => {
+  const output = (value: unknown, max = 6000) => {
     const content = (value as { content?: { type: string; text?: string }[] })?.content ?? [];
-    return content.map((item) => item.text ?? '').join('\n').slice(0, 6000);
+    return content.map((item) => item.text ?? '').join('\n').slice(0, max);
+  };
+  // Messages, email and posts in short: long text, HTML and media are cut, so many fit at once.
+  const compact = (text: string) => {
+    const shorten = (value: unknown, depth: number): unknown => {
+      if (typeof value === 'string') return value.length > 320 ? `${value.slice(0, 320)}…` : value;
+      if (Array.isArray(value)) return value.slice(0, 40).map((item) => shorten(item, depth + 1));
+      if (value && typeof value === 'object' && depth < 6) return Object.fromEntries(Object.entries(value).filter(([key]) => !/^(html|raw|headers|media|attachments|avatarUrl|posterUrl|provenance|why|explanation)$/i.test(key)).map(([key, item]) => [key, shorten(item, depth + 1)]));
+      return value;
+    };
+    try { return JSON.stringify(shorten(JSON.parse(text), 0)).slice(0, 9000); } catch { return text.slice(0, 9000); }
   };
   // A preview in words, without the manifest and code, so the model repeats words and not data.
   const brief = (text: string) => {
@@ -1574,7 +1586,7 @@ export function assistantToolkit(env: AgentEnv, origin: string, account: Account
   const kit = { actions, used } as AiToolkit;
   for (const name of assistantReads) {
     const found = captured.get(name);
-    if (found) tools[name] = aiTool({ description: found.description.slice(0, 500), inputSchema: found.schema, execute: async (args: Record<string, unknown>) => { used.push(name); return output(await found.run(args)); } });
+    if (found) tools[name] = aiTool({ description: found.description.slice(0, 500), inputSchema: found.schema, execute: async (args: Record<string, unknown>) => { used.push(name); return assistantPrivateReads.includes(name) || name === 'search' || name === 'get_feed' ? compact(output(await found.run(name === 'list_email' ? { limit: Math.min(Number(args.limit ?? 25), 40) } : args), 200000)) : output(await found.run(args)); } });
   }
   for (const name of assistantChanges) {
     const found = captured.get(name);

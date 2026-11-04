@@ -197,7 +197,9 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
     // IMAP server like any mail app. POP has no read state on the server; its mail is stored as read.
     const seenMatch = request.method === 'POST' && url.pathname.match(/^\/v1\/mail-accounts\/([^/]+)\/seen$/);
     if (seenMatch) {
-      if (!await allowed(env.MAIL_SYNC_RATE_LIMITER, `${session.userId}:${seenMatch[1]}:seen`)) return rateLimited(headers);
+      // Reading through emails quickly marks many conversations read, so this has its own, larger
+      // budget (120 a minute) instead of sharing the mail sync limit.
+      if (!await allowed(env.PUBLIC_API_RATE_LIMITER ?? env.MAIL_SYNC_RATE_LIMITER, `seen:${session.userId}:${seenMatch[1]}`)) return rateLimited(headers);
       const ids = seenSchema.parse(await readJSON(request)).messageIds;
       const account = await repository.findAccount(session.userId, seenMatch[1]);
       if (!account) return json(404, { error: 'Mailbox not found.' }, headers);

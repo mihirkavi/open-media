@@ -157,3 +157,14 @@ test('app actions travel with the answer', async () => {
   const [, reply] = await chat({ text: 'set my theme to dark' }, memory.store, env, (async () => 'Your theme is now dark.') as never);
   assert.deepEqual(reply.meta, { actions: [{ type: 'appearance', value: 'dark' }], used: ['change_app_setting'] });
 });
+
+test('when the free AI’s daily allowance is spent, the chat says so instead of failing', async () => {
+  const memory = memoryStore();
+  const spent = async () => { throw new Error('4006: you have used up your daily free allocation of 10,000 neurons'); };
+  const [, reply] = await chat({ text: 'hello' }, memory.store, env, spent as never);
+  assert.match(reply.body, /reached today’s limit.*midnight UTC.*paste an API key/s);
+  await chat({ text: fake.openai }, memory.store, env, (async () => 'x') as never);
+  const failing = async (route: Route) => { if (route.provider === 'openai') throw Object.assign(new Error('nope'), { statusCode: 401 }); return spent(); };
+  const [, both] = await chat({ text: 'hello again' }, memory.store, env, failing as never);
+  assert.match(both.body, /^GPT didn’t accept the saved key\. The free built-in AI has reached today’s limit/);
+});

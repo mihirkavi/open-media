@@ -44,6 +44,8 @@ interface Props {
   emailContacts?: EmailContact[];
   /** Opens this conversation, e.g. after “Message” on someone's profile. */
   openConversationId?: string;
+  /** Something asked from Search, sent in the Open Media AI chat as if typed there. */
+  aiAsk?: { text: string; at: number };
   /** Pull down on the list: ask every mailbox and chat for anything new. */
   onRefresh?: () => Promise<void>;
   /** The conversation on screen has been seen: record it as read (ADR 0026). */
@@ -72,6 +74,7 @@ export function OpenMediaMessages({
   onSetBlocked,
   onReport,
   openConversationId,
+  aiAsk,
   onRefresh,
   onRead,
 }: Props) {
@@ -131,6 +134,7 @@ export function OpenMediaMessages({
         blockedUserIds={blockedUserIds}
         onBack={() => setSelectedId(undefined)}
         focusOnOpen
+        ask={isAiConversation(selected) ? aiAsk : undefined}
         onSend={onSend}
         onSetBlocked={onSetBlocked}
         onReport={onReport}
@@ -333,6 +337,7 @@ export function OpenMediaMessages({
               conversation={selected}
               blockedUserIds={blockedUserIds}
               focusOnOpen={selected.id === selectedId}
+              ask={isAiConversation(selected) ? aiAsk : undefined}
               onSend={onSend}
               onSetBlocked={onSetBlocked}
               onReport={onReport}
@@ -438,6 +443,7 @@ function MessageThread({
   blockedUserIds,
   onBack,
   focusOnOpen,
+  ask,
   onSend,
   onSetBlocked,
   onReport,
@@ -445,6 +451,7 @@ function MessageThread({
   conversation: Conversation;
   blockedUserIds: string[];
   onBack?: () => void;
+  ask?: { text: string; at: number };
   /** Put the cursor in the reply box when the conversation was chosen, so typing can start at once. */
   focusOnOpen?: boolean;
   onSend: (conversationId: string, body: string, replyTo?: Message) => Promise<void>;
@@ -532,6 +539,18 @@ function MessageThread({
     setPending((items) => [...items, item]);
     deliver(item);
   };
+  // A question asked from Search arrives here once and is sent like a typed message.
+  const asked = useRef(0);
+  useEffect(() => {
+    if (!ask || ask.at === asked.current || !ask.text.trim()) return;
+    asked.current = ask.at;
+    const item: PendingMessage = { id: `pending-${ask.at}`, threadId: conversation.id, conversationId: conversation.id, body: ask.text.trim() };
+    sentBodies.add(item.body);
+    setPending((items) => [...items, item]);
+    deliver(item);
+    // deliver only reads the latest props through onSend.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ask?.at]);
   const waiting = pending.filter((item) => item.threadId === conversation.id);
   // A message you just sent (and Open Media AI's drawing while it answers) scroll into view at once.
   useEffect(() => {

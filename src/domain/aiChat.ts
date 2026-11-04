@@ -86,3 +86,12 @@ export function aiConversation(records: AiRecord[], currentUserId: string): Conv
 export function maskKeys(text: string): string {
   return text.replace(/\b(?:sk-[A-Za-z0-9_-]{16,}|AIza[0-9A-Za-z_-]{30,}|gsk_[A-Za-z0-9]{20,}|xai-[A-Za-z0-9]{20,})/g, (key) => `…${key.slice(-4)}`);
 }
+
+const askStarts = /^(catch me up|summari[sz]e|recap|what|what's|whats|how|why|who|when|where|which|can you|could you|would you|will you|please|help|tell me|explain|show me|give me|find me|remind me|draft|write|reply|set|change|switch|turn|make|connect|open|take me|is there|are there|do i|did i|have i|should i)\b/i;
+
+/** Whether words typed into Ask or search read as a question or request for Open Media AI, not a search. */
+export function looksLikeAsk(text: string): boolean {
+  const words = text.trim();
+  if (!words) return false;
+  return /\?\s*$/.test(words) || askStarts.test(words) || words.split(/\s+/).length >= 7;
+}

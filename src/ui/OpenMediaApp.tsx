@@ -40,6 +40,7 @@ import { initialsFor } from "../domain/publicPosts";
 import { ThemeColors } from "../theme";
 import { useOpenMediaTheme } from "../themeContext";
 import { ClipsView } from "./ClipsView";
+import { AskMark } from "./AiMark";
 import { SearchView } from "./SearchView";
 import { FeedView } from "./OpenMediaFeed";
 import { OpenMediaMessages } from "./OpenMediaMessages";
@@ -52,7 +53,7 @@ import { PeopleProvider, PersonTarget, useContactsStore } from "./people";
 import { PersonProfile } from "./PersonProfile";
 import { encounterForConversation, ownEmails } from "../domain/people";
 import { mergeByContact, recipientSuggestions } from "../domain/contactMerge";
-import { AiAction, AiRecord, aiConversation, isAiConversation } from "../domain/aiChat";
+import { AiAction, AiRecord, aiConversation, aiConversationId, isAiConversation } from "../domain/aiChat";
 import { loadAiMessages, onAiChatChanged, sendAiMessage } from "../connectors/aiChatConnector";
 import { setTranslationPreferences } from "../data/translationService";
 import { loadPublicPerson } from "../data/peopleService";
@@ -409,6 +410,8 @@ export function OpenMediaApp({
     return handle ? { ref: { kind: "open_media", handle } } : undefined;
   });
   const [openConversationId, setOpenConversationId] = useState<string>();
+  // A question asked from Ask or search, sent in the AI chat once Messages opens it.
+  const [aiAsk, setAiAsk] = useState<{ text: string; at: number }>();
   const encounters = useMemo(
     () => conversations.map(encounterForConversation).filter((item): item is NonNullable<typeof item> => Boolean(item)),
     [conversations],
@@ -590,6 +593,7 @@ export function OpenMediaApp({
             onSetBlocked={updateBlock}
             onReport={reportConversation}
             openConversationId={openConversationId}
+            aiAsk={aiAsk}
           />
         ) : null}
         {!person && destination === "search" ? (
@@ -601,6 +605,7 @@ export function OpenMediaApp({
             lenses={lenses}
             onNavigate={navigate}
             onOpenConversation={(id) => { setOpenConversationId(id); navigate("messages"); }}
+            onAsk={aiRecords !== null && messageMode === "open_media" ? (text) => { setAiAsk({ text, at: Date.now() }); setOpenConversationId(aiConversationId); navigate("messages"); } : undefined}
             onDismiss={() => navigate(lastPrimary)}
           />
         ) : null}
@@ -662,10 +667,10 @@ function DesktopRail({
         <Text style={styles.wordmarkText}>Open Media</Text>
       </Pressable>
       <View style={styles.primary}>
-        {/* One way into Search, with its shortcut; the only search field is on the Search page itself. */}
+        {/* One way into Ask or search, with its shortcut; the only field is on that page itself. */}
         <NavButton
           id="search"
-          label="Search"
+          label="Ask or search"
           icon="search-outline"
           hint={Platform.OS === "web" ? shortcutLabel : undefined}
           active={destination === "search"}
@@ -710,6 +715,7 @@ function DesktopRail({
 }
 
 function NavButton({
+  id,
   label,
   icon,
   avatarUrl,
@@ -740,6 +746,8 @@ function NavButton({
         <View style={[styles.navAvatarRing, active && styles.navAvatarRingActive]}>
           <Image source={{ uri: avatarUrl }} style={styles.navAvatar} accessibilityIgnoresInvertColors />
         </View>
+      ) : id === "search" ? (
+        <AskMark size={20} color={active ? colors.text : colors.textSecondary} />
       ) : (
         <Ionicons
           name={icon}
@@ -784,11 +792,15 @@ function Header({
       <View style={styles.headerRight}>
         {utility ? null : (
           <>
-            <IconButton
-              icon="search-outline"
-              label="Search"
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Ask or search"
+              hitSlop={8}
               onPress={() => onNavigate("search")}
-            />
+              style={styles.iconButton}
+            >
+              <AskMark size={21} color={colors.text} />
+            </Pressable>
             {avatarUrl ? (
               <Pressable
                 accessibilityRole="button"

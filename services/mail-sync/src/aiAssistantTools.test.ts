@@ -38,3 +38,12 @@ test('device settings and Settings sections become app actions, and odd values a
   assert.match(String(await run(kit, 'change_app_setting', { setting: 'appearance', value: 'purple' })), /isn’t a value/);
   assert.deepEqual(kit.actions, [{ type: 'appearance', value: 'dark' }, { type: 'open', value: 'email' }]);
 });
+
+test('it can read the person’s own messages, email, chats and contacts, at most 40 emails at a time', async () => {
+  const calls: string[] = [];
+  const kit = assistantToolkit({} as AgentEnv, 'https://api.openmedia.site', recordingAccount(calls), 'catch me up');
+  for (const wanted of ['list_conversations', 'list_email', 'list_bridged_chats', 'list_my_contacts', 'search', 'get_feed']) assert.ok(kit.tools[wanted], wanted);
+  await run(kit, 'list_email', { limit: 500 });
+  assert.equal(calls.at(-1), 'email:[40]');
+  assert.deepEqual(kit.used, ['list_email']);
+});

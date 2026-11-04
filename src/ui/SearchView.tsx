@@ -18,7 +18,8 @@ import { highlightTerms, snippetAround } from '../domain/searchHighlight';
 import { conversationTitle } from '../domain/selectors';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
-import { AiMark } from './AiMark';
+import { AiMark, AskMark } from './AiMark';
+import { looksLikeAsk } from '../domain/aiChat';
 import { AiThinking } from './AiThinking';
 import { FeedViewer, PostCard } from './OpenMediaFeed';
 import { Highlighted, SearchHighlight } from './RichText';
@@ -30,16 +31,20 @@ import { Loader } from './Loader';
 export type SearchTarget = 'feed' | 'messages' | 'settings';
 
 const suggestions = ['videos about cooking today', 'ethereum on lens', 'only videos from people I follow', 'dark mode'];
+const askSuggestions = ['Catch me up on my messages and email', 'What’s happening on Open Media today?', 'Help me make my feed less noisy'];
 
 /** One result Search can open: chosen with a tap, or with ↑ ↓ and Return. */
-interface ResultItem { key: string; section: string; icon: keyof typeof Ionicons.glyphMap; title: string; subtitle?: string; run: () => void }
+interface ResultItem { key: string; section: string; icon: keyof typeof Ionicons.glyphMap; /** Drawn instead of the icon. */ mark?: 'ask'; title: string; subtitle?: string; run: () => void }
 
 /**
- * Universal search: everything Open Media knows plus public posts across every network, with a
+ * Ask or search: everything Open Media knows plus public posts across every network, with a
  * basic AI summary. Messages and email are matched on this device only. Laid out like Spotlight:
- * one large field, then grouped results with the first one ready to open with Return.
+ * one large field, then grouped results with the first one ready to open with Return. Signed in,
+ * the same field asks Open Media AI: a question or request makes “Ask Open Media AI” the top
+ * result, which sends it to the AI chat, where the assistant can read the person's messages,
+ * email and Open Media to answer.
  */
-export function SearchView({ posts, conversations, viewer, lenses, onNavigate, onOpenConversation, onClose, onDismiss, initialQuery = '' }: { posts: SocialPost[]; conversations: Conversation[]; viewer?: FeedViewer; lenses?: FeedLenses; onNavigate?: (target: SearchTarget) => void; onOpenConversation?: (id: string) => void; onClose?: () => void; /** Esc on an empty field: back to where the person was. */ onDismiss?: () => void; initialQuery?: string }) {
+export function SearchView({ posts, conversations, viewer, lenses, onNavigate, onOpenConversation, onClose, onDismiss, onAsk, initialQuery = '' }: { posts: SocialPost[]; conversations: Conversation[]; viewer?: FeedViewer; lenses?: FeedLenses; onNavigate?: (target: SearchTarget) => void; onOpenConversation?: (id: string) => void; onClose?: () => void; /** Esc on an empty field: back to where the person was. */ onDismiss?: () => void; /** Signed in: send this to Open Media AI. */ onAsk?: (text: string) => void; initialQuery?: string }) {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
   const [query, setQuery] = useState(initialQuery);
   // A hashtag tapped in a post opens Search with it filled in.
@@ -69,14 +74,20 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
   const [focused, setFocused] = useState(false);
   // Opening a result remembers the search, so it is offered again next time.
   const remember = (run: () => void) => () => { recent.add(query); run(); };
+  const askRow = (text: string, subtitle?: string): ResultItem => ({ key: `ask-${text}`, section: 'Ask Open Media AI', icon: 'sparkles-outline', mark: 'ask', title: text, subtitle, run: () => onAsk?.(text) });
+  const asking = Boolean(onAsk) && hasQuery && looksLikeAsk(query);
+  const askItem = onAsk && hasQuery ? [askRow(query.trim(), 'Open Media AI answers in your AI chat, reading your messages, email and Open Media as needed.')] : [];
   const items: ResultItem[] = (hasQuery ? [
+    ...(asking ? askItem : []),
     ...lensRows.map((row) => ({ key: row.key, section: 'Feed', icon: 'options-outline' as const, title: row.title, subtitle: row.subtitle, run: () => { row.run().then((leave) => { if (leave) showFeed(); }).catch(() => undefined); } })),
     ...feedRows.map((row) => ({ key: row.key, section: 'Web feeds', icon: 'logo-rss' as const, title: row.title, subtitle: row.subtitle, run: () => { row.run().then((leave) => { if (leave) showFeed(); }).catch(() => undefined); } })),
     ...receiptRows.map((row) => ({ key: row.key, section: 'Messages', icon: 'checkmark-done-outline' as const, title: row.title, subtitle: row.subtitle, run: () => { row.run().catch(() => undefined); } })),
     ...profileRows.map((row) => ({ key: row.key, section: 'Your profile', icon: 'briefcase-outline' as const, title: row.title, subtitle: row.subtitle, run: () => { row.run().catch(() => undefined); } })),
     ...search.settings.map((setting) => ({ key: setting.id, section: 'Settings', icon: 'settings-outline' as const, title: setting.title, subtitle: setting.description, run: () => onNavigate?.('settings') })),
     ...search.messages.map((conversation) => ({ key: conversation.id, section: 'Messages and email', icon: (conversation.email ? 'mail-outline' : 'chatbubble-outline') as keyof typeof Ionicons.glyphMap, title: conversationTitle(conversation), subtitle: matchingLine(conversation), run: () => onOpenConversation ? onOpenConversation(conversation.id) : onNavigate?.('messages') })),
+    ...(asking ? [] : askItem),
   ].map((item) => ({ ...item, run: remember(item.run) })) : [
+    ...(onAsk ? askSuggestions.map((item) => askRow(item)) : []),
     ...recent.list.map((item) => ({ key: `recent-${item}`, section: 'Recent', icon: 'time-outline' as const, title: item, run: () => setQuery(item) })),
     ...suggestions.filter((item) => !recent.list.includes(item)).map((item) => ({ key: item, section: 'Try', icon: 'search-outline' as const, title: item, run: () => setQuery(item) })),
   ]);
@@ -129,8 +140,8 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
       <View style={styles.fieldRow}>
         {onClose ? <Pressable accessibilityRole="button" accessibilityLabel="Close search" onPress={onClose} style={styles.close}><Ionicons name="chevron-back" size={22} color={colors.text} /></Pressable> : null}
         <View style={[styles.field, focused && styles.fieldFocused]}>
-          <Ionicons name="search" size={21} color={focused ? colors.text : colors.textSecondary} />
-          <TextInput accessibilityLabel="Search" autoFocus value={query} onChangeText={setQuery} onKeyPress={onKey} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} placeholder="Search people, posts, messages and settings" placeholderTextColor={colors.textTertiary} returnKeyType="search" autoCorrect={false} onSubmitEditing={() => { const item = items[selected]; if (item) item.run(); else { if (hasQuery) recent.add(query); Keyboard.dismiss(); } }} style={styles.input} />
+          <AskMark size={21} color={focused ? colors.text : colors.textSecondary} thinking={search.ai.status === 'loading'} />
+          <TextInput accessibilityLabel={onAsk ? 'Ask or search' : 'Search'} autoFocus value={query} onChangeText={setQuery} onKeyPress={onKey} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} placeholder={onAsk ? 'Ask anything, or search people, posts and messages' : 'Search people, posts, messages and settings'} placeholderTextColor={colors.textTertiary} returnKeyType="search" autoCorrect={false} onSubmitEditing={() => { const item = items[selected]; if (item) item.run(); else { if (hasQuery) recent.add(query); Keyboard.dismiss(); } }} style={styles.input} />
           {query ? <Pressable accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => setQuery('')} style={styles.clear}><Ionicons name="close-circle" size={20} color={colors.textTertiary} /></Pressable> : null}
         </View>
       </View>
@@ -393,7 +404,7 @@ function useHasKeyboard(): boolean {
 
 function ResultRow({ item, selected, onHover, styles, colors }: { item: ResultItem; selected: boolean; onHover: () => void; styles: ReturnType<typeof createStyles>; colors: ThemeColors }) {
   return <Pressable accessibilityRole="button" accessibilityState={{ selected }} onPress={item.run} onHoverIn={onHover} style={({ pressed }) => [styles.row, selected && styles.rowSelected, pressed && styles.rowPressed]}>
-    <View style={[styles.rowIcon, selected && styles.rowIconSelected]}><Ionicons name={item.icon} size={17} color={selected ? colors.surface : colors.text} /></View>
+    <View style={[styles.rowIcon, selected && styles.rowIconSelected]}>{item.mark === 'ask' ? <AskMark size={17} color={selected ? colors.surface : colors.text} /> : <Ionicons name={item.icon} size={17} color={selected ? colors.surface : colors.text} />}</View>
     <View style={styles.rowCopy}>
       <Text numberOfLines={1} style={[styles.rowTitle, selected && styles.rowTextSelected]}><Highlighted text={item.title} /></Text>
       {item.subtitle ? <Text numberOfLines={2} style={[styles.rowSubtitle, selected && styles.rowSubtitleSelected]}><Highlighted text={item.subtitle} /></Text> : null}

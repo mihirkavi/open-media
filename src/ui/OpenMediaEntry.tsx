@@ -17,6 +17,7 @@ import { PeopleProvider, PersonTarget, usePeople } from './people';
 import { PersonProfile } from './PersonProfile';
 import { MobileTabs, OpenMediaApp } from './OpenMediaApp';
 import { ClipsView } from './ClipsView';
+import { AskMark } from './AiMark';
 import { SocialPost } from '../domain/posts';
 import { FeedView } from './OpenMediaFeed';
 import { SearchView } from './SearchView';
@@ -170,7 +171,7 @@ function PublicHome({ kind, onSignIn, onNavigate }: { kind: 'feed' | 'clips'; on
   const people = useMemo(() => parent ? { ...parent, search: (query: string) => setSearching(query) } : null, [parent]);
   if (searching !== false) return <View style={styles.screen}><SearchView posts={kind === 'feed' ? feedPosts : []} conversations={[]} lenses={lenses} initialQuery={searching} onClose={() => setSearching(false)} /></View>;
   const page = <View style={styles.screen}>
-    <View style={styles.publicBar}><Pressable accessibilityRole="link" accessibilityLabel={Platform.OS === 'web' ? 'Open Media home' : 'About Open Media'} onPress={() => onNavigate(Platform.OS === 'web' ? 'landing' : 'mission')}><BrandMark compact /></Pressable><View style={styles.publicActions}>{Platform.OS !== 'web' ? <Pressable accessibilityRole="button" accessibilityLabel="Our mission" onPress={() => onNavigate('mission')} style={styles.publicSearch}><Ionicons name="information-circle-outline" size={22} color={colors.text} /></Pressable> : null}<Pressable accessibilityRole="search" accessibilityLabel="Search everything" onPress={() => setSearching("")} style={styles.publicSearch}><Ionicons name="search" size={20} color={colors.text} /></Pressable><Pressable accessibilityRole="button" onPress={onSignIn} style={styles.signInButton}><Text style={styles.signInText}>Sign in</Text></Pressable></View></View>
+    <View style={styles.publicBar}><Pressable accessibilityRole="link" accessibilityLabel={Platform.OS === 'web' ? 'Open Media home' : 'About Open Media'} onPress={() => onNavigate(Platform.OS === 'web' ? 'landing' : 'mission')}><BrandMark compact /></Pressable><View style={styles.publicActions}>{Platform.OS !== 'web' ? <Pressable accessibilityRole="button" accessibilityLabel="Our mission" onPress={() => onNavigate('mission')} style={styles.publicSearch}><Ionicons name="information-circle-outline" size={22} color={colors.text} /></Pressable> : null}<Pressable accessibilityRole="search" accessibilityLabel="Search everything" onPress={() => setSearching("")} style={styles.publicSearch}><AskMark size={20} color={colors.text} /></Pressable><Pressable accessibilityRole="button" onPress={onSignIn} style={styles.signInButton}><Text style={styles.signInText}>Sign in</Text></Pressable></View></View>
     {kind === 'clips' ? <ClipsView /> : <PublicFeed lenses={lenses} onPosts={setFeedPosts} onDevelopers={() => onNavigate('developers')} />}
     <MobileTabs destination={kind} onNavigate={(next) => next === 'feed' || next === 'clips' ? onNavigate(next) : onSignIn()} />
   </View>;

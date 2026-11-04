@@ -107,3 +107,24 @@ The owner asked for the AI to be agentic: "help me write my algorithm filter", "
   - letting the AI act on settings with confirmation (master plan §22);
   - images and files;
   - a per-person monthly cap on the free model if use grows.
+
+## 8. Ask or search, and reading the person's own messages (added 2026-11-03)
+
+Search and Open Media AI share one entry, **Ask or search** (⌘K), with one mark: the AI mark's
+three dots flowing into a magnifying glass. Typing a question or request ("catch me up", "what
+does my conversation with Sam look like?", "set my theme to dark") makes **Ask Open Media AI** the
+top result; Return sends it to the AI chat and opens it there. Keywords and names still search as
+before, with the Ask row last. Guests keep plain search, with the same mark.
+
+So the assistant can answer those questions, it may read, only when the person asks and only for
+that person: their Open Media conversations, stored email (at most 40 at a time), bridged chats,
+contacts, public search and the feed. Results are shortened (long text, HTML and media cut)
+before the model sees them. That text goes to the model answering: the built-in Workers AI model,
+or the provider of a key the person pasted. Messages and emails are data, never instructions, and
+the assistant still cannot send, publish, pay or delete; account changes still need the person's
+own yes.
+
+Cost: the built-in model runs on Workers AI's free daily allowance (10,000 neurons). Tool
+descriptions and message text make each agentic answer far larger than a plain one, so on the
+free plan the allowance runs out after a modest number of answers. When it does, the chat says so
+and suggests pasting a key, instead of failing.
