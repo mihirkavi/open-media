@@ -4,7 +4,7 @@ import {
   SupabaseClient,
 } from "@supabase/supabase-js";
 
-import { Conversation, Message, Person } from "../domain/models";
+import { Conversation, Message, MessageReaction, Person } from "../domain/models";
 import { applyReceipts, unreadCount } from "../domain/receipts";
 import { isEmptyProfessional, parseProfessional, ProfessionalProfile, toJsonResume } from "../domain/professionalProfile";
 import { ProfileFieldValue, validateProfileFields } from "../domain/profileFields";
@@ -253,6 +253,18 @@ export async function loadOpenMediaConversations(
   // Receipts (ADR 0026): everyone's delivery and read times the caller may see. Loading the
   // conversations is itself delivery, so it is recorded once this list arrives.
   const { data: receiptData } = await client.rpc("open_media_conversation_receipts", { p_conversation_ids: conversationIds });
+  // Reactions (tapbacks). Older servers have no table yet: messages simply show none.
+  const { data: reactionData } = await client
+    .from("message_reactions")
+    .select("message_id, user_id, emoji, created_at")
+    .in("conversation_id", conversationIds)
+    .order("created_at", { ascending: true });
+  const reactionsByMessage = new Map<string, MessageReaction[]>();
+  for (const row of (reactionData ?? []) as ReactionRow[]) {
+    const list = reactionsByMessage.get(row.message_id) ?? [];
+    list.push({ emoji: row.emoji, personId: row.user_id, mine: row.user_id === currentUserId, at: row.created_at });
+    reactionsByMessage.set(row.message_id, list);
+  }
   const receipts = (receiptData ?? []) as ReceiptRow[];
   // Conversations the person marked unread themselves count as unread until opened. Older servers lack it.
   const { data: markedData } = await client.rpc("open_media_marked_unread");
@@ -286,7 +298,7 @@ export async function loadOpenMediaConversations(
         .map((receipt) => ({ deliveredAt: receipt?.delivered_at ?? undefined, readAt: receipt?.read_at ?? undefined }));
       const conversationMessages = applyReceipts(messages
         .filter((message) => message.conversation_id === conversation.id)
-        .map((message) => mapMessage(message, currentUserId, participantRows)), others);
+        .map((message) => withReactions(mapMessage(message, currentUserId, participantRows), reactionsByMessage.get(message.id))), others);
       const lastMessage = conversationMessages[conversationMessages.length - 1];
       return {
         id: conversation.id,
@@ -308,6 +320,19 @@ export async function loadOpenMediaConversations(
         new Date(right.lastMessageAt).getTime() -
         new Date(left.lastMessageAt).getTime(),
     );
+}
+
+interface ReactionRow { message_id: string; user_id: string; emoji: string; created_at: string }
+
+function withReactions(message: Message, reactions?: MessageReaction[]): Message {
+  return reactions?.length ? { ...message, reactions } : message;
+}
+
+/** Puts the caller's reaction on a message, replaces it, or (null, or the same emoji) takes it off. */
+export async function setMessageReaction(messageId: string, emoji: string | null): Promise<string | undefined> {
+  const { data, error } = await requireClient().rpc("open_media_set_reaction", { p_message_id: messageId, p_emoji: emoji });
+  if (error) throw error;
+  return (data as string | null) ?? undefined;
 }
 
 interface ReceiptRow { conversation_id: string; user_id: string; delivered_at: string | null; read_at: string | null }
@@ -346,6 +371,12 @@ export function subscribeToOpenMediaMessages(
     .on(
       "postgres_changes",
       { event: "INSERT", schema: "public", table: "messages" },
+      onChange,
+    )
+    // Reactions added, changed or taken off.
+    .on(
+      "postgres_changes",
+      { event: "*", schema: "public", table: "message_reactions" },
       onChange,
     )
     .subscribe();

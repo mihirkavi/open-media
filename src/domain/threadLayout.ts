@@ -2,7 +2,8 @@ import { Message } from './models';
 
 /** One row in a conversation thread, laid out the way iMessage does it. */
 export type ThreadItem =
-  | { kind: 'time'; key: string; label: string }
+  /** A time between messages, iMessage style: the day in bold ("Today"), then the time. */
+  | { kind: 'time'; key: string; label: string; day: string; time: string }
   | {
       kind: 'message';
       key: string;
@@ -25,7 +26,8 @@ export function layoutThread(messages: Message[], now = new Date()): ThreadItem[
     const next = messages[index + 1];
     const at = Date.parse(message.sentAt);
     if (!previous || at - Date.parse(previous.sentAt) > timeGapMs) {
-      items.push({ kind: 'time', key: `time-${message.id}`, label: formatThreadTime(new Date(at), now) });
+      const parts = threadTimeParts(new Date(at), now);
+      items.push({ kind: 'time', key: `time-${message.id}`, label: formatThreadTime(new Date(at), now), ...parts });
     }
     const subject = message.emailContext?.subject?.trim();
     const normalized = normalizeSubject(subject ?? '');
@@ -65,14 +67,24 @@ export function normalizeSubject(subject: string): string {
 
 /** "Today 9:02 PM", "Yesterday 9:02 PM", "Monday 9:02 PM", "Oct 1 at 9:02 PM". */
 export function formatThreadTime(date: Date, now = new Date()): string {
-  const time = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(date);
+  const { day, time } = threadTimeParts(date, now);
+  return /^\p{L}+$/u.test(day) ? `${day} ${time}` : `${day} at ${time}`;
+}
+
+/** The two halves of a thread time: { day: "Today", time: "9:02 PM" }, { day: "Sat, Oct 1", time: "9:02 PM" }. */
+export function threadTimeParts(date: Date, now = new Date()): { day: string; time: string } {
+  const time = formatClockTime(date);
   const days = Math.round((startOfDay(now) - startOfDay(date)) / 86_400_000);
-  if (days === 0) return `Today ${time}`;
-  if (days === 1) return `Yesterday ${time}`;
-  if (days > 1 && days < 7) return `${new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(date)} ${time}`;
+  if (days === 0) return { day: 'Today', time };
+  if (days === 1) return { day: 'Yesterday', time };
+  if (days > 1 && days < 7) return { day: new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(date), time };
   const sameYear = date.getFullYear() === now.getFullYear();
-  const day = new Intl.DateTimeFormat('en-US', sameYear ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' }).format(date);
-  return `${day} at ${time}`;
+  return { day: new Intl.DateTimeFormat('en-US', sameYear ? { weekday: 'short', month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', year: 'numeric' }).format(date), time };
+}
+
+/** "9:02 PM", for the time beside a single message. */
+export function formatClockTime(date: Date): string {
+  return new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(date);
 }
 
 /** Short time for the conversation list: "9:02 PM", "Yesterday", "Monday", "10/1/26". */

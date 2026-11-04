@@ -85,6 +85,16 @@ export interface Message {
   readAt?: string;
   /** Present on Open Media AI messages (ADR 0028): which model answered, and whether it was an AI search. */
   ai?: { byline?: string; search?: boolean; citations?: string[] };
+  /** Emoji reactions (tapbacks), one per person, in the order they were added. */
+  reactions?: MessageReaction[];
+}
+
+export interface MessageReaction {
+  emoji: string;
+  personId: string;
+  /** The signed-in person's own reaction. */
+  mine: boolean;
+  at: string;
 }
 
 export interface Conversation {

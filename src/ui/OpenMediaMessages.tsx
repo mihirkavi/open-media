@@ -1,6 +1,6 @@
 import Ionicons from "./Icon";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { AccessibilityInfo, Animated, Easing, Image, Keyboard, Linking, Modal, Platform, Pressable, ScrollView, StyleProp, StyleSheet, TextStyle, View, useWindowDimensions } from "react-native";
+import { AccessibilityInfo, Animated, Easing, Image, Keyboard, LayoutChangeEvent, Linking, Modal, PanResponder, Platform, Pressable, ScrollView, StyleProp, StyleSheet, TextStyle, View, ViewStyle, useWindowDimensions } from "react-native";
 import { Loader } from "./Loader";
 import { PullToRefresh } from "./PullToRefresh";
 import { SwipeToToggleRead } from "./SwipeToToggleRead";
@@ -11,8 +11,10 @@ import { Text, TextInput } from "./Text";
 import { bridgedSourceOf } from "../connectors/bridgesConnector";
 import { attachmentURL } from "../connectors/mailApiConnector";
 import { formatEmailBody } from "../domain/emailBody";
-import { formatListTime, layoutThread } from "../domain/threadLayout";
-import { Conversation, Message, MessageAttachment, PeopleFilter, Person } from "../domain/models";
+import { formatClockTime, formatListTime, layoutThread } from "../domain/threadLayout";
+import { applyMyReaction, myReaction } from "../domain/reactions";
+import { ReactionBadges, TapbackBar } from "./MessageReactions";
+import { Conversation, Message, MessageAttachment, MessageReaction, PeopleFilter, Person } from "../domain/models";
 import { encounterForConversation } from "../domain/people";
 import { canReply, channelOf, defaultChannel } from "../domain/contactMerge";
 import { conversationTitle, filterConversations } from "../domain/selectors";
@@ -39,6 +41,8 @@ interface Props {
   blockedUserIds: string[];
   onRetry: () => Promise<void>;
   onSend: (conversationId: string, body: string, replyTo?: Message, clientId?: string) => Promise<void>;
+  /** Puts your reaction on an Open Media message, changes it, or (undefined) takes it off. */
+  onReact?: (message: Message, emoji: string | undefined) => Promise<void>;
   onSearchProfiles: (query: string) => Promise<Person[]>;
   onStartConversation: (personId: string) => Promise<string>;
   /** Sends a new email and returns the conversation it lands in. */
@@ -87,6 +91,7 @@ export function OpenMediaMessages({
   onRefresh,
   onRead,
   onToggleRead,
+  onReact,
 }: Props) {
   const { width } = useWindowDimensions();
   const compact = width < 760;
@@ -147,6 +152,7 @@ export function OpenMediaMessages({
         focusOnOpen
         ask={isAiConversation(selected) ? aiAsk : undefined}
         onSend={onSend}
+        onReact={onReact}
         onSetBlocked={onSetBlocked}
         onReport={onReport}
       />
@@ -356,6 +362,7 @@ export function OpenMediaMessages({
               focusOnOpen={selected.id === selectedId}
               ask={isAiConversation(selected) ? aiAsk : undefined}
               onSend={onSend}
+              onReact={onReact}
               onSetBlocked={onSetBlocked}
               onReport={onReport}
             />
@@ -462,6 +469,7 @@ function MessageThread({
   focusOnOpen,
   ask,
   onSend,
+  onReact,
   onSetBlocked,
   onReport,
 }: {
@@ -472,6 +480,8 @@ function MessageThread({
   /** Put the cursor in the reply box when the conversation was chosen, so typing can start at once. */
   focusOnOpen?: boolean;
   onSend: (conversationId: string, body: string, replyTo?: Message, clientId?: string) => Promise<void>;
+  /** Puts your reaction on an Open Media message, changes it, or (undefined) takes it off. */
+  onReact?: (message: Message, emoji: string | undefined) => Promise<void>;
   onSetBlocked: (personId: string, blocked: boolean) => Promise<void>;
   onReport: (
     conversationId: string,
@@ -625,6 +635,62 @@ function MessageThread({
       submit();
     }
   };
+  // Reactions (tapbacks): yours shows the moment you pick it, and the server's copy replaces it.
+  const [tapbackFor, setTapbackFor] = useState<string>();
+  const [reactionOverrides, setReactionOverrides] = useState<Record<string, MessageReaction[]>>({});
+  useEffect(() => setReactionOverrides({}), [conversation.messages]);
+  const shownMessages = useMemo(
+    () => (Object.keys(reactionOverrides).length ? conversation.messages.map((message) => (message.id in reactionOverrides ? { ...message, reactions: reactionOverrides[message.id] } : message)) : conversation.messages),
+    [conversation.messages, reactionOverrides],
+  );
+  const everyone = useMemo(() => [...conversation.participants, ...channels.flatMap((channel) => channel.participants)], [conversation.participants, channels]);
+  const nameOf = (personId: string) => everyone.find((person) => person.id === personId)?.name ?? "Someone";
+  const canReact = (message: Message) =>
+    Boolean(onReact) && !blocked && message.source === "open_media" && message.channel === "native" && !message.ai && !isAiConversation(conversation);
+  const react = (message: Message, emoji: string) => {
+    setTapbackFor(undefined);
+    const current = shownMessages.find((other) => other.id === message.id)?.reactions;
+    const next = applyMyReaction(current, "me", emoji);
+    setReactionOverrides((overrides) => ({ ...overrides, [message.id]: next }));
+    onReact?.(message, myReaction(next)).catch(() => {
+      // It didn't save: show what the server has again.
+      setReactionOverrides((overrides) => {
+        const { [message.id]: _dropped, ...rest } = overrides;
+        return rest;
+      });
+    });
+  };
+  useEffect(() => {
+    if (!tapbackFor || Platform.OS !== "web") return;
+    const close = (event: KeyboardEvent) => event.key === "Escape" && setTapbackFor(undefined);
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
+  }, [tapbackFor]);
+  // Tapping what a reply quotes scrolls back to the original, which briefly lights up.
+  const rowY = useRef(new Map<string, number>()).current;
+  const nearBottom = useRef(true);
+  const [flashId, setFlashId] = useState<string>();
+  const jumpTo = (messageId: string) => {
+    const y = rowY.get(messageId);
+    if (y === undefined) return;
+    threadScroll.current?.scrollTo({ y: Math.max(0, y - 96), animated: !reduceMotion });
+    setFlashId(messageId);
+    setTimeout(() => setFlashId((current) => (current === messageId ? undefined : current)), 1100);
+  };
+  // Phones: swipe left to see every message's time (iMessage).
+  const timeReveal = useRef(new Animated.Value(0)).current;
+  const swipePan = useMemo(
+    () =>
+      Platform.OS === "web"
+        ? { panHandlers: {} }
+        : PanResponder.create({
+            onMoveShouldSetPanResponderCapture: (_, gesture) => gesture.dx < -12 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 2,
+            onPanResponderMove: (_, gesture) => timeReveal.setValue(Math.max(-swipeTimeWidth, Math.min(0, gesture.dx * 0.7))),
+            onPanResponderRelease: () => Animated.spring(timeReveal, { toValue: 0, friction: 8, tension: 90, useNativeDriver: false }).start(),
+            onPanResponderTerminate: () => Animated.spring(timeReveal, { toValue: 0, friction: 8, tension: 90, useNativeDriver: false }).start(),
+          }),
+    [timeReveal],
+  );
   return (
     <View ref={threadRef} style={[styles.thread, keyboardInset ? { paddingBottom: keyboardInset } : null]}>
       <View style={styles.threadHeader}>
@@ -683,53 +749,73 @@ function MessageThread({
           </Pressable>
         ) : null}
       </View>
+      <View style={styles.threadBody} {...swipePan.panHandlers}>
       <ScrollView
         ref={threadScroll}
         contentContainerStyle={styles.threadContent}
+        scrollEventThrottle={64}
+        onScroll={(event) => {
+          const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
+          nearBottom.current = contentOffset.y + layoutMeasurement.height >= contentSize.height - 120;
+        }}
         onContentSizeChange={() => {
+          // A reaction on an older message changes the height too; only follow the end when already there.
+          if (scrolledOnce.current && !nearBottom.current) return;
           threadScroll.current?.scrollToEnd({ animated: scrolledOnce.current && !reduceMotion });
           scrolledOnce.current = true;
         }}
       >
+        {tapbackFor ? (
+          // Anywhere else closes the tapback bar.
+          <Pressable accessibilityLabel="Close reactions" accessibilityRole="button" onPress={() => setTapbackFor(undefined)} style={styles.tapbackBackdrop} />
+        ) : null}
         {conversation.messages.length || waiting.length ? (
-          layoutThread(conversation.messages).map((item) =>
+          layoutThread(shownMessages).map((item) =>
             item.kind === "time" ? (
-              <Text key={item.key} style={styles.timeSeparator}>
-                {item.label}
+              <Text key={item.key} accessibilityRole="header" style={styles.timeSeparator}>
+                <Text style={styles.timeSeparatorDay}>{item.day}</Text> {item.time}
               </Text>
             ) : (
+              <SwipeTime key={item.key} reveal={timeReveal} outbound={item.message.direction === "outbound"} sentAt={item.message.sentAt} onLayout={(y) => rowY.set(item.message.id, y)} style={[item.groupStart && styles.groupStart, tapbackFor === item.message.id && styles.rowRaised]}>
               <Appear
-                key={item.key}
                 animate={arrives(item.message)}
                 style={[
                   styles.messageWrap,
                   item.message.direction === "outbound" && styles.outboundWrap,
-                  item.groupStart && styles.groupStart,
+                  item.message.reactions?.length ? styles.messageWrapReacted : null,
                 ]}
               >
                 {isGroup && item.groupStart && item.message.direction === "inbound" ? (
                   <Text numberOfLines={1} style={styles.groupSender}>{senderLabel(item.message)}</Text>
                 ) : null}
-                <ReplyableBubble
+                {item.message.replyToMessageId && byId.get(item.message.replyToMessageId) ? (
+                  <ReplyContext
+                    outbound={item.message.direction === "outbound"}
+                    name={senderLabel(byId.get(item.message.replyToMessageId)!)}
+                    text={quoteText(byId.get(item.message.replyToMessageId)!)}
+                    reacted={Boolean(item.message.reactions?.length)}
+                    onPress={() => jumpTo(item.message.replyToMessageId!)}
+                  />
+                ) : null}
+                <MessageBubble
                   outbound={item.message.direction === "outbound"}
-                  enabled={canSend && !item.message.ai}
-                  onReply={() => startReply(item.message)}
+                  canReplyTo={canSend && !item.message.ai}
+                  canReact={canReact(item.message)}
+                  reactions={item.message.reactions}
+                  nameOf={nameOf}
+                  sentAt={item.message.sentAt}
+                  open={tapbackFor === item.message.id}
+                  flash={flashId === item.message.id}
+                  reduceMotion={reduceMotion}
+                  onOpen={(open) => setTapbackFor(open ? item.message.id : undefined)}
+                  onReply={() => { setTapbackFor(undefined); startReply(item.message); }}
+                  onReact={(emoji) => react(item.message, emoji)}
                   style={artOf(item.message) ? styles.bareBubble : [
                     styles.bubble,
                     item.message.direction === "outbound" && styles.outboundBubble,
                     item.groupEnd && (item.message.direction === "outbound" ? styles.outboundTail : styles.inboundTail),
                   ]}
                 >
-                  {item.message.replyToMessageId && byId.get(item.message.replyToMessageId) ? (
-                    <View style={[styles.quote, item.message.direction === "outbound" && !artOf(item.message) && styles.quoteOutbound]}>
-                      <Text style={[styles.quoteName, item.message.direction === "outbound" && !artOf(item.message) && styles.quoteNameOutbound]}>
-                        {senderLabel(byId.get(item.message.replyToMessageId)!)}
-                      </Text>
-                      <Text numberOfLines={2} style={[styles.quoteText, item.message.direction === "outbound" && !artOf(item.message) && styles.quoteTextOutbound]}>
-                        {quoteText(byId.get(item.message.replyToMessageId)!)}
-                      </Text>
-                    </View>
-                  ) : null}
                   {item.subject ? (
                     <Text
                       style={[
@@ -753,7 +839,7 @@ function MessageThread({
                       ]}
                     />
                   )}
-                </ReplyableBubble>
+                </MessageBubble>
                 <MessageMedia message={item.message} />
                 {item.message.ai?.byline ? (
                   <View style={[styles.aiByline, item.message.direction === "outbound" && styles.outboundWrap]}>
@@ -771,17 +857,13 @@ function MessageThread({
                   </View>
                 ) : null}
               </Appear>
+              </SwipeTime>
             ),
           ).concat(
             waiting.map((item) => (
               <Appear key={item.id} animate={!reduceMotion} style={[styles.messageWrap, styles.outboundWrap, styles.groupStart]}>
+                {item.replyTo ? <ReplyContext outbound name={senderLabel(item.replyTo)} text={quoteText(item.replyTo)} /> : null}
                 <View style={[artOfBody(item.body) ? styles.bareBubble : [styles.bubble, styles.outboundBubble, styles.outboundTail], item.failed ? styles.failedBubble : !isAiConversation(conversation) && styles.sendingBubble]}>
-                  {item.replyTo ? (
-                    <View style={[styles.quote, !artOfBody(item.body) && styles.quoteOutbound]}>
-                      <Text style={[styles.quoteName, !artOfBody(item.body) && styles.quoteNameOutbound]}>{senderLabel(item.replyTo)}</Text>
-                      <Text numberOfLines={2} style={[styles.quoteText, !artOfBody(item.body) && styles.quoteTextOutbound]}>{quoteText(item.replyTo)}</Text>
-                    </View>
-                  ) : null}
                   {artOfBody(item.body) ? (
                     <MessageArt art={artOfBody(item.body)!} outbound />
                   ) : (
@@ -818,6 +900,7 @@ function MessageThread({
           </View>
         )}
       </ScrollView>
+      </View>
       {channels.length > 1 ? (
         <View style={styles.channelBar}>
           {choosingChannel ? (
@@ -861,19 +944,29 @@ function MessageThread({
               onMedia={(url) => { send(url); if (compactThread) setPickerOpen(false); }}
             />
           ) : null}
+          <View style={[styles.composerShell, (focused || pickerOpen) && styles.composerFocused]}>
           {replyTo ? (
-            <View style={styles.replyBanner}>
-              <View style={styles.replyBar} />
+            <Appear animate={!reduceMotion} style={styles.replyBanner}>
+              <View style={styles.replyIcon}>
+                <Ionicons name="arrow-undo-outline" size={14} color={colors.text} />
+              </View>
               <View style={styles.replyBannerCopy}>
-                <Text style={styles.replyBannerTitle}>Replying to {senderLabel(replyTo)}</Text>
+                <Text numberOfLines={1} style={styles.replyBannerTitle}>
+                  Replying to <Text style={styles.replyBannerName}>{senderLabel(replyTo) === "You" ? "yourself" : senderLabel(replyTo)}</Text>
+                </Text>
                 <Text numberOfLines={1} style={styles.replyBannerText}>{quoteText(replyTo)}</Text>
               </View>
-              <Pressable accessibilityRole="button" accessibilityLabel="Cancel reply" onPress={() => setReplyTo(undefined)} style={styles.replyCancel}>
-                <Ionicons name="close" size={18} color={colors.textSecondary} />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Cancel reply"
+                onPress={() => setReplyTo(undefined)}
+                style={({ hovered }: { hovered?: boolean; pressed: boolean }) => [styles.replyCancel, hovered && styles.trayButtonHover]}
+              >
+                <Ionicons name="close" size={17} color={colors.textSecondary} />
               </Pressable>
-            </View>
+            </Appear>
           ) : null}
-          <View style={[styles.composer, styles.composerWithTools, (focused || pickerOpen) && styles.composerFocused]}>
+          <View style={[styles.composer, styles.composerWithTools]}>
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={pickerOpen ? "Close emoji, GIFs and stickers" : "Emoji, GIFs and stickers"}
@@ -910,6 +1003,7 @@ function MessageThread({
               style={[styles.composerInput, { height: inputHeight }]}
             />
             <SendButton ready={Boolean(body.trim())} reduceMotion={reduceMotion} onPress={submit} />
+          </View>
           </View>
         </View>
       ) : (
@@ -1417,39 +1511,159 @@ function quoteText(message: Message): string {
 }
 
 /**
- * A message bubble you can reply to, like iMessage: hover on the web shows a
- * reply button beside it; long-press anywhere starts a reply.
+ * A message bubble you can react to and reply to, like iMessage. On the web, hovering shows a
+ * quiet tray beside it (react, reply and the time it was sent) and a double-click opens the
+ * tapback bar; on phones a long-press opens it. Reactions sit over the bubble's top corner.
  */
-function ReplyableBubble({ outbound, enabled, onReply, style, children }: React.PropsWithChildren<{ outbound: boolean; enabled: boolean; onReply: () => void; style: object }>) {
+function MessageBubble({
+  outbound,
+  canReplyTo,
+  canReact,
+  reactions,
+  nameOf,
+  sentAt,
+  open,
+  flash,
+  reduceMotion,
+  onOpen,
+  onReply,
+  onReact,
+  style,
+  children,
+}: React.PropsWithChildren<{
+  outbound: boolean;
+  canReplyTo: boolean;
+  canReact: boolean;
+  reactions?: Message["reactions"];
+  nameOf: (personId: string) => string;
+  sentAt: string;
+  open: boolean;
+  flash: boolean;
+  reduceMotion: boolean;
+  onOpen: (open: boolean) => void;
+  onReply: () => void;
+  onReact: (emoji: string) => void;
+  style: StyleProp<ViewStyle>;
+}>) {
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [hovered, setHovered] = useState(false);
-  if (!enabled) return <View style={style}>{children}</View>;
+  const lastTap = useRef(0);
+  // In a narrow window the tray keeps to its two buttons; the time would run off the edge.
+  const roomy = useWindowDimensions().width >= 520;
+  const interactive = canReplyTo || canReact;
+  const badges = <ReactionBadges outbound={outbound} reactions={reactions} nameOf={nameOf} onPress={canReact ? () => onOpen(true) : undefined} />;
+  const bubbleStyle = [style, styles.replyBubble, flash && styles.bubbleFlash];
+  if (!interactive) return <View style={bubbleStyle}>{children}{badges}</View>;
+  const time = formatClockTime(new Date(sentAt));
   return (
-    <View style={[styles.replyRow, outbound && styles.replyRowOutbound]}>
-      <Pressable
-        accessibilityActions={[{ name: "reply", label: "Reply" }]}
-        onAccessibilityAction={(event) => event.nativeEvent.actionName === "reply" && onReply()}
-        onLongPress={onReply}
-        delayLongPress={350}
-        onHoverIn={() => setHovered(true)}
-        onHoverOut={() => setHovered(false)}
-        style={[style, styles.replyBubble]}
-      >
-        {children}
-      </Pressable>
+    <Pressable
+      accessibilityActions={[
+        ...(canReact ? [{ name: "react", label: "React" }] : []),
+        ...(canReplyTo ? [{ name: "reply", label: "Reply" }] : []),
+      ]}
+      onAccessibilityAction={(event) => {
+        if (event.nativeEvent.actionName === "reply") onReply();
+        if (event.nativeEvent.actionName === "react") onOpen(true);
+      }}
+      // Long-press opens the tapback bar, which also has Reply; without reactions it replies at once.
+      onLongPress={() => (canReact ? onOpen(true) : onReply())}
+      delayLongPress={320}
+      onHoverIn={() => setHovered(true)}
+      onHoverOut={() => setHovered(false)}
+      // A double-tap (or double-click) opens the tapback bar too, as in iMessage.
+      onPress={canReact ? () => {
+        const now = Date.now();
+        if (now - lastTap.current < 320) { lastTap.current = 0; clearSelection(); onOpen(true); } else lastTap.current = now;
+      } : undefined}
+      style={bubbleStyle}
+    >
+      {children}
+      {badges}
       {Platform.OS === "web" ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Reply"
-          onPress={onReply}
-          onHoverIn={() => setHovered(true)}
-          onHoverOut={() => setHovered(false)}
-          style={[styles.replyButton, !hovered && styles.replyButtonHidden]}
-        >
-          <Ionicons name="arrow-undo-outline" size={16} color={colors.textSecondary} />
-        </Pressable>
+        // Beside the bubble, inside its hover area, so moving onto the tray keeps it open.
+        <View style={[styles.hoverTray, outbound ? styles.hoverTrayOutbound : styles.hoverTrayInbound, !(hovered && !open) && styles.hoverTrayHidden]}>
+          {canReact ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="React"
+              onPress={() => onOpen(true)}
+              style={({ hovered: over }: { hovered?: boolean; pressed: boolean }) => [styles.trayButton, over && styles.trayButtonHover]}
+            >
+              <Ionicons name="happy-outline" size={17} color={colors.textSecondary} />
+            </Pressable>
+          ) : null}
+          {canReplyTo ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Reply"
+              onPress={onReply}
+              style={({ hovered: over }: { hovered?: boolean; pressed: boolean }) => [styles.trayButton, over && styles.trayButtonHover]}
+            >
+              <Ionicons name="arrow-undo-outline" size={16} color={colors.textSecondary} />
+            </Pressable>
+          ) : null}
+          {roomy ? <Text accessibilityElementsHidden importantForAccessibility="no" style={styles.trayTime}>{time}</Text> : null}
+        </View>
       ) : null}
+      {open ? <TapbackBar outbound={outbound} reactions={reactions} reduceMotion={reduceMotion} onReact={canReact ? onReact : undefined} onReply={canReplyTo ? onReply : undefined} /> : null}
+    </Pressable>
+  );
+}
+
+/**
+ * Swipe the thread left on a phone to see when each message was sent, like iMessage: your
+ * bubbles slide aside and the times come in from the right edge, then everything springs back.
+ */
+function SwipeTime({ reveal, outbound, sentAt, onLayout, style, children }: React.PropsWithChildren<{ reveal: Animated.Value; outbound: boolean; sentAt: string; onLayout: (y: number) => void; style: StyleProp<ViewStyle> }>) {
+  const { colors } = useOpenMediaTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const measure = (event: LayoutChangeEvent) => onLayout(event.nativeEvent.layout.y);
+  if (Platform.OS === "web") return <View onLayout={measure} style={[styles.swipeRow, style]}>{children}</View>;
+  return (
+    <View onLayout={measure} style={[styles.swipeRow, style]}>
+      <Animated.View style={outbound ? { transform: [{ translateX: reveal }] } : null}>{children}</Animated.View>
+      <Animated.View
+        pointerEvents="none"
+        style={[styles.swipeTime, {
+          opacity: reveal.interpolate({ inputRange: [-swipeTimeWidth, -18, 0], outputRange: [1, 0, 0] }),
+          transform: [{ translateX: reveal.interpolate({ inputRange: [-swipeTimeWidth, 0], outputRange: [0, swipeTimeWidth], extrapolate: "clamp" }) }],
+        }]}
+      >
+        <Text style={styles.swipeTimeText}>{formatClockTime(new Date(sentAt))}</Text>
+      </Animated.View>
+    </View>
+  );
+}
+
+const swipeTimeWidth = 68;
+
+/** A double-click on the web selects a word; opening the tapback bar shouldn't leave it highlighted. */
+function clearSelection() {
+  if (Platform.OS === "web") window.getSelection?.()?.removeAllRanges();
+}
+
+/**
+ * What a reply answers, the iMessage way: the original as a faint ghost bubble above, with a thin
+ * line curving down into the reply. Tapping it jumps back to the original message.
+ */
+function ReplyContext({ outbound, name, text, reacted, onPress }: { outbound: boolean; name: string; text: string; reacted?: boolean; onPress?: () => void }) {
+  const { colors } = useOpenMediaTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  return (
+    <View style={[styles.replyContext, outbound && styles.replyContextOutbound, reacted && styles.replyContextReacted]}>
+      <View style={[styles.replyConnector, outbound ? styles.replyConnectorOutbound : styles.replyConnectorInbound, reacted && styles.replyConnectorReacted]} />
+      <Pressable
+        accessibilityRole={onPress ? "button" : undefined}
+        accessibilityLabel={`In reply to ${name}: ${text}`}
+        accessibilityHint={onPress ? "Shows the original message" : undefined}
+        disabled={!onPress}
+        onPress={onPress}
+        style={({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) => [styles.ghost, outbound && styles.ghostOutbound, hovered && styles.ghostHover, pressed && styles.ghostPressed]}
+      >
+        <Text numberOfLines={1} style={[styles.ghostName, outbound && styles.ghostNameOutbound]}>{name}</Text>
+        <Text numberOfLines={2} style={styles.ghostText}>{text}</Text>
+      </Pressable>
     </View>
   );
 }
@@ -1887,14 +2101,18 @@ function createStyles(colors: ThemeColors) {
       paddingVertical: 18,
       flexGrow: 1,
     },
+    // iMessage's time line: the day in semibold, the time lighter, small and centred.
     timeSeparator: {
-      marginTop: 18,
-      marginBottom: 6,
+      marginTop: 22,
+      marginBottom: 8,
       color: colors.textTertiary,
       fontSize: 11,
-      fontWeight: "600",
+      lineHeight: 14,
+      fontWeight: "400",
+      letterSpacing: 0.1,
       textAlign: "center",
     },
+    timeSeparatorDay: { fontWeight: "600", color: colors.textSecondary },
     threadEmpty: {
       flex: 1,
       minHeight: 240,
@@ -1932,23 +2150,61 @@ function createStyles(colors: ThemeColors) {
     channelChoiceOff: { opacity: 0.45 },
     channelChoiceText: { color: colors.textSecondary, fontSize: 12, fontWeight: "600" },
     channelChoiceTextActive: { color: colors.surface },
-    replyRow: { maxWidth: "100%", flexDirection: "row", alignItems: "center", gap: 6 },
     replyBubble: { flexShrink: 1, minWidth: 0 },
-    replyRowOutbound: { flexDirection: "row-reverse" },
-    replyButton: { width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center", backgroundColor: colors.chrome },
-    replyButtonHidden: { opacity: 0 },
-    quote: { marginBottom: 6, paddingLeft: 9, borderLeftWidth: 3, borderLeftColor: colors.textTertiary },
-    quoteOutbound: { borderLeftColor: colors.surface, opacity: 0.85 },
-    quoteName: { color: colors.textSecondary, fontSize: 12, fontWeight: "700" },
-    quoteNameOutbound: { color: colors.surface },
-    quoteText: { marginTop: 1, color: colors.textSecondary, fontSize: 13, lineHeight: 18 },
-    quoteTextOutbound: { color: colors.surface },
-    replyBanner: { marginBottom: 8, paddingVertical: 8, paddingLeft: 10, paddingRight: 4, flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 14, backgroundColor: colors.chrome },
-    replyBar: { width: 3, alignSelf: "stretch", borderRadius: 2, backgroundColor: colors.text },
+    // A replied-to message lights up for a moment when you jump to it.
+    bubbleFlash: { transform: [{ scale: 1.04 }], opacity: 0.78 },
+    // The hover tray beside a bubble on the web: react, reply and the time it was sent.
+    hoverTray: { position: "absolute", top: 0, bottom: 0, flexDirection: "row", alignItems: "center", gap: 2, transitionProperty: "opacity", transitionDuration: "120ms" } as object,
+    hoverTrayInbound: { left: "100%", paddingLeft: 8 },
+    hoverTrayOutbound: { right: "100%", paddingRight: 8, flexDirection: "row-reverse" },
+    hoverTrayHidden: { opacity: 0, pointerEvents: "none" } as object,
+    trayButton: { width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center" },
+    trayButtonHover: { backgroundColor: colors.chrome },
+    trayTime: { marginHorizontal: 4, color: colors.textTertiary, fontSize: 11, fontWeight: "500", fontVariant: ["tabular-nums"], whiteSpace: "nowrap" } as object,
+    // The thread's rows, and the times a phone's swipe reveals at the right edge.
+    threadBody: { flex: 1 },
+    swipeRow: { width: "100%" },
+    rowRaised: { zIndex: 20 },
+    // While the tapback bar is open, the rest of the thread fades back, as in iMessage.
+    tapbackBackdrop: { position: "absolute", top: -400, left: -40, right: -40, bottom: -400, zIndex: 10, cursor: "default", backgroundColor: colors.surface, opacity: 0.72 } as object,
+    swipeTime: { position: "absolute", top: 0, bottom: 0, right: -4, width: swipeTimeWidth, alignItems: "flex-end", justifyContent: "center" },
+    swipeTimeText: { color: colors.textTertiary, fontSize: 11, fontWeight: "500", fontVariant: ["tabular-nums"] },
+    messageWrapReacted: { marginTop: 18 },
+    // What a reply answers: a faint ghost of the original, and a thin line curving into the reply.
+    replyContext: { maxWidth: "100%", paddingLeft: 16, marginBottom: 3, alignSelf: "flex-start" },
+    replyContextOutbound: { paddingLeft: 0, paddingRight: 16, alignSelf: "flex-end" },
+    replyConnector: { position: "absolute", top: "50%", bottom: -7, width: 11, borderColor: colors.textTertiary, opacity: 0.45, borderTopWidth: 1.5 },
+    // Room for a reaction badge on the reply's top corner.
+    replyContextReacted: { marginBottom: 17 },
+    replyConnectorReacted: { bottom: -21 },
+    replyConnectorInbound: { left: 6, borderLeftWidth: 1.5, borderTopLeftRadius: 10 },
+    replyConnectorOutbound: { right: 6, borderRightWidth: 1.5, borderTopRightRadius: 10 },
+    ghost: {
+      maxWidth: "92%",
+      paddingHorizontal: 11,
+      paddingTop: 5,
+      paddingBottom: 6,
+      borderRadius: 15,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      transitionProperty: "background-color, transform",
+      transitionDuration: "140ms",
+    } as object,
+    ghostOutbound: { alignSelf: "flex-end" },
+    ghostHover: { backgroundColor: colors.chrome },
+    ghostPressed: { transform: [{ scale: 0.98 }] },
+    ghostName: { color: colors.textTertiary, fontSize: 10.5, lineHeight: 14, fontWeight: "700", letterSpacing: 0.2 },
+    ghostNameOutbound: { textAlign: "right" },
+    ghostText: { color: colors.textTertiary, fontSize: 13, lineHeight: 17 },
+    // The reply banner sits inside the composer, above the text, like a draft's header.
+    replyBanner: { marginHorizontal: 4, marginTop: 2, marginBottom: 2, paddingVertical: 7, paddingLeft: 8, paddingRight: 2, flexDirection: "row", alignItems: "center", gap: 10, borderRadius: 18, backgroundColor: colors.bubble },
+    replyIcon: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
     replyBannerCopy: { flex: 1, minWidth: 0 },
-    replyBannerTitle: { color: colors.text, fontSize: 12, fontWeight: "700" },
-    replyBannerText: { marginTop: 1, color: colors.textSecondary, fontSize: 13 },
-    replyCancel: { width: 32, height: 32, alignItems: "center", justifyContent: "center" },
+    replyBannerTitle: { color: colors.textSecondary, fontSize: 12 },
+    replyBannerName: { color: colors.text, fontWeight: "700" },
+    replyBannerText: { marginTop: 1, color: colors.text, fontSize: 13, lineHeight: 18 },
+    replyCancel: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
     media: { marginTop: 4, gap: 4, alignItems: "flex-start", width: 280, maxWidth: "100%" },
     mediaOutbound: { alignItems: "flex-end", alignSelf: "flex-end" },
     photo: {
@@ -2002,14 +2258,7 @@ function createStyles(colors: ThemeColors) {
       borderTopColor: colors.border,
       backgroundColor: colors.surface,
     },
-    composer: {
-      minHeight: 46,
-      flexDirection: "row",
-      alignItems: "flex-end",
-      gap: 8,
-      paddingVertical: 4,
-      paddingRight: 4,
-      paddingLeft: 16,
+    composerShell: {
       borderRadius: 23,
       backgroundColor: colors.chrome,
       borderWidth: 1,
@@ -2017,6 +2266,15 @@ function createStyles(colors: ThemeColors) {
       // @ts-expect-error web-only style
       transitionProperty: "border-color, background-color",
       transitionDuration: "160ms",
+    },
+    composer: {
+      minHeight: 44,
+      flexDirection: "row",
+      alignItems: "flex-end",
+      gap: 8,
+      paddingVertical: 3,
+      paddingRight: 3,
+      paddingLeft: 16,
     },
     composerFocused: { borderColor: colors.textTertiary, backgroundColor: colors.surface },
     composerWithTools: { paddingLeft: 4 },

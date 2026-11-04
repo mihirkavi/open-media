@@ -38,7 +38,7 @@ test('formats thread and list times relative to today', () => {
   assert.match(formatThreadTime(new Date(2026, 9, 16, 9, 2), now), /^Today 9:02\sAM$/);
   assert.match(formatThreadTime(new Date(2026, 9, 15, 21, 2), now), /^Yesterday 9:02\sPM$/);
   assert.match(formatThreadTime(new Date(2026, 9, 12, 8, 0), now), /^Monday 8:00\sAM$/);
-  assert.match(formatThreadTime(new Date(2026, 8, 1, 8, 0), now), /^Sep 1 at 8:00\sAM$/);
+  assert.match(formatThreadTime(new Date(2026, 8, 1, 8, 0), now), /^Tue, Sep 1 at 8:00\sAM$/);
   assert.equal(formatListTime(new Date(2026, 9, 15, 21, 0), now), 'Yesterday');
   assert.equal(formatListTime(new Date(2025, 0, 2), now), '1/2/25');
 });
@@ -47,4 +47,13 @@ test('a subject taken from the first line is not shown twice', () => {
   const message = { id: 'm', sourceMessageId: 'm', conversationId: 'c', senderPersonId: 'me', senderIdentityId: 'me', recipientPersonIds: [], sentAt: '2026-10-31T10:00:00Z', body: 'Dinner on Friday?\nAt 7', source: 'imap', channel: 'email', direction: 'outbound', deliveryState: 'sent', emailContext: { providerThreadId: 'm', subject: 'Dinner on Friday?', address: 'a@example.com', accountId: 'a', accountEmail: 'me@example.com' } } as unknown as Message;
   const item = layoutThread([message]).find((entry) => entry.kind === 'message');
   assert.equal(item?.kind === 'message' ? item.subject : 'missing', undefined);
+});
+
+test('splits a thread time into a bold day and the time', async () => {
+  const { threadTimeParts } = await import('./threadLayout');
+  const now = new Date(2026, 9, 16, 12, 0);
+  const today = threadTimeParts(new Date(2026, 9, 16, 9, 2), now);
+  assert.equal(today.day, 'Today');
+  assert.match(today.time, /^9:02\sAM$/);
+  assert.equal(threadTimeParts(new Date(2025, 0, 2, 8, 0), now).day, 'Jan 2, 2025');
 });

@@ -26,6 +26,7 @@ import {
   reportConversation,
   searchOpenMediaProfiles,
   sendOpenMediaMessage,
+  setMessageReaction,
   setUserBlocked,
   startDirectConversation,
   subscribeToOpenMediaMessages,
@@ -382,6 +383,14 @@ export function OpenMediaApp({
     },
     [bridgedConversations, currentUserId, lenses, mailConversations, messageMode, refreshBridged, refreshMail, refreshMessages],
   );
+  // Reactions (tapbacks) on Open Media messages; the live subscription brings everyone else's.
+  const reactToMessage = useCallback(
+    async (message: Message, emoji: string | undefined) => {
+      await setMessageReaction(message.id, emoji ?? null);
+      await refreshMessages();
+    },
+    [refreshMessages],
+  );
   // A new email written like a message: the first line becomes the subject.
   const sendNewEmail = useCallback(
     async (addresses: string[], body: string) => {
@@ -620,6 +629,7 @@ export function OpenMediaApp({
             onRead={readConversation}
             onToggleRead={messageMode === "open_media" ? toggleRead : undefined}
             onSend={sendMessage}
+            onReact={messageMode === "open_media" ? reactToMessage : undefined}
             onSearchProfiles={searchProfiles}
             onStartConversation={beginConversation}
             onSendNewEmail={sendNewEmail}
