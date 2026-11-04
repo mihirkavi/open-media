@@ -72,6 +72,7 @@ const env: MailEnv & PaymentsEnv & VerificationEnv & { PROFILE_IMPORT_ALLOW_LOCA
   MAIL_SYNC_RATE_LIMITER: limiter(12),
   MAIL_SEND_RATE_LIMITER: limiter(10),
   PUBLIC_API_RATE_LIMITER: limiter(120),
+  DICTATION_RATE_LIMITER: limiter(20),
 };
 
 // Optional: translation and AI search through the owner's Workers AI, borrowed from Wrangler

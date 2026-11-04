@@ -41,6 +41,11 @@ export function OpenMediaThemeProvider({ children }: PropsWithChildren) {
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 
+/** The theme when there is one: shared pieces such as text fields can render outside the app too. */
+export function useOptionalOpenMediaTheme(): ThemeContextValue | undefined {
+  return useContext(ThemeContext);
+}
+
 export function useOpenMediaTheme() {
   const value = useContext(ThemeContext);
   if (!value) throw new Error('useOpenMediaTheme must be used inside OpenMediaThemeProvider.');

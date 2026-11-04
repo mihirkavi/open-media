@@ -1,6 +1,8 @@
-import { forwardRef } from 'react';
-import { Platform, StyleSheet, Text as NativeText, TextInput as NativeTextInput, TextInputProps, TextProps, TextStyle } from 'react-native';
+import { forwardRef, useCallback, useRef, useState } from 'react';
+import { Platform, StyleSheet, Text as NativeText, TextInput as NativeTextInput, TextInputProps, TextProps, TextStyle, View, ViewStyle } from 'react-native';
 
+import { dictationEligible } from '../domain/dictation';
+import { DictationButton, dictationInset } from './DictationButton';
 import { sfTracking } from './typeMetrics';
 
 /**
@@ -43,8 +45,52 @@ export const Text = forwardRef<NativeText, TextProps>(function Text({ style, ...
   return <NativeText ref={ref} {...props} style={uiTextStyle(style)} />;
 });
 
-export const TextInput = forwardRef<NativeTextInput, TextInputProps>(function TextInput({ style, ...props }, ref) {
-  return <NativeTextInput ref={ref} {...props} style={uiTextStyle(style)} />;
+/** Layout that belongs to the field's place on the page, so it moves to the box that holds the mic. */
+const outerKeys = new Set<keyof ViewStyle>([
+  'flex', 'flexGrow', 'flexShrink', 'flexBasis', 'alignSelf', 'width', 'minWidth', 'maxWidth',
+  'margin', 'marginTop', 'marginBottom', 'marginLeft', 'marginRight', 'marginHorizontal', 'marginVertical', 'marginStart', 'marginEnd',
+  'position', 'top', 'bottom', 'left', 'right', 'zIndex',
+]);
+
+export interface OpenMediaTextInputProps extends TextInputProps {
+  /** Show the dictation mic (ADR 0031). Left out, fields people write words in get one. */
+  dictation?: boolean;
+}
+
+/**
+ * Every text field in Open Media. On the web, fields people write words in also carry the
+ * dictation mic at their right edge (ADR 0031); phones keep their keyboard's own dictation.
+ */
+export const TextInput = forwardRef<NativeTextInput, OpenMediaTextInputProps>(function TextInput({ style, dictation, ...props }, ref) {
+  const node = useRef<NativeTextInput | null>(null);
+  const [fieldHeight, setFieldHeight] = useState<number | undefined>();
+  const setRef = useCallback((value: NativeTextInput | null) => {
+    node.current = value;
+    if (typeof ref === 'function') ref(value);
+    else if (ref) ref.current = value;
+  }, [ref]);
+  const target = useCallback(() => node.current as unknown as HTMLInputElement | HTMLTextAreaElement | null, []);
+  const textStyle = uiTextStyle(style);
+  const withMic = Platform.OS === 'web' && dictationEligible({ ...(props as Record<string, unknown>), dictation } as Parameters<typeof dictationEligible>[0]);
+  if (!withMic) return <NativeTextInput ref={setRef} {...props} style={textStyle} />;
+
+  const outer: ViewStyle = { position: 'relative' };
+  const inner: TextStyle = {};
+  for (const [key, value] of Object.entries(textStyle)) {
+    if (outerKeys.has(key as keyof ViewStyle)) (outer as Record<string, unknown>)[key] = value;
+    else (inner as Record<string, unknown>)[key] = value;
+  }
+  // The field still fills its place: it keeps its own height, and grows with the box that holds it.
+  if (outer.flex !== undefined || outer.flexGrow !== undefined) inner.flexGrow = 1;
+  if (outer.position === 'absolute' && inner.height === undefined) inner.height = '100%';
+  const ownRight = Number(inner.paddingRight ?? inner.paddingHorizontal ?? inner.padding ?? 0) || 0;
+  inner.paddingRight = Math.max(ownRight, dictationInset);
+  return (
+    <View style={outer} onLayout={(event) => setFieldHeight(Math.round(event.nativeEvent.layout.height))}>
+      <NativeTextInput ref={setRef} {...props} style={inner} />
+      <DictationButton target={target} multiline={Boolean(props.multiline)} maxLength={props.maxLength} fieldHeight={fieldHeight} />
+    </View>
+  );
 });
 
 /** Refs keep the platform types, so `useRef<TextInput>` works as it did before. */

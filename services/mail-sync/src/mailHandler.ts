@@ -19,6 +19,7 @@ import { authenticate } from './session.js';
 import { runSearchAssist, SearchAssistEnv } from './searchAssist.js';
 import { AiChatEnv, ownSearchModel, recordSearch } from './aiChat.js';
 import { runTranslate, TranslateEnv } from './translate.js';
+import { readDictationAudio, transcribe } from './dictate.js';
 import { parseGifQuery, searchGifs, GifSearchEnv } from './gifSearch.js';
 import { syncPop3, testPop3 } from './pop3.js';
 import { sendSmtp, SmtpConnection, testSmtp } from './smtp.js';
@@ -39,6 +40,7 @@ export interface MailEnv extends FarcasterSignerEnv, SearchAssistEnv, AiChatEnv,
   MAIL_SYNC_RATE_LIMITER: Limiter;
   MAIL_SEND_RATE_LIMITER: Limiter;
   PUBLIC_API_RATE_LIMITER?: Limiter;
+  DICTATION_RATE_LIMITER?: Limiter;
 }
 
 const seenSchema = z.object({ messageIds: z.array(z.string().min(1).max(998).refine((value) => !/[\r\n]/.test(value))).min(1).max(100), unseen: z.boolean().optional() });
@@ -136,6 +138,18 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
       if (limiter && !(await limiter.limit({ key: `translate:${caller}` })).success) return rateLimited(headers);
       if (!env.AI) return json(503, { error: 'Translation isn’t available on this server.' }, headers);
       return json(200, await runTranslate(input, env, privacy), { ...headers, 'cache-control': privacy === 'private' ? 'no-store' : 'private, max-age=300' });
+    }
+
+    // Dictation (ADR 0031): GET says whether this server can transcribe; POST a WAV and get text
+    // back. Signed in, the limit is per person; otherwise per address. Nothing is stored or logged.
+    if (url.pathname === '/v1/dictate' && request.method === 'GET') return json(200, { available: Boolean(env.AI), model: env.AI ? 'whisper-large-v3-turbo' : undefined }, headers);
+    if (url.pathname === '/v1/dictate' && request.method === 'POST') {
+      const signedIn = /^Bearer \S+$/.test(request.headers.get('authorization') ?? '');
+      const caller = signedIn ? `user:${(await authenticate(request, env.SUPABASE_URL)).userId}` : `ip:${request.headers.get('cf-connecting-ip') ?? 'local'}`;
+      const limiter = env.DICTATION_RATE_LIMITER ?? env.PUBLIC_API_RATE_LIMITER;
+      if (limiter && !(await limiter.limit({ key: `dictate:${caller}` })).success) return rateLimited(headers);
+      if (!env.AI) return json(503, { error: 'Dictation isn’t available on this server.' }, headers);
+      return json(200, await transcribe(await readDictationAudio(request), env), headers);
     }
 
     // GIFs for the message media picker (ADR 0029): GIPHY through this server, so its key stays a secret.
