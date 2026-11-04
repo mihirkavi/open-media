@@ -21,7 +21,7 @@ import { useOpenMediaTheme } from "../themeContext";
 import { SourceMarker, sourceLabel } from "./SourceMarker";
 import type { MessageMode } from "./OpenMediaApp";
 import { TranslationNote, useTranslation } from "./useTranslation";
-import { VerifiedTick, verifiedBlue } from "./VerifiedTick";
+import { VerifiedTick } from "./VerifiedTick";
 import { aiPersonId, isAiConversation, maskKeys } from "../domain/aiChat";
 import { parseMarkdown } from "../domain/markdown";
 import { MarkdownBody } from "./MarkdownBody";
@@ -1339,15 +1339,7 @@ function Avatar({ initials, imageUrls = [], size = 40 }: { initials: string; ima
 
 /** The blue tick for senders that passed DMARC and publish a BIMI mark certificate. */
 function VerifiedBadge({ domain }: { domain: string }) {
-  return (
-    <Ionicons
-      accessibilityRole="image"
-      accessibilityLabel={`Verified sender: ${domain}`}
-      name="checkmark-circle"
-      size={15}
-      color={verifiedBlue}
-    />
-  );
+  return <VerifiedTick size={15} label={`Verified sender: ${domain}`} />;
 }
 
 /** "Verified sender · coursera.org · via you@…", without repeating an address that is already the title. */
