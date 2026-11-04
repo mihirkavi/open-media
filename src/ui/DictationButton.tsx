@@ -155,6 +155,7 @@ export function DictationButton({ target, multiline, maxLength, fieldHeight }: {
         }}
         style={({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) => [
           styles.button,
+          phase === 'idle' && styles.buttonIdle,
           (hovered || pressed) && phase === 'idle' && styles.buttonHover,
           (listening || phase === 'starting') && styles.buttonLive,
           phase === 'writing' && styles.buttonWriting,
@@ -167,7 +168,7 @@ export function DictationButton({ target, multiline, maxLength, fieldHeight }: {
             ? <Loader size={15} color={colors.text} accessibilityLabel="Transcribing" />
             : phase === 'starting'
               ? <Pulse color={colors.surface} />
-              : <Ionicons name={hovered ? 'mic' : 'mic-outline'} size={17} color={hovered ? colors.text : colors.textTertiary} />}
+              : <Ionicons name="mic" size={15} color={hovered ? colors.text : colors.textSecondary} />}
       </Pressable>
     </View>
   );
@@ -225,7 +226,9 @@ function createStyles(colors: ThemeColors) {
       alignItems: 'center', justifyContent: 'center',
       ...(Platform.OS === 'web' ? { transitionDuration: '160ms', transitionProperty: 'background-color, transform, box-shadow', cursor: 'pointer' } as object : {}),
     },
-    buttonHover: { backgroundColor: colors.accentSoft },
+    // At rest it is a soft chip with a hairline edge, so it can be found in any field and theme.
+    buttonIdle: { backgroundColor: colors.accentSoft, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
+    buttonHover: { backgroundColor: colors.border, borderColor: colors.textTertiary },
     buttonLive: {
       backgroundColor: colors.accent,
       ...(Platform.OS === 'web' ? { boxShadow: '0 2px 10px rgba(0,0,0,0.18)' } as object : {}),
