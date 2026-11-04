@@ -110,8 +110,11 @@ The owner asked for the AI to be agentic: "help me write my algorithm filter", "
 
 ## 8. Ask or search, and reading the person's own messages (added 2026-11-03)
 
-Search and Open Media AI share one entry, **Ask or search** (⌘K), with one mark: the AI mark's
-three dots flowing into a magnifying glass. Typing a question or request ("catch me up", "what
+Search and Open Media AI share one entry, **Ask or search** (⌘K), with one mark: a magnifying glass
+holding the AI mark's three dots, drawn to the Ionicons outline proportions so it matches the
+other navigation icons. In the desktop sidebar the entry is a navigation row like Feed and
+Clips, never a field shape (there is nothing to type there), on one line, with ⌘K shown quietly on
+hover. Typing a question or request ("catch me up", "what
 does my conversation with Sam look like?", "set my theme to dark") makes **Ask Open Media AI** the
 top result; Return sends it to the AI chat and opens it there. Keywords and names still search as
 before, with the Ask row last. Guests keep plain search, with the same mark.

@@ -667,15 +667,8 @@ function DesktopRail({
         <Text style={styles.wordmarkText}>Open Media</Text>
       </Pressable>
       <View style={styles.primary}>
-        {/* One way into Ask or search, with its shortcut; the only field is on that page itself. */}
-        <NavButton
-          id="search"
-          label="Ask or search"
-          icon="search-outline"
-          hint={Platform.OS === "web" ? shortcutLabel : undefined}
-          active={destination === "search"}
-          onPress={() => onNavigate("search")}
-        />
+        {/* One way into Ask or search, a row like the others; the only field is on that page itself. */}
+        <AskTrigger active={destination === "search"} onPress={() => onNavigate("search")} />
         {primary.map((item) => (
           <NavButton
             key={item.id}
@@ -714,12 +707,44 @@ function DesktopRail({
   );
 }
 
+/**
+ * The sidebar's way into Ask or search: a navigation row like Feed and Clips, not a field, because
+ * there is nothing to type here; it opens the page that has the field. The shortcut appears quietly
+ * on hover, so the row reads as one calm line; screen readers hear it as the hint instead.
+ */
+function AskTrigger({ active, onPress }: { active: boolean; onPress: () => void }) {
+  const { colors } = useOpenMediaTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel="Ask or search"
+      accessibilityHint={Platform.OS === "web" ? `Shortcut ${shortcutLabel}` : undefined}
+      accessibilityState={{ selected: active }}
+      onPress={onPress}
+      style={(state) => [styles.nav, !active && ((state as { hovered?: boolean }).hovered || state.pressed) && styles.navHover, active && styles.navActive]}
+    >
+      {(state) => {
+        const hovered = Boolean((state as { hovered?: boolean }).hovered);
+        return (
+          <>
+            <AskMark size={21} color={active || hovered ? colors.text : colors.textSecondary} />
+            <Text numberOfLines={1} style={[styles.navText, styles.askText, (active || hovered) && styles.navTextHover, active && styles.navTextActive]}>Ask or search</Text>
+            {Platform.OS === "web" && hovered && !active ? (
+              <Text accessible={false} importantForAccessibility="no" style={styles.askHint}>{shortcutLabel}</Text>
+            ) : null}
+          </>
+        );
+      }}
+    </Pressable>
+  );
+}
+
 function NavButton({
   id,
   label,
   icon,
   avatarUrl,
-  hint,
   active,
   onPress,
 }: {
@@ -728,8 +753,6 @@ function NavButton({
   icon: keyof typeof Ionicons.glyphMap;
   /** A picture drawn in the icon's place, ringed when the item is active. */
   avatarUrl?: string;
-  /** A keyboard shortcut, shown as a key on the right. */
-  hint?: string;
   active: boolean;
   onPress: () => void;
 }) {
@@ -746,8 +769,6 @@ function NavButton({
         <View style={[styles.navAvatarRing, active && styles.navAvatarRingActive]}>
           <Image source={{ uri: avatarUrl }} style={styles.navAvatar} accessibilityIgnoresInvertColors />
         </View>
-      ) : id === "search" ? (
-        <AskMark size={20} color={active ? colors.text : colors.textSecondary} />
       ) : (
         <Ionicons
           name={icon}
@@ -758,7 +779,6 @@ function NavButton({
       <Text style={[styles.navText, active && styles.navTextActive]}>
         {label}
       </Text>
-      {hint ? <Text style={styles.navHint}>{hint}</Text> : null}
     </Pressable>
   );
 }
@@ -958,7 +978,11 @@ function createStyles(colors: ThemeColors) {
     headerAvatar: { width: 26, height: 26, borderRadius: 13, backgroundColor: colors.chrome },
     navText: { color: colors.textSecondary, fontSize: 15, fontWeight: "500" },
     navTextActive: { color: colors.text, fontWeight: "700" },
-    navHint: { marginLeft: "auto", paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, color: colors.textTertiary, fontSize: 11, fontWeight: "600" },
+    navHover: { backgroundColor: colors.surfaceAlt },
+    navTextHover: { color: colors.text },
+    askText: { flexShrink: 1 },
+    // The shortcut, shown on hover only: plain quiet text, no box, so it never competes with the label.
+    askHint: { marginLeft: "auto", color: colors.textTertiary, fontSize: 12, fontWeight: "500", letterSpacing: 0.6 },
     create: {
       minHeight: 46,
       marginTop: 22,
