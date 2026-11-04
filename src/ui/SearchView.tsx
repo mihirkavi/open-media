@@ -18,7 +18,7 @@ import { highlightTerms, snippetAround } from '../domain/searchHighlight';
 import { conversationTitle } from '../domain/selectors';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
-import { AiMark, AskMark } from './AiMark';
+import { AiMark } from './AiMark';
 import { looksLikeAsk } from '../domain/aiChat';
 import { AiThinking } from './AiThinking';
 import { FeedViewer, PostCard } from './OpenMediaFeed';
@@ -140,7 +140,7 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
       <View style={styles.fieldRow}>
         {onClose ? <Pressable accessibilityRole="button" accessibilityLabel="Close search" onPress={onClose} style={styles.close}><Ionicons name="chevron-back" size={22} color={colors.text} /></Pressable> : null}
         <View style={[styles.field, focused && styles.fieldFocused]}>
-          <AskMark size={21} color={focused ? colors.text : colors.textSecondary} thinking={search.ai.status === 'loading'} />
+          <Ionicons name="search" size={21} color={focused ? colors.text : colors.textSecondary} />
           <TextInput accessibilityLabel={onAsk ? 'Ask or search' : 'Search'} autoFocus value={query} onChangeText={setQuery} onKeyPress={onKey} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} placeholder={onAsk ? 'Ask anything, or search people, posts and messages' : 'Search people, posts, messages and settings'} placeholderTextColor={colors.textTertiary} returnKeyType="search" autoCorrect={false} onSubmitEditing={() => { const item = items[selected]; if (item) item.run(); else { if (hasQuery) recent.add(query); Keyboard.dismiss(); } }} style={styles.input} />
           {query ? <Pressable accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => setQuery('')} style={styles.clear}><Ionicons name="close-circle" size={20} color={colors.textTertiary} /></Pressable> : null}
         </View>
@@ -404,7 +404,7 @@ function useHasKeyboard(): boolean {
 
 function ResultRow({ item, selected, onHover, styles, colors }: { item: ResultItem; selected: boolean; onHover: () => void; styles: ReturnType<typeof createStyles>; colors: ThemeColors }) {
   return <Pressable accessibilityRole="button" accessibilityState={{ selected }} onPress={item.run} onHoverIn={onHover} style={({ pressed }) => [styles.row, selected && styles.rowSelected, pressed && styles.rowPressed]}>
-    <View style={[styles.rowIcon, selected && styles.rowIconSelected]}>{item.mark === 'ask' ? <AskMark size={17} color={selected ? colors.surface : colors.text} /> : <Ionicons name={item.icon} size={17} color={selected ? colors.surface : colors.text} />}</View>
+    <View style={[styles.rowIcon, selected && styles.rowIconSelected]}>{item.mark === 'ask' ? <AiMark size={15} color={selected ? colors.surface : colors.text} /> : <Ionicons name={item.icon} size={17} color={selected ? colors.surface : colors.text} />}</View>
     <View style={styles.rowCopy}>
       <Text numberOfLines={1} style={[styles.rowTitle, selected && styles.rowTextSelected]}><Highlighted text={item.title} /></Text>
       {item.subtitle ? <Text numberOfLines={2} style={[styles.rowSubtitle, selected && styles.rowSubtitleSelected]}><Highlighted text={item.subtitle} /></Text> : null}
