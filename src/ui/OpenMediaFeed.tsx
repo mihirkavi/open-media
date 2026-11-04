@@ -312,7 +312,7 @@ type PostCardProps = { post: SocialPost; mode: FeedMode | FeedLens; lensContext?
 
 /** One post in the Feed or Search. Items from web feeds get their own news card (ADR 0024). */
 export function PostCard(props: PostCardProps) {
-  return props.post.webFeed ? <WebFeedCard post={props.post} mode={props.mode} lensContext={props.lensContext} /> : <NetworkPostCard {...props} />;
+  return props.post.webFeed ? <WebFeedCard post={props.post} mode={props.mode} lensContext={props.lensContext} signedIn={Boolean(props.viewer)} /> : <NetworkPostCard {...props} />;
 }
 
 function NetworkPostCard({ post, mode, lensContext, viewer, onDelete, onReport }: PostCardProps) {

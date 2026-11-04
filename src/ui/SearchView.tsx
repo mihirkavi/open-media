@@ -30,7 +30,7 @@ import { Loader } from './Loader';
 
 export type SearchTarget = 'feed' | 'messages' | 'settings';
 
-const suggestions = ['videos about cooking today', 'ethereum on lens', 'only videos from people I follow', 'dark mode'];
+const suggestions = ['videos about cooking today', 'ethereum on lens', 'follow theverge.com', 'only videos from people I follow', 'dark mode'];
 const askSuggestions = ['Catch me up on my messages and email', 'What’s happening on Open Media today?', 'Help me make my feed less noisy'];
 
 /** One result Search can open: chosen with a tap, or with ↑ ↓ and Return. */

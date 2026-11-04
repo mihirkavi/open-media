@@ -53,6 +53,61 @@ export async function loadPostComments(postId: string): Promise<PostComment[]> {
   return (Array.isArray(data) ? data : []).map(postCommentFromRecord).filter((comment): comment is PostComment => Boolean(comment));
 }
 
+/** Likes a web feed item (or takes the like back), keyed by its article link; returns its new counts. */
+export async function setWebItemLike(url: string, liked: boolean): Promise<PostEngagement> {
+  const { data, error } = await requireClient().rpc('open_media_set_web_item_like', { p_url: url, p_liked: liked });
+  if (error) throw friendly(error);
+  return engagementFromRecord(data);
+}
+
+/** Reshares a web feed item (or takes the reshare back); returns its new counts. */
+export async function setWebItemReshare(url: string, reshared: boolean): Promise<PostEngagement> {
+  const { data, error } = await requireClient().rpc('open_media_set_web_item_reshare', { p_url: url, p_reshared: reshared });
+  if (error) throw friendly(error);
+  return engagementFromRecord(data);
+}
+
+/** Comments on a web feed item. The client ID makes a retried send idempotent. */
+export async function addWebItemComment(url: string, clientId: string, body: string): Promise<PostComment> {
+  const text = body.trim();
+  if (!text) throw new Error('Write something first.');
+  if (text.length > maxCommentLength) throw new Error(`Comments can be up to ${maxCommentLength} characters.`);
+  const { data, error } = await requireClient().rpc('open_media_add_web_item_comment', { p_url: url, p_client_id: clientId, p_body: text });
+  if (error) throw friendly(error);
+  const comment = postCommentFromRecord(data);
+  if (!comment) throw new Error('Open Media returned an unexpected comment.');
+  return comment;
+}
+
+/** Comments on a web feed item, oldest first. Works signed out. */
+export async function loadWebItemComments(url: string): Promise<PostComment[]> {
+  const { data, error } = await requireClient().rpc('open_media_web_item_comments', { p_url: url, p_limit: 100 });
+  if (error) throw friendly(error);
+  return (Array.isArray(data) ? data : []).map(postCommentFromRecord).filter((comment): comment is PostComment => Boolean(comment));
+}
+
+// Web item counts are asked for together: cards that appear within a moment share one request.
+let waitingUrls = new Map<string, ((engagement: PostEngagement) => void)[]>();
+let flushTimer: ReturnType<typeof setTimeout> | undefined;
+async function flushEngagement() {
+  const batch = waitingUrls; waitingUrls = new Map(); flushTimer = undefined;
+  const urls = [...batch.keys()];
+  for (let start = 0; start < urls.length; start += 100) {
+    const chunk = urls.slice(start, start + 100);
+    const { data } = await requireClient().rpc('open_media_web_item_engagement', { p_urls: chunk }).then((result) => result, () => ({ data: null }));
+    const found = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>;
+    for (const url of chunk) for (const resolve of batch.get(url) ?? []) resolve(engagementFromRecord(found[url]));
+  }
+}
+
+/** A web feed item's counts and the viewer's own like and reshare. */
+export function loadWebItemEngagement(url: string): Promise<PostEngagement> {
+  return new Promise((resolve) => {
+    waitingUrls.set(url, [...(waitingUrls.get(url) ?? []), resolve]);
+    flushTimer ??= setTimeout(() => { flushEngagement().catch(() => undefined); }, 40);
+  });
+}
+
 // Likes and reshares already sent to other networks from this device, so the icon stays filled
 // after a reload and a second tap never sends the same reaction twice.
 const ledgerKey = 'open-media.network-interactions';

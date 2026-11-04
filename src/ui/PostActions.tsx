@@ -3,9 +3,9 @@ import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { createClientId } from '../data/openMediaService';
-import { addPostComment, interactOnNetwork, loadPostComments, networkInteractionsDone, setPostLike, setPostReshare } from '../data/interactionService';
+import { addPostComment, addWebItemComment, interactOnNetwork, loadPostComments, loadWebItemComments, loadWebItemEngagement, networkInteractionsDone, setPostLike, setPostReshare, setWebItemLike, setWebItemReshare } from '../data/interactionService';
 import { NetworkId, networks } from '../domain/networkPosts';
-import { applyInteraction, InteractionKind, interactionLabel, interactionRoute, InteractionRoute, maxCommentLength, PostComment } from '../domain/postInteractions';
+import { applyInteraction, InteractionKind, interactionLabel, interactionRoute, InteractionRoute, maxCommentLength, PostComment, webItemUrl } from '../domain/postInteractions';
 import { PostEngagement, SocialPost } from '../domain/posts';
 import { formatRelativeTime } from '../domain/publicPosts';
 import { ThemeColors } from '../theme';
@@ -19,15 +19,24 @@ import { Loader } from './Loader';
 const zero: PostEngagement = { replies: 0, reposts: 0, likes: 0, liked: false, reshared: false };
 
 /**
- * The comment, reshare, and like icons under a post. Open Media posts are acted on in Open Media;
- * posts from another network through the person's connected cross-posting account, or, without
- * one, the icon opens the post on its network. `children` (the post's links) follow the icons.
+ * The comment, reshare, and like icons under a post. Open Media posts and web feed items are acted
+ * on in Open Media; posts from another network through the person's connected cross-posting
+ * account, or, without one, the icon opens the post on its network. `children` (the post's links)
+ * follow the icons.
  */
 export function PostActions({ post, signedIn, children }: { post: SocialPost; signedIn: boolean; children?: ReactNode }) {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
   const native = post.provenance.connectorId === 'open-media';
-  const [engagement, setEngagement] = useState<PostEngagement | undefined>(post.engagement ?? (native ? zero : undefined));
-  useEffect(() => { setEngagement(post.engagement ?? (native ? zero : undefined)); }, [post.engagement, native]);
+  const item = useMemo(() => webItemUrl(post), [post]);
+  const [engagement, setEngagement] = useState<PostEngagement | undefined>(post.engagement ?? (native || item ? zero : undefined));
+  useEffect(() => { setEngagement(post.engagement ?? (native || item ? zero : undefined)); }, [post.engagement, native, item]);
+  // A web feed item's counts come from Open Media, asked for with the other cards on screen.
+  useEffect(() => {
+    if (!item) return;
+    let live = true;
+    loadWebItemEngagement(item).then((loaded) => { if (live) setEngagement(loaded); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [item, signedIn]);
   const crossPosting = useCrossPosting();
   const connected = useMemo(() => Object.fromEntries(crossPosting.networks.filter((item) => item.account).map((item) => [item.network, item.account!.handle])) as Partial<Record<NetworkId, string>>, [crossPosting.networks]);
   const routes = useMemo(() => ({
@@ -41,7 +50,7 @@ export function PostActions({ post, signedIn, children }: { post: SocialPost; si
 
   // External likes and reshares sent from this device stay filled after a reload.
   useEffect(() => {
-    if (native) return;
+    if (native || item) return;
     let live = true;
     networkInteractionsDone(post.id).then((done) => { if (live && (done.liked || done.reshared)) setEngagement((current) => current && { ...current, liked: done.liked || current.liked, reshared: done.reshared || current.reshared }); }).catch(() => undefined);
     return () => { live = false; };
@@ -53,13 +62,14 @@ export function PostActions({ post, signedIn, children }: { post: SocialPost; si
     const route = routes[kind];
     if (route.via === 'open') { Linking.openURL(route.url).catch(() => undefined); return; }
     if (route.via === 'sign-in') { setNotice('Sign in to like, comment, or reshare.'); return; }
-    if (route.via !== 'open-media' && route.via !== 'network') return;
+    if (route.via !== 'open-media' && route.via !== 'web' && route.via !== 'network') return;
     const active = Boolean(kind === 'like' ? engagement.liked : engagement.reshared);
     if (route.via === 'network' && active) { setNotice(`${kind === 'like' ? 'Liked' : 'Reshared'} on ${networks[route.network].displayName}. To undo it, use ${networks[route.network].displayName}.`); return; }
     const before = engagement;
     setEngagement(applyInteraction(engagement, kind, !active)); setNotice(''); setBusy(kind);
     try {
       if (route.via === 'open-media') setEngagement(await (kind === 'like' ? setPostLike(post.id, !active) : setPostReshare(post.id, !active)));
+      else if (route.via === 'web') setEngagement(await (kind === 'like' ? setWebItemLike(route.url, !active) : setWebItemReshare(route.url, !active)));
       else {
         await interactOnNetwork(post.id, route.target, { kind });
         setNotice(`${kind === 'like' ? 'Liked' : 'Reshared'} on ${networks[route.network].displayName} as ${route.handle}.`);
@@ -74,7 +84,7 @@ export function PostActions({ post, signedIn, children }: { post: SocialPost; si
   const openComments = () => {
     const route = routes.comment;
     if (route.via === 'open') { Linking.openURL(route.url).catch(() => undefined); return; }
-    if (route.via === 'open-media' || route.via === 'network') setCommentsOpen((open) => !open);
+    if (route.via === 'open-media' || route.via === 'web' || route.via === 'network') setCommentsOpen((open) => !open);
   };
 
   return <>
@@ -123,7 +133,9 @@ function CommentBody({ comment, source, style }: { comment: PostComment; source:
 
 function Comments({ post, route, signedIn, onCommented }: { post: SocialPost; route: InteractionRoute; signedIn: boolean; onCommented: () => void }) {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
-  const native = route.via === 'open-media';
+  // Comments kept in Open Media: on its own posts, and on web feed items by article link.
+  const native = route.via === 'open-media' || route.via === 'web';
+  const itemUrl = route.via === 'web' ? route.url : undefined;
   const [comments, setComments] = useState<PostComment[]>();
   const [error, setError] = useState('');
   const [draft, setDraft] = useState('');
@@ -134,16 +146,16 @@ function Comments({ post, route, signedIn, onCommented }: { post: SocialPost; ro
   useEffect(() => {
     if (!native) return;
     let live = true;
-    loadPostComments(post.id).then((items) => { if (live) setComments(items); }).catch((reason) => { if (live) setError(reason instanceof Error ? reason.message : 'Comments didn’t load.'); });
+    (itemUrl ? loadWebItemComments(itemUrl) : loadPostComments(post.id)).then((items) => { if (live) setComments(items); }).catch((reason) => { if (live) setError(reason instanceof Error ? reason.message : 'Comments didn’t load.'); });
     return () => { live = false; };
-  }, [native, post.id]);
+  }, [native, itemUrl, post.id]);
   const send = async () => {
     const text = draft.trim();
     if (!text || sending) return;
     setSending(true); setError(''); setSent('');
     try {
-      if (route.via === 'open-media') {
-        const comment = await addPostComment(post.id, clientId.current, text);
+      if (route.via === 'open-media' || route.via === 'web') {
+        const comment = await (route.via === 'web' ? addWebItemComment(route.url, clientId.current, text) : addPostComment(post.id, clientId.current, text));
         setComments((current) => [...(current ?? []), comment]);
       } else if (route.via === 'network') {
         await interactOnNetwork(post.id, route.target, { kind: 'comment', text, idempotencyKey: clientId.current });

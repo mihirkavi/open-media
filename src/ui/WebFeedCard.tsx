@@ -13,14 +13,16 @@ import { Text } from './Text';
 import { TranslationNote, useTranslation } from './useTranslation';
 import { VerifiedTick } from './VerifiedTick';
 import { OriginalLink } from './OriginalLink';
+import { PostActions } from './PostActions';
 
 /**
  * An item from a web feed the viewer follows (ADR 0024), laid out like a news card: the site's icon
  * and name, the lead image, the headline, a short excerpt, and the way to the publisher. Only the
- * excerpt is shown; the article is read on the publisher's site. Feeds served from a major news
+ * excerpt is shown; the article is read on the publisher's site. People like, comment on and
+ * reshare it in Open Media, under the same icons as any post. Feeds served from a major news
  * outlet's or weather service's own domain carry the blue tick, labelled as an official feed.
  */
-export function WebFeedCard({ post, mode, lensContext }: { post: SocialPost; mode: FeedMode | FeedLens; lensContext?: LensContext }) {
+export function WebFeedCard({ post, mode, lensContext, signedIn = false }: { post: SocialPost; mode: FeedMode | FeedLens; lensContext?: LensContext; signedIn?: boolean }) {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
   const feed = post.webFeed!;
   const [expanded, setExpanded] = useState(false);
@@ -58,10 +60,12 @@ export function WebFeedCard({ post, mode, lensContext }: { post: SocialPost; mod
     </View>
     <TranslationNote note={translation.note} />
     {byline ? <Text numberOfLines={1} style={styles.byline}>{byline}</Text> : null}
-    <View style={styles.footer}>
+    <PostActions post={post} signedIn={signedIn}>
+      <View style={styles.footer}>
       {articleUrl ? <OriginalLink url={articleUrl} label={`${feed.audio ? 'Listen' : 'Read'} on ${articleHost}`} accessibilityLabel={`Read the full ${feed.audio ? 'episode' : feed.alert ? 'alert' : 'article'} on ${articleHost}`} /> : null}
       <Pressable accessibilityRole="button" accessibilityState={{ expanded }} onPress={() => setExpanded((value) => !value)} style={styles.why}><Text style={styles.whyText}>Why this?</Text></Pressable>
-    </View>
+      </View>
+    </PostActions>
     {expanded ? <View style={styles.explanation}>
       <Text style={styles.explanationTitle}>Why you’re seeing this</Text>
       {explanation.used.map((item) => <Text key={item} style={styles.explanationItem}>✓ {item}</Text>)}
@@ -142,7 +146,7 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   excerptAlone: { marginTop: 12, color: colors.text, fontSize: 16, lineHeight: 23.5 },
   byline: { marginTop: 8, color: colors.textTertiary, fontSize: 12 },
   // The same bottom-right group as every post: the original, then Why this?
-  footer: { marginTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 14 },
+  footer: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 14 },
   why: { minHeight: 32, justifyContent: 'center' },
   whyText: { color: colors.textSecondary, fontSize: 12, textDecorationLine: 'underline' },
   alert: { marginTop: 14, flexDirection: 'row', gap: 12, padding: 14, borderRadius: 14, backgroundColor: colors.chrome },

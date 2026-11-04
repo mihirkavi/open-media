@@ -82,3 +82,16 @@ At the owner's request, `src/domain/webFeedDirectory.ts` lists the official feed
   - Weather feeds are official alerts and warnings (NWS for US states and territories, Met Office for the UK), not forecasts. NWS alert links point at the NWS API record; some read better on weather.gov.
   - Feeds that need a login, a paywall token or cookies are not supported.
   - Folders in OPML are flattened on import.
+
+## Addendum (2026-11-03): likes, comments and reshares on web feed items
+
+Web feed items now carry the Feed's comment, reshare and like icons, acted on in Open Media
+(migration `20261116120000_web_item_interactions.sql`). An item is keyed by its article link:
+https only, with the #fragment and tracking parameters (`utm_*`, `fbclid` and similar) removed, so
+everyone following a feed with that article meets in one place. Nothing is sent to the publisher.
+The rules match Open Media posts: acting needs an account and a profile; counts and comments are
+readable signed out; comments are 1 to 1,000 characters, idempotent per draft, and share the
+60-an-hour limit with post comments; comments by people the viewer blocked or can't see are left
+out. A reshare is counted, as for posts; it doesn't place the item in anyone's Feed. Following a
+feed of your own stays in Search ("follow theverge.com", a pasted feed address, or OPML), now
+also suggested on the empty Search page.

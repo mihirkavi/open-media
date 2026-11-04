@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { applyInteraction, engagementFromRecord, interactionLabel, interactionRoute, interactionTarget, postCommentFromRecord } from './postInteractions';
+import { applyInteraction, engagementFromRecord, interactionLabel, interactionRoute, interactionTarget, postCommentFromRecord, webItemUrl } from './postInteractions';
 import { SocialPost } from './posts';
 import { socialPostFromPublic } from './publicPosts';
 
@@ -82,4 +82,14 @@ test('icons say what a tap does', () => {
   assert.equal(interactionLabel('like', engagement, { via: 'open-media' }), 'Liked, 1 like');
   assert.equal(interactionLabel('reshare', engagement, { via: 'open', url: 'https://peakd.com/@ada/x', name: 'Hive' }), '0 reshares. Opens the post on Hive');
   assert.equal(interactionLabel('comment', engagement, { via: 'network', network: 'farcaster', target: { network: 'farcaster', fid: 1, hash: castHash }, handle: '@me' }), 'Comments on Farcaster as @me, 1 comment');
+});
+
+test('web feed items are acted on in Open Media, keyed by their article link without tracking', () => {
+  const item = post('rss', 'guid-1', 'rss:news.example.test', 'https://News.Example.test/story?id=7&utm_source=rss&fbclid=abc#top');
+  assert.equal(webItemUrl(item), 'https://news.example.test/story?id=7');
+  assert.deepEqual(interactionRoute(item, 'like', { signedIn: true, connected: {} }), { via: 'web', url: 'https://news.example.test/story?id=7' });
+  assert.deepEqual(interactionRoute(item, 'like', { signedIn: false, connected: {} }), { via: 'sign-in' });
+  assert.equal(interactionRoute(item, 'comment', { signedIn: false, connected: {} }).via, 'web', 'comments can be read signed out');
+  assert.equal(webItemUrl(post('rss', 'guid-2', 'rss:x', 'http://insecure.example.test/a')), undefined, 'only https links');
+  assert.equal(webItemUrl(post('farcaster', '0x' + 'a'.repeat(40), 'farcaster:1', 'https://warpcast.com/x')), undefined, 'only web feed items');
 });

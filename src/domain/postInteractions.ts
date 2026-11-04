@@ -44,9 +44,29 @@ export function interactionTarget(post: SocialPost): InteractionTarget | undefin
   }
 }
 
+/**
+ * The key a web feed item's likes and comments are kept under (ADR 0024 §8): its article link,
+ * https only, with the #fragment and tracking parameters (utm_*, fbclid and the like) removed, so
+ * the same article shared with different tracking still meets in one place.
+ */
+export function webItemUrl(post: SocialPost): string | undefined {
+  if (post.provenance.connectorId !== 'rss') return undefined;
+  const url = safeHttpsUrl(post.provenance.canonicalURL);
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url);
+    parsed.hash = '';
+    for (const key of [...parsed.searchParams.keys()]) if (/^(utm_|mc_|_hs|ga_)|^(fbclid|gclid|dclid|msclkid|igshid|ref|ref_src|cmpid|ocid|at_medium|at_campaign)$/i.test(key)) parsed.searchParams.delete(key);
+    parsed.hostname = parsed.hostname.toLowerCase();
+    const text = parsed.toString();
+    return text.length <= 2048 ? text : undefined;
+  } catch { return undefined; }
+}
+
 /** What tapping an action icon does for this post and person. */
 export type InteractionRoute =
   | { via: 'open-media' }
+  | { via: 'web'; url: string }
   | { via: 'sign-in' }
   | { via: 'network'; network: NetworkId; target: InteractionTarget; handle: string }
   | { via: 'open'; url: string; name: string }
@@ -58,6 +78,9 @@ export function interactionRoute(post: SocialPost, kind: InteractionKind, viewer
   // Comments on Open Media posts can be read signed out; writing one needs an account.
   if (source === 'open-media') return viewer.signedIn || kind === 'comment' ? { via: 'open-media' } : { via: 'sign-in' };
   if (post.event) return { via: 'none' };
+  // Web feed items are liked, commented on and reshared in Open Media, keyed by their article link.
+  const item = webItemUrl(post);
+  if (item) return viewer.signedIn || kind === 'comment' ? { via: 'web', url: item } : { via: 'sign-in' };
   const network = source in networks ? source as NetworkId : undefined;
   const handle = network ? viewer.connected[network] : undefined;
   const target = interactionTarget(post);
