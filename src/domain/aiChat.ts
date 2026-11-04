@@ -95,3 +95,37 @@ export function looksLikeAsk(text: string): boolean {
   if (!words) return false;
   return /\?\s*$/.test(words) || askStarts.test(words) || words.split(/\s+/).length >= 7;
 }
+
+/** Your message with this id, and the answer that followed it, when the chat has them. */
+export function foundIn(records: AiRecord[], clientId: string): AiRecord[] | undefined {
+  const at = records.findIndex((record) => record.role === 'user' && record.meta?.clientId === clientId);
+  if (at < 0) return undefined;
+  const next = records.findIndex((record, index) => index > at && record.role === 'user');
+  return records.slice(at, next < 0 ? undefined : next);
+}
+
+/**
+ * Sends one AI message, and when the answer is lost on the way back (a dropped connection, a
+ * timeout, a server error) looks for it in the chat a few times before calling it not sent. A
+ * refusal from the service (4xx: too long, too many messages) is final and shown as it is.
+ */
+export async function sendRecovering(
+  send: () => Promise<AiRecord[]>,
+  clientId: string | undefined,
+  load: () => Promise<AiRecord[]>,
+  wait: (ms: number) => Promise<void>,
+  delays: number[] = [0, 2000, 4000, 8000],
+): Promise<AiRecord[]> {
+  try {
+    return await send();
+  } catch (error) {
+    const status = (error as { status?: number }).status;
+    if (!clientId || (status !== undefined && status < 500)) throw error;
+    for (const delay of delays) {
+      if (delay) await wait(delay);
+      const found = foundIn(await load().catch(() => []), clientId);
+      if (found) return found;
+    }
+    throw error;
+  }
+}

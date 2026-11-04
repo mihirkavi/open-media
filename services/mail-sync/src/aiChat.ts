@@ -98,12 +98,17 @@ export interface AiToolkit {
   used: string[];
   /** The changes the model proposed in this answer, which the person hasn't approved yet. */
   pending?: PendingChange[];
+  /** The changes actually made to the person's account while answering, by tool name. */
+  changed?: string[];
   /** Carries out an approved change. */
   run(name: string, args: Record<string, unknown>): Promise<string>;
 }
 export interface PendingChange { name: string; args: Record<string, unknown> }
-/** At most this many changes wait for one yes. */
-export const maxPending = 12;
+/** At most this many changes wait for one yes (“add these 25 feeds” is one yes). */
+export const maxPending = 30;
+/** Approved changes run a few at a time, and one that hangs gives up rather than stalling the rest. */
+const changeConcurrency = 4;
+const changeTimeoutMs = 20_000;
 
 /** Where the conversation and keys live; the Worker implements it with the person's own token. */
 export interface AiStore {
@@ -283,6 +288,14 @@ export async function chat(input: unknown, store: AiStore, env: AiChatEnv, run: 
   if (!raw.trim()) throw new UserFacingError('Write a message first.');
   if (raw.length > maxMessageLength) throw new UserFacingError(`Messages to the AI can be up to ${maxMessageLength.toLocaleString('en-US')} characters.`);
   const reply = (body: string, extra: Partial<NewAiRecord> = {}): NewAiRecord => ({ role: 'assistant', body, source: 'chat', provider: 'open-media', ...extra });
+  // The app names each message, so sending it again (a retry after a dropped connection) returns
+  // what the first send added instead of asking, or changing anything, twice.
+  const clientId = clientIdOf(input);
+  if (clientId) {
+    const earlier = answeredBefore(await store.history(historyTurns * 2), clientId);
+    if (earlier) return earlier;
+  }
+  const tagged = clientId ? { clientId } : undefined;
 
   const found = findKeys(raw);
   if (found.length) {
@@ -293,7 +306,7 @@ export async function chat(input: unknown, store: AiStore, env: AiChatEnv, run: 
     await store.saveSettings({ provider: first });
     const shown = withoutKeys(raw, found);
     return store.append([
-      { role: 'user', body: shown, source: 'chat', meta: { redacted: true } },
+      { role: 'user', body: shown, source: 'chat', meta: { redacted: true, ...tagged } },
       reply(`Saved ${names}. It’s encrypted, and I’ll never show it again. From now on ${providers[first].name} answers here, using ${providers[first].model}. Say “use Llama” to go back to the free model, or “forget my ${providers[first].name} key” to remove it.`),
     ]);
   }
@@ -303,7 +316,7 @@ export async function chat(input: unknown, store: AiStore, env: AiChatEnv, run: 
   const keys = openKeys(stored, env);
   const hints = new Map<ProviderId, string>(stored.map((key) => [key.provider, key.hint]));
   const settings = await store.settings();
-  const asked: NewAiRecord = { role: 'user', body: raw.trim(), source: 'chat' };
+  const asked: NewAiRecord = { role: 'user', body: raw.trim(), source: 'chat', ...(tagged ? { meta: tagged } : {}) };
 
   if (intent.kind === 'forget') {
     const gone = intent.provider === 'all' ? [...hints.keys()] : hints.has(intent.provider as ProviderId) ? [intent.provider as ProviderId] : [];
@@ -336,13 +349,18 @@ export async function chat(input: unknown, store: AiStore, env: AiChatEnv, run: 
   if (proposed.length && agrees(raw) && store.toolkit) {
     const toolkit = store.toolkit(raw);
     // Every change proposed in that answer, in order: “add these five feeds” is one yes.
-    const outcomes: string[] = [];
-    for (const change of proposed) {
-      try { outcomes.push(`${change.name}: ${(await toolkit.run(change.name, change.args)).slice(0, 1500)}`); } catch (error) { outcomes.push(`${change.name}: It didn’t work: ${error instanceof Error ? error.message : 'unknown error'}`); }
-    }
+    // A few at a time, each with its own time limit, so twenty feeds finish well inside one request.
+    const results = await inBatches(proposed, changeConcurrency, async (change) => {
+      try { return { change, ok: true, text: (await withTimeout(toolkit.run(change.name, change.args), changeTimeoutMs)).slice(0, 1500) }; }
+      catch (error) { return { change, ok: false, text: error instanceof Error ? error.message : 'unknown error' }; }
+    });
+    const outcomes = results.map((result) => `${result.change.name}: ${result.ok ? result.text : `It didn’t work: ${result.text}`}`);
     const told = [...messages.slice(0, -1), { role: 'user' as const, content: `${raw}\n\n[Open Media carried out the ${proposed.length > 1 ? `${proposed.length} changes` : 'change'} you approved. Results:\n${outcomes.join('\n').slice(0, 6000)}] Say briefly and plainly what changed (and anything that didn’t work), and how to undo it if that’s possible.` }];
-    const text = await run(route, told, env).catch(() => '') || 'Done.';
-    return store.append([asked, reply(text, { provider: route.provider, model: route.model, meta: { used: toolkit.used, actions: toolkit.actions } })]);
+    // What didn't work waits for another yes, so “yes” tries just those again.
+    const retry = results.filter((result) => !result.ok).map((result) => result.change);
+    const summary = await run(route, told, env).catch(() => '') || plainOutcome(results);
+    const text = retry.length ? `${summary}\n\nSay yes to try ${retry.length === 1 ? 'the one that didn’t work' : `the ${retry.length} that didn’t work`} again.` : summary;
+    return store.append([asked, reply(text, { provider: route.provider, model: route.model, meta: { used: toolkit.used, actions: toolkit.actions, ...(retry.length ? { pending: retry } : {}) } })]);
   }
   // Fresh tools for each attempt, so a failed attempt's actions never carry over.
   const kit = () => store.toolkit?.(raw);
@@ -353,9 +371,12 @@ export async function chat(input: unknown, store: AiStore, env: AiChatEnv, run: 
     if (!text) throw new Error('empty');
     return store.append([asked, reply(text, { provider: route.provider, model: route.model, meta: done(first) })]);
   } catch (error) {
-    if (error instanceof UserFacingError) throw error;
     // Which provider failed and how, never what was asked.
     console.warn(JSON.stringify({ event: 'ai_chat_failed', provider: route.provider, status: (error as { statusCode?: number })?.statusCode, error: String((error as Error)?.message ?? error).slice(0, 300) }));
+    // Changes already made are never lost to a late failure, and never made twice by a retry:
+    // the message is kept, with what changed, instead of coming back as not sent.
+    if (first?.changed?.length) return store.append([asked, reply(`Done so far: ${describeChanged(first.changed)}. I couldn’t finish my answer, so ask me to check what changed, or carry on.`, { provider: route.provider, model: route.model, meta: done(first) })]);
+    if (error instanceof UserFacingError) throw error;
     if (route.provider === 'built-in') {
       if (usedUp(error)) return store.append([asked, reply(usedUpReply)]);
       throw new UserFacingError('The AI didn’t answer. Try again.');
@@ -369,6 +390,70 @@ export async function chat(input: unknown, store: AiStore, env: AiChatEnv, run: 
     if (!text) throw new UserFacingError(`${providers[route.provider].name} ${providerProblem(error)}, and the built-in AI didn’t answer either. Try again.`);
     return store.append([asked, reply(text, { provider: 'built-in', model: builtInModel, meta: { fallbackFrom: route.provider, reason: providerProblem(error), ...done(second) } })]);
   }
+}
+
+/** The app's own name for a message, when it sent one: letters, digits and dashes only. */
+export function clientIdOf(input: unknown): string | undefined {
+  const value = (input as { clientId?: unknown })?.clientId;
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{6,80}$/.test(value) ? value : undefined;
+}
+
+/** What an earlier send of this same message added, when it already went through. */
+export function answeredBefore(history: AiRecord[], clientId: string): AiRecord[] | undefined {
+  const at = history.findIndex((record) => record.role === 'user' && record.meta?.clientId === clientId);
+  if (at < 0) return undefined;
+  const next = history.findIndex((record, index) => index > at && record.role === 'user');
+  return history.slice(at, next < 0 ? undefined : next);
+}
+
+/** Runs work over items, at most `limit` at once, keeping the items' order in the results. */
+export async function inBatches<T, R>(items: T[], limit: number, work: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const lane = async () => { while (next < items.length) { const index = next++; results[index] = await work(items[index]); } };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, lane));
+  return results;
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('It took too long. Try that one again.')), ms); });
+  return Promise.race([promise, late]).finally(() => clearTimeout(timer));
+}
+
+const changeNames: Record<string, [string, string]> = {
+  follow_web_feed: ['feed followed', 'feeds followed'],
+  unfollow_web_feed: ['feed unfollowed', 'feeds unfollowed'],
+  follow: ['person followed', 'people followed'],
+  unfollow: ['person unfollowed', 'people unfollowed'],
+};
+
+/** “3 feeds followed and 1 other change”, from tool names. */
+export function describeChanged(names: string[]): string {
+  const counts = new Map<string, number>();
+  for (const name of names) counts.set(name, (counts.get(name) ?? 0) + 1);
+  const parts: string[] = [];
+  let other = 0;
+  for (const [name, count] of counts) {
+    const label = changeNames[name];
+    if (label) parts.push(`${count} ${count === 1 ? label[0] : label[1]}`);
+    else other += count;
+  }
+  if (other) parts.push(parts.length ? `${other} other change${other === 1 ? '' : 's'}` : `${other} change${other === 1 ? '' : 's'}`);
+  return parts.join(' and ');
+}
+
+/** When the model can't summarise approved changes, the person still gets a plain account. */
+export function plainOutcome(results: { change: PendingChange; ok: boolean; text: string }[]): string {
+  const made = results.filter((result) => result.ok).map((result) => result.change.name);
+  const failed = results.filter((result) => !result.ok);
+  const lines = [made.length ? `Done: ${describeChanged(made)}.` : 'None of those changes went through.'];
+  for (const result of failed.slice(0, 10)) {
+    const target = result.change.args.url ?? result.change.args.handle ?? result.change.args.feed ?? '';
+    lines.push(`- ${target ? `${String(target).slice(0, 120)}: ` : ''}${result.text.slice(0, 200)}`);
+  }
+  if (failed.length > 10) lines.push(`- and ${failed.length - 10} more didn’t work.`);
+  return lines.join('\n');
 }
 
 /** The changes an earlier answer proposed; answers saved before several were allowed hold one. */

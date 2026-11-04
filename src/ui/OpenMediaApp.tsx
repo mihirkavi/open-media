@@ -334,10 +334,11 @@ export function OpenMediaApp({
     return onAiChatChanged(refreshAi);
   }, [refreshAi]);
   const sendMessage = useCallback(
-    async (conversationId: string, body: string, replyTo?: Message) => {
+    async (conversationId: string, body: string, replyTo?: Message, clientId?: string) => {
       if (isAiConversation({ id: conversationId })) {
-        const added = await sendAiMessage(body);
-        setAiRecords((current) => [...(current ?? []), ...added]);
+        const added = await sendAiMessage(body, clientId);
+        // A reply found after a dropped connection may already be in the chat from a refresh.
+        setAiRecords((current) => [...(current ?? []).filter((record) => !added.some((other) => other.id === record.id)), ...added]);
         setAiActions(added.flatMap((record) => (Array.isArray(record.meta?.actions) ? (record.meta.actions as AiAction[]) : [])));
         // A change to the algorithm made from the chat shows in the Feed at once.
         if (added.some((record) => Array.isArray(record.meta?.used) && (record.meta.used as string[]).some((name) => /feed_lens$/.test(name)))) lenses.reload(lenses.tuneBase.id);

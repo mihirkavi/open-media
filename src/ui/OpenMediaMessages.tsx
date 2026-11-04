@@ -38,7 +38,7 @@ interface Props {
   messageMode: MessageMode;
   blockedUserIds: string[];
   onRetry: () => Promise<void>;
-  onSend: (conversationId: string, body: string, replyTo?: Message) => Promise<void>;
+  onSend: (conversationId: string, body: string, replyTo?: Message, clientId?: string) => Promise<void>;
   onSearchProfiles: (query: string) => Promise<Person[]>;
   onStartConversation: (personId: string) => Promise<string>;
   /** Sends a new email and returns the conversation it lands in. */
@@ -468,7 +468,7 @@ function MessageThread({
   ask?: { text: string; at: number };
   /** Put the cursor in the reply box when the conversation was chosen, so typing can start at once. */
   focusOnOpen?: boolean;
-  onSend: (conversationId: string, body: string, replyTo?: Message) => Promise<void>;
+  onSend: (conversationId: string, body: string, replyTo?: Message, clientId?: string) => Promise<void>;
   onSetBlocked: (personId: string, blocked: boolean) => Promise<void>;
   onReport: (
     conversationId: string,
@@ -535,7 +535,8 @@ function MessageThread({
   const deliver = async (item: PendingMessage) => {
     setPending((items) => items.map((other) => (other.id === item.id ? { ...other, failed: undefined } : other)));
     try {
-      await onSend(item.conversationId, item.body, item.replyTo);
+      // The bubble's id names the message, so tapping “try again” never sends it twice.
+      await onSend(item.conversationId, item.body, item.replyTo, item.id);
       setPending((items) => items.filter((other) => other.id !== item.id));
     } catch (reason) {
       const failed = reason instanceof Error ? reason.message : "Message could not be sent.";
@@ -544,7 +545,7 @@ function MessageThread({
   };
   const send = (text: string) => {
     // A quote only threads within its own channel.
-    const item: PendingMessage = { id: `pending-${Date.now()}`, threadId: conversation.id, conversationId: via.id, body: text, replyTo: replyTo?.conversationId === via.id || !channels.length ? replyTo : undefined };
+    const item: PendingMessage = { id: `pending-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, threadId: conversation.id, conversationId: via.id, body: text, replyTo: replyTo?.conversationId === via.id || !channels.length ? replyTo : undefined };
     // The stored copy replaces this bubble in place, without moving in a second time.
     sentBodies.add(item.body);
     setReplyTo(undefined);

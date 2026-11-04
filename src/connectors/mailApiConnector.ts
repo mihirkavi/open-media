@@ -175,7 +175,8 @@ export async function request<T = unknown>(path: string, init: { method?: string
   }
   const payload = await response.json().catch(() => ({})) as T & { error?: string | { message?: string } };
   // Mail routes send { error: "…" }; agent routes send { error: { code, message } }.
-  if (!response.ok) throw new Error((typeof payload.error === 'string' ? payload.error : payload.error?.message) ?? fallbackError);
+  // The status rides along, so a caller can tell a refusal (4xx) from a server that failed.
+  if (!response.ok) throw Object.assign(new Error((typeof payload.error === 'string' ? payload.error : payload.error?.message) ?? fallbackError), { status: response.status });
   return payload;
 }
 

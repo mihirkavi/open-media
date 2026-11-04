@@ -1,5 +1,5 @@
 import { getAPIAccessToken } from '../auth/supabase';
-import { AiRecord } from '../domain/aiChat';
+import { AiRecord, sendRecovering } from '../domain/aiChat';
 import { request } from './mailApiConnector';
 
 /**
@@ -12,9 +12,30 @@ export async function loadAiMessages(): Promise<AiRecord[]> {
   return (await request<{ messages: AiRecord[] }>('/v1/me/ai/messages?limit=300', {}, 'Could not load your AI chat.')).messages;
 }
 
-/** Sends one message and returns what was added: yours (with any key hidden) and the answer. */
-export async function sendAiMessage(text: string): Promise<AiRecord[]> {
-  return (await request<{ messages: AiRecord[] }>('/v1/me/ai/messages', { method: 'POST', body: { text } }, 'The AI didn’t answer. Try again.')).messages;
+/** Long enough for an answer that makes many changes (following twenty feeds) to finish. */
+const answerTimeoutMs = 180_000;
+
+/**
+ * Sends one message and returns what was added: yours (with any key hidden) and the answer.
+ * `clientId` names the message, so sending it again never asks or changes anything twice, and a
+ * reply lost on the way back (a dropped connection, a timeout) is found in the chat instead of
+ * the message showing as not sent.
+ */
+export async function sendAiMessage(text: string, clientId?: string): Promise<AiRecord[]> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), answerTimeoutMs);
+  try {
+    return await sendRecovering(
+      () => request<{ messages: AiRecord[] }>('/v1/me/ai/messages', { method: 'POST', body: clientId ? { text, clientId } : { text }, signal: controller.signal }, 'The AI didn’t answer. Try again.').then((result) => result.messages),
+      clientId,
+      loadAiMessages,
+      (ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)),
+    );
+  } catch (error) {
+    throw controller.signal.aborted ? new Error('The AI took too long to answer. Try again.') : error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** The session, when there is one, so an AI search is saved to the AI chat too. */

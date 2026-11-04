@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import test from 'node:test';
 
 import { encryptSecret } from './crypto.js';
-import { aiKeysKey, agrees, aiKeysSummary, AiRecord, AiSettings, AiStore, AiToolkit, builtInModel, chat, chooseAiModel, chooseRoute, conversationFor, findKeys, intentOf, NewAiRecord, ownSearchModel, pendingOf, recordSearch, removeAiKey, Route, saveAiKey, StoredKey, withoutKeys, withoutToolTalk } from './aiChat.js';
+import { aiKeysKey, agrees, answeredBefore, clientIdOf, describeChanged, inBatches, plainOutcome, aiKeysSummary, AiRecord, AiSettings, AiStore, AiToolkit, builtInModel, chat, chooseAiModel, chooseRoute, conversationFor, findKeys, intentOf, NewAiRecord, ownSearchModel, pendingOf, recordSearch, removeAiKey, Route, saveAiKey, StoredKey, withoutKeys, withoutToolTalk } from './aiChat.js';
 
 // Made-up keys in each provider's shape; none is real.
 const fake = {
@@ -172,6 +172,67 @@ test('one yes carries out every change proposed in that answer, and an older sin
   assert.deepEqual(done.meta?.used, ['tune_feed_lens', 'follow_web_feed']);
   assert.deepEqual(pendingOf({ name: 'tune_feed_lens', args: { key: 'relevant' } }), [{ name: 'tune_feed_lens', args: { key: 'relevant' } }]);
   assert.deepEqual(pendingOf('junk'), []);
+});
+
+test('a message sent again with the same id returns the first answer, and never asks or changes anything twice', async () => {
+  const memory = memoryStore();
+  let calls = 0;
+  const run = async () => { calls += 1; return `Answer ${calls}`; };
+  const first = await chat({ text: 'Plan my week', clientId: 'pending-1-abc' }, memory.store, env, run as never);
+  const again = await chat({ text: 'Plan my week', clientId: 'pending-1-abc' }, memory.store, env, run as never);
+  assert.equal(calls, 1);
+  assert.deepEqual(again.map((record) => record.id), first.map((record) => record.id));
+  assert.equal(first[0].meta?.clientId, 'pending-1-abc');
+  await chat({ text: 'Plan my week', clientId: 'pending-2-abc' }, memory.store, env, run as never);
+  assert.equal(calls, 2, 'a new message with the same words is a new question');
+  assert.equal(clientIdOf({ clientId: 'bad id!' }), undefined);
+  assert.equal(answeredBefore(memory.records, 'nope-123'), undefined);
+});
+
+test('twenty approved feeds run a few at a time, one that hangs gives up, and the ones that failed wait for another yes', async () => {
+  const memory = memoryStore();
+  let running = 0;
+  let most = 0;
+  const changes = Array.from({ length: 20 }, (_, index) => ({ name: 'follow_web_feed', args: { url: `site${index}.example` } }));
+  const kit = (): AiToolkit => {
+    const toolkit: AiToolkit = { tools: {}, actions: [], used: [], run: async (name, args) => {
+      running += 1; most = Math.max(most, running);
+      try {
+        if (args.url === 'site3.example') throw new Error('No feed there.');
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        toolkit.used.push(name);
+        return 'ok';
+      } finally { running -= 1; }
+    } };
+    return toolkit;
+  };
+  memory.store.toolkit = (latest) => { const toolkit = kit(); if (latest !== 'yes!') toolkit.pending = changes; return toolkit; };
+  const [, proposal] = await chat({ text: 'add all the tech feeds' }, memory.store, env, (async () => { memory.store.toolkit!('x'); return 'Shall I add all 20?'; }) as never);
+  assert.equal((proposal.meta?.pending as unknown[]).length, 20, 'more than twelve changes wait for one yes');
+  // The model can't summarise: the person still gets a plain account, not “not sent”.
+  const [, done] = await chat({ text: 'yes!' }, memory.store, env, (async () => { throw new Error('timeout'); }) as never);
+  assert.ok(most > 1 && most <= 4, `ran ${most} at once`);
+  assert.match(done.body, /19 feeds followed/);
+  assert.match(done.body, /site3\.example: No feed there\./);
+  assert.match(done.body, /Say yes to try the one that didn’t work again\./);
+  assert.deepEqual(done.meta?.pending, [{ name: 'follow_web_feed', args: { url: 'site3.example' } }]);
+});
+
+test('changes already made are kept when the answer fails late, instead of the message showing as not sent', async () => {
+  const memory = memoryStore();
+  memory.store.toolkit = () => ({ tools: {}, actions: [], used: ['follow_web_feed', 'follow_web_feed'], changed: ['follow_web_feed', 'follow_web_feed'], run: async () => '' });
+  let calls = 0;
+  const [asked, reply] = await chat({ text: 'yes, add them' }, memory.store, env, (async () => { calls += 1; throw Object.assign(new Error('slow'), { name: 'TimeoutError' }); }) as never);
+  assert.equal(calls, 1, 'no second attempt that could make the changes again');
+  assert.equal(asked.role, 'user');
+  assert.match(reply.body, /Done so far: 2 feeds followed\. I couldn’t finish my answer/);
+});
+
+test('helpers: batches keep order, and changes are counted in words', async () => {
+  assert.deepEqual(await inBatches([3, 1, 2], 2, async (n) => { await new Promise((resolve) => setTimeout(resolve, n)); return n * 10; }), [30, 10, 20]);
+  assert.equal(describeChanged(['follow_web_feed', 'tune_feed_lens', 'follow_web_feed']), '2 feeds followed and 1 other change');
+  assert.equal(describeChanged(['set_profile_fields']), '1 change');
+  assert.equal(plainOutcome([{ change: { name: 'follow', args: { handle: 'a' } }, ok: false, text: 'Not found.' }]), 'None of those changes went through.\n- a: Not found.');
 });
 
 test('app actions travel with the answer', async () => {

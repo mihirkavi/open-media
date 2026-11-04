@@ -1626,7 +1626,9 @@ export function assistantToolkit(env: AgentEnv, origin: string, account: Account
           return `Not changed yet.${preview ? ` Preview of the change: ${preview}` : ''} Tell the person exactly what will change and ask them to say yes.`;
         }
         used.push(name);
-        return output(await found.run(args));
+        const result = output(await found.run(args));
+        (kit.changed ??= []).push(name);
+        return result;
       },
     });
   }
