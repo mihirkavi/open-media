@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { boostLimits, builtInLenses, describeLensRules, describeScore, explainLensPost, forbiddenSignals, lensFormat, lensFormatV2, lensFromRequest, lensKeeps, LensError, lensScoreParts, looksLikeLensRequest, looksLikeTuneRequest, parseLens, rawLens, relevantLens, runLens, tuneLens } from './feedLenses';
+import { authorVolumes, boostLimits, keepOrder, builtInLenses, describeLensRules, describeScore, explainLensPost, forbiddenSignals, lensFormat, lensFormatV2, lensFromRequest, lensKeeps, LensError, lensScoreParts, looksLikeLensRequest, looksLikeTuneRequest, parseLens, rawLens, relevantLens, runLens, tuneLens } from './feedLenses';
 import { SocialPost } from './posts';
 
 const now = Date.parse('2026-10-27T12:00:00Z');
@@ -253,10 +253,10 @@ test('Leaning a newest-first lens ranks it by newness so the change can apply', 
 test('“Why this?” shows the post’s score under the person’s own weights, and changes when they tune', () => {
   const item = post('clip', { hours: 0, source: 'hive', kind: 'video', media: [{ kind: 'video', aspectRatio: 1, altText: '' }] });
   const plain = explainLensPost(item, relevantLens, { now });
-  assert.deepEqual(plain.scoring.slice(0, 2), ['Score 50 of 100', 'Newness 50 of 50 · Who you follow 0 of 30 · Your topics 0 of 20']);
+  assert.deepEqual(plain.scoring.slice(0, 2), ['Score 32 of 100', 'Fit 10 of 100 (who you follow 0 of 60, your topics 0 of 40) × Newness 100 of 100']);
   const tuned = tuneLens(tuneLens(relevantLens, 'less hive').lens, 'more videos').lens;
   const explained = explainLensPost(item, tuned, { now });
-  assert.deepEqual(explained.scoring.slice(0, 3), ['Score 47 of 100', 'Newness 50 of 50 · Who you follow 0 of 30 · Your topics 0 of 20', 'Less Hive ×0.75 · More videos ×1.25']);
+  assert.deepEqual(explained.scoring.slice(0, 3), ['Score 30 of 100', 'Fit 10 of 100 (who you follow 0 of 60, your topics 0 of 40) × Newness 100 of 100', 'Less Hive ×0.75 · More videos ×1.25']);
   assert.equal(explained.tuneHint, 'My Relevant has only newness and the network mix to go on: you follow no one yet and chose no topics. Follow people, or type “more about design” (any topic), and it will lift those posts. To change My Relevant, type “less hive” or “more videos” in Settings → Feed or in Search.');
   // Once there is something to go on, only the tuning words are shown.
   assert.equal(explainLensPost(item, tuned, { now, interests: ['design'] }).tuneHint, 'To change My Relevant, type “less hive” or “more videos” in Settings → Feed or in Search.');
@@ -281,4 +281,60 @@ test('Relevant spreads networks out, so one busy network can’t fill the top of
   for (let index = 2; index < 6; index += 1) assert.ok(!(top[index] === top[index - 1] && top[index] === top[index - 2]), top.join(', '));
   // Nobody is hidden: every post is still there.
   assert.equal(relevant.length, posts.length);
+});
+
+// ---------- ADR 0030: relevance × newness, busy authors, a still Feed ----------
+
+function feedItem(id: string, hours: number, site: string): SocialPost {
+  return { ...post(id, { hours, author: `rss:${site}`, source: 'rss' }), relevance: { followsAuthor: true, selectedInterestMatches: [] } };
+}
+
+test('A followed newsroom posting all day can’t bury a friend, a small blog or your topics', () => {
+  // What the owner saw: every New York Times headline counted as “someone you follow” and was new,
+  // so the top of Relevant was nothing but the Times.
+  const times = Array.from({ length: 40 }, (_, index) => feedItem(`nyt-${index}`, index * 0.4, 'nytimes.com'));
+  const blog = feedItem('blog', 9, 'simonwillison.net');
+  const friend = post('friend-post', { hours: 10, author: 'friend' });
+  const topic = post('topic-post', { hours: 5, body: 'Notes on #design systems', source: 'farcaster' });
+  const strangers = Array.from({ length: 6 }, (_, index) => post(`stranger-${index}`, { hours: index * 0.2, source: index % 2 ? 'hive' : 'lens' }));
+  const posts = [...times, blog, friend, topic, ...strangers];
+  const context = { now, followedAuthorIds: new Set(['friend']), interests: ['design'] };
+  const top = ids(runLens(posts, relevantLens, context)).slice(0, 6);
+  for (const id of ['friend-post', 'blog', 'topic-post']) assert.ok(top.includes(id), `${id} in the first six: ${top.join(', ')}`);
+  assert.ok(top.filter((id) => id.startsWith('nyt')).length <= 2, top.join(', '));
+  // The Times is still there, lower down, and nothing is hidden.
+  assert.equal(runLens(posts, relevantLens, context).length, posts.length);
+  // “Why this?” says why a headline counts less.
+  const why = explainLensPost(times[0], relevantLens, { ...context, authorVolumes: authorVolumes(posts, now) }).scoring.join('\n');
+  assert.match(why, /posted \d+ times in the last day, so each post counts \d+% of a follow/);
+});
+
+test('A brand-new post about nothing you chose no longer outranks a friend’s post from this morning', () => {
+  const posts = [post('stranger', { hours: 0 }), post('friend-post', { hours: 8, author: 'friend' })];
+  assert.equal(ids(runLens(posts, relevantLens, { now, followedAuthorIds: new Set(['friend']) }))[0], 'friend-post');
+  // But relevance alone can’t hold the top for days: a three-day-old follow falls below fresh posts.
+  const old = [post('stranger', { hours: 0 }), post('friend-post', { hours: 72, author: 'friend' })];
+  assert.equal(ids(runLens(old, relevantLens, { now, followedAuthorIds: new Set(['friend']) }))[0], 'stranger');
+});
+
+test('Relevant never shows the same author twice in a row while anyone else is available', () => {
+  const posts = [...Array.from({ length: 6 }, (_, index) => post(`many-${index}`, { hours: index * 0.1, author: 'many' })), post('a', { hours: 20 }), post('b', { hours: 30 })];
+  const authors = runLens(posts, relevantLens, { now, followedAuthorIds: new Set(['many']) }).map((item) => item.author.id);
+  for (let index = 1; index < 5; index += 1) assert.ok(authors[index] !== authors[index - 1], authors.join(', '));
+});
+
+test('The order is the same for the same posts and moment, whatever order they arrive in', () => {
+  const posts = [...Array.from({ length: 12 }, (_, index) => post(`p${index}`, { hours: index * 0.7, source: ['hive', 'lens', 'farcaster'][index % 3], author: `a${index % 4}` }))];
+  const context = { now, followedAuthorIds: new Set(['a1']) };
+  assert.deepEqual(ids(runLens([...posts].reverse(), relevantLens, context)), ids(runLens(posts, relevantLens, context)));
+});
+
+test('Posts on screen keep their places when slower networks or the next page arrive', () => {
+  const first = runLens([post('x', { hours: 1 }), post('y', { hours: 2 })], relevantLens, { now });
+  const later = runLens([post('x', { hours: 1 }), post('y', { hours: 2 }), post('fresh', { hours: 0, author: 'friend' })], relevantLens, { now, followedAuthorIds: new Set(['friend']) });
+  assert.equal(later[0].id, 'fresh');
+  assert.deepEqual(ids(keepOrder(ids(first), later)), [...ids(first), 'fresh']);
+  // A post that went away is dropped, the rest keep their order.
+  assert.deepEqual(ids(keepOrder(['gone', ...ids(first)], later)), [...ids(first), 'fresh']);
+  assert.deepEqual(ids(keepOrder([], later)), ids(later));
 });

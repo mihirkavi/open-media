@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform } from 'react-native';
 
-import { deleteMyLens, LensVersion, loadLensHistory, loadMyLenses, loadSharedLens, revertMyLens, saveMyLens } from '../data/lensService';
+import { deleteMyLens, LensVersion, loadLensHistory, loadMyInterests, loadMyLenses, loadSharedLens, revertMyLens, saveMyInterests, saveMyLens } from '../data/lensService';
 import { loadMyFollows } from '../data/peopleService';
 import { builtInLenses, FeedLens, LensContext, lensById, lensIdFromUrl, lensShareUrl, ownCopyId, parseLens } from '../domain/feedLenses';
 
@@ -62,7 +62,9 @@ export function useFeedLenses(viewerId?: string, fallback: 'relevant' | 'raw' = 
         // The account may already have answered; the newer version of each lens wins either way.
         setSaved((current) => mergeLenses(validLenses(stored.saved), current));
         if (stored.activeId) setActiveId(stored.activeId);
-        setInterests(Array.isArray(stored.interests) ? stored.interests.filter((item): item is string => typeof item === 'string').slice(0, 20) : []);
+        // The account may already have answered; keep its topics and add this device's.
+        const local = Array.isArray(stored.interests) ? stored.interests.filter((item): item is string => typeof item === 'string') : [];
+        setInterests((current) => [...new Set([...current, ...local])].slice(0, 20));
       }
     }).catch(() => undefined).finally(() => { loaded.current = true; });
   }, []);
@@ -76,6 +78,8 @@ export function useFeedLenses(viewerId?: string, fallback: 'relevant' | 'raw' = 
   // before signing in are added to the account.
   const savedRef = useRef(saved);
   savedRef.current = saved;
+  const interestsRef = useRef(interests);
+  interestsRef.current = interests;
   useEffect(() => {
     if (!viewerId) { setFollowed(new Set()); return; }
     let active = true;
@@ -85,6 +89,15 @@ export function useFeedLenses(viewerId?: string, fallback: 'relevant' | 'raw' = 
       sharedIds.current = new Set(mine.filter((item) => item.visibility === 'public').map((item) => item.lens.id));
       savedRef.current.filter((lens) => !known.has(lens.id)).forEach((lens) => { saveMyLens(lens).catch(() => undefined); });
       if (mine.length) setSaved((existing) => mergeLenses(existing, mine.map((item) => item.lens)));
+    }).catch(() => undefined);
+    // Topics live in the account (ADR 0030), so Relevant matches on every device. Topics chosen on
+    // this device before they were kept in the account are added to it once.
+    loadMyInterests().then((stored) => {
+      if (!active) return;
+      const local = interestsRef.current.filter((topic) => !stored.includes(topic));
+      const merged = [...stored, ...local].slice(0, 20);
+      setInterests(merged);
+      if (local.length) saveMyInterests(merged).catch(() => undefined);
     }).catch(() => undefined);
     loadMyFollows().then((follows) => {
       if (active) setFollowed(new Set(follows.following.filter((card) => !card.status || card.status === 'accepted').map((card) => card.id)));
@@ -144,8 +157,10 @@ export function useFeedLenses(viewerId?: string, fallback: 'relevant' | 'raw' = 
   }, [saved, viewerId]);
 
   const addInterests = useCallback((topics: string[]) => {
-    setInterests((existing) => [...new Set([...existing, ...topics.map((topic) => topic.toLocaleLowerCase())])].slice(0, 20));
-  }, []);
+    const next = [...new Set([...interestsRef.current, ...topics.map((topic) => topic.trim().toLocaleLowerCase()).filter(Boolean)])].slice(0, 20);
+    setInterests(next);
+    if (viewerId) saveMyInterests(next).then(setInterests).catch(() => undefined);
+  }, [viewerId]);
 
   const history = useCallback(async (id: string) => {
     if (!viewerId) throw new Error('Sign in to keep your lens’s history.');

@@ -90,7 +90,14 @@ export interface LensContext {
   followedAuthorIds?: ReadonlySet<string>;
   /** Topics the viewer chose. */
   interests?: string[];
+  /** The moment the Feed was ranked. Fixed per refresh so the order doesn't drift while someone reads. */
   now?: number;
+  /**
+   * How many posts each author published in the last day among the loaded posts (authorVolumes).
+   * Public data, not about the viewer: it keeps a publisher posting fifty headlines a day from
+   * outweighing a friend who posts once.
+   */
+  authorVolumes?: ReadonlyMap<string, number>;
 }
 
 /** Never readable by any lens; listed in every “Why this?”. */
@@ -289,7 +296,7 @@ export function matchingTopics(post: SocialPost, topics: string[]): string[] {
   });
 }
 
-interface Signals { interestsAllowed: boolean; followsAllowed: boolean; followed: ReadonlySet<string>; interests: string[]; now: number }
+interface Signals { interestsAllowed: boolean; followsAllowed: boolean; followed: ReadonlySet<string>; interests: string[]; now: number; volumes?: ReadonlyMap<string, number> }
 
 /** Followed when the viewer's follows say so, or the source itself marked the author as followed. */
 function isFollowed(post: SocialPost, signals: Signals) {
@@ -304,6 +311,7 @@ function permittedSignals(lens: FeedLens, context: LensContext): Signals {
     followed: lens.permissions.includes('follows') ? context.followedAuthorIds ?? new Set() : new Set(),
     interests: lens.permissions.includes('interests') ? unique([...lens.interests, ...(context.interests ?? [])]) : [],
     now: context.now ?? Date.now(),
+    volumes: context.authorVolumes,
   };
 }
 
@@ -337,14 +345,46 @@ export function lensKeeps(post: SocialPost, lens: FeedLens, context: LensContext
   return { kept: true };
 }
 
+/**
+ * How many posts a followed author can publish in a day before each one counts for less. A friend
+ * posting a few times a day keeps full weight; a newsroom posting sixty headlines gets about a
+ * quarter per headline, so following it never buries everyone else (1/√(volume ÷ this)).
+ */
+export const fullWeightPostsPerDay = 4;
+
+/** The floor every kept post's relevance starts from, so new voices can still surface when fresh. */
+export const relevanceFloor = 0.1;
+
+/**
+ * Counts each author's posts from the last day. The Feed passes this in the lens context, so every
+ * card's “Why this?” agrees with the order the runner produced.
+ */
+export function authorVolumes(posts: SocialPost[], now = Date.now()): Map<string, number> {
+  const volumes = new Map<string, number>();
+  for (const post of posts) {
+    if (now - createdAt(post) > 24 * 3_600_000) continue;
+    volumes.set(post.author.id, (volumes.get(post.author.id) ?? 0) + 1);
+  }
+  return volumes;
+}
+
+/** How much following this post's author counts, 0–1: full for most people, less per post for very busy authors. */
+function followWeight(post: SocialPost, signals: Signals) {
+  if (!isFollowed(post, signals)) return 0;
+  const volume = signals.volumes?.get(post.author.id) ?? 1;
+  return volume <= fullWeightPostsPerDay ? 1 : Math.sqrt(fullWeightPostsPerDay / volume);
+}
+
 /** Each objective's 0–1 value for one post. */
 function objectiveValues(post: SocialPost, signals: Signals) {
   const ageHours = Math.max(0, (signals.now - createdAt(post)) / 3_600_000);
   const engagement = post.engagement ? post.engagement.likes + post.engagement.reposts * 2 + post.engagement.replies : 0;
+  const topics = signals.interestsAllowed ? new Set([...matchingTopics(post, signals.interests), ...post.relevance.selectedInterestMatches]).size : 0;
   return {
     recency: Math.pow(0.5, ageHours / recencyHalfLifeHours),
-    follows: isFollowed(post, signals) ? 1 : 0,
-    interests: signals.interestsAllowed && (matchingTopics(post, signals.interests).length || post.relevance.selectedInterestMatches.length) ? 1 : 0,
+    follows: followWeight(post, signals),
+    // One topic you chose counts most of the way; two or more count fully.
+    interests: topics >= 2 ? 1 : topics === 1 ? 0.75 : 0,
     engagement: Math.min(1, Math.log1p(engagement) / Math.log1p(1000)),
     // Only meaningful when the lens may read follows; otherwise every author would count as new.
     discovery: signals.followsAllowed && !isFollowed(post, signals) ? 1 : 0,
@@ -364,7 +404,11 @@ export interface LensScoreParts {
   base: number;
   /** 0–200 after boosts. */
   score: number;
-  /** Each objective's points out of its share of 100. */
+  /** How well the post fits who you follow and what you chose, 0–100 (before newness). */
+  relevance: number;
+  /** How new the post is, 0–100 (halves every recencyHalfLifeHours). */
+  freshness: number;
+  /** Each relevance objective's points out of its share of 100, and newness's share of the score. */
   objectives: { key: keyof LensObjectives; label: string; points: number; max: number }[];
   /** Boosts that matched, with what they multiplied the score by. */
   boosts: { boost: LensBoost; rule: string; factor: number }[];
@@ -374,7 +418,13 @@ export interface LensScoreParts {
 
 const objectiveLabels: Record<Exclude<keyof LensObjectives, 'diversity'>, string> = { recency: 'Newness', follows: 'Who you follow', interests: 'Your topics', engagement: 'Public likes and reposts', discovery: 'New voices' };
 
-/** How a ranked lens scores one post: each objective's points and each boost's multiplier. */
+/**
+ * How a ranked lens scores one post (ADR 0030). Relevance and newness multiply instead of adding,
+ * like EdgeRank's affinity × decay: score = relevance^(1−r) × freshness^r, where r is newness's
+ * share of the lens's weights. A brand-new post nobody you follow wrote, about nothing you chose,
+ * can no longer outrank a friend's post from this morning just by being new; and an old post
+ * can't sit on top forever just by being relevant.
+ */
 export function lensScoreParts(post: SocialPost, lens: FeedLens, context: LensContext = {}): LensScoreParts {
   const signals = permittedSignals(lens, context);
   const values = objectiveValues(post, signals);
@@ -385,11 +435,17 @@ export function lensScoreParts(post: SocialPost, lens: FeedLens, context: LensCo
     discovery: objectives.discovery ?? 0,
   };
   const total = Object.values(weights).reduce((sum, weight) => sum + weight, 0) || 1;
-  const parts = (Object.keys(weights) as (keyof typeof weights)[]).filter((key) => weights[key] > 0).map((key) => ({ key, label: objectiveLabels[key], points: (values[key] * weights[key] / total) * 100, max: (weights[key] / total) * 100 }));
-  const base = parts.reduce((sum, part) => sum + part.points, 0);
+  const share = weights.recency / total;
+  const relevanceKeys = (Object.keys(weights) as (keyof typeof weights)[]).filter((key) => key !== 'recency' && weights[key] > 0);
+  const relevanceTotal = relevanceKeys.reduce((sum, key) => sum + weights[key], 0);
+  const fit = relevanceTotal ? relevanceKeys.reduce((sum, key) => sum + values[key] * weights[key], 0) / relevanceTotal : 1;
+  const relevance = relevanceTotal ? relevanceFloor + (1 - relevanceFloor) * fit : 1;
+  const freshness = values.recency;
+  const base = Math.pow(relevance, 1 - share) * Math.pow(freshness, share) * 100;
+  const parts = relevanceKeys.map((key) => ({ key, label: objectiveLabels[key], points: (values[key] * weights[key] / relevanceTotal) * 100, max: (weights[key] / relevanceTotal) * 100 }));
   const matched = lens.order === 'ranked' ? (lens.boosts ?? []).filter((boost) => boostMatches(post, boost)).map((boost) => ({ boost, rule: describeBoost(boost), factor: 1 + boost.weight / 2 })) : [];
   const factor = Math.min(boostLimits.max, Math.max(boostLimits.min, matched.reduce((product, item) => product * item.factor, 1)));
-  return { base, score: base * factor, objectives: parts, boosts: matched, factor };
+  return { base, score: base * factor, relevance: relevance * 100, freshness: freshness * 100, objectives: parts, boosts: matched, factor };
 }
 
 export function lensScore(post: SocialPost, lens: FeedLens, context: LensContext = {}): number {
@@ -398,29 +454,44 @@ export function lensScore(post: SocialPost, lens: FeedLens, context: LensContext
 
 /** How many of the latest posts count when spreading networks out. */
 const networkWindow = 3;
+/** How far ahead the re-rank looks for a better next post; scores only fall further down. */
+const lookAhead = 40;
 
-/** Orders posts through a lens: filters first, then newest first or by score with authors spread out. */
+/**
+ * Orders posts through a lens. A small pipeline, the shape large feeds use (candidates → filters →
+ * scoring → heuristics), with every step a pure function of the posts and the lens context:
+ *
+ * 1. Filters: the lens's own rules decide which posts are kept.
+ * 2. Scoring: each kept post gets one score from relevance and newness (lensScoreParts).
+ * 3. Heuristics (diversity): a greedy re-rank where each earlier post by the same author costs the
+ *    next one a share of its score (author fatigue), the same author never appears twice in a row
+ *    while anyone else is available, and one network can't take every slot in a run of three.
+ *
+ * Given the same posts and context it returns the same order on every device; ties fall back to
+ * newest first and then the post id.
+ */
 export function runLens(posts: SocialPost[], lens: FeedLens, context: LensContext = {}): SocialPost[] {
   const kept = posts.filter((post) => lensKeeps(post, lens, context).kept);
   if (lens.order === 'newest') return kept.sort(newestFirst);
-  const scored = kept.map((post) => ({ post, score: lensScore(post, lens, context) })).sort((a, b) => b.score - a.score || newestFirst(a.post, b.post));
+  const now = context.now ?? Date.now();
+  const scoring: LensContext = { ...context, now, authorVolumes: context.authorVolumes ?? authorVolumes(posts, now) };
+  const scored = kept.map((post) => ({ post, score: lensScore(post, lens, scoring) })).sort((a, b) => b.score - a.score || newestFirst(a.post, b.post));
   const diversity = lens.objectives.diversity;
   if (!diversity) return scored.map((item) => item.post);
-  // Greedy re-rank: each post already shown from the same author lowers the next one's score, and so
-  // does each of the last few posts from the same network, so the Feed alternates voices and one
-  // busy network can't fill a screen. Nobody is hidden; they only move down.
   const authorSeen = new Map<string, number>();
   const ordered: SocialPost[] = [];
   const remaining = [...scored];
+  const fatigue = 1 - diversity;
   while (remaining.length) {
     let best = 0;
     let bestScore = -Infinity;
     const recent = ordered.slice(-networkWindow).map((post) => post.provenance.connectorId);
-    // Looking ahead a bounded window keeps this fast on long feeds; scores only fall further down.
-    for (let index = 0; index < Math.min(remaining.length, 40); index += 1) {
+    const previousAuthor = ordered[ordered.length - 1]?.author.id;
+    for (let index = 0; index < Math.min(remaining.length, lookAhead); index += 1) {
       const { post, score } = remaining[index];
       const sameNetwork = recent.filter((source) => source === post.provenance.connectorId).length;
-      const adjusted = score * Math.pow(1 - diversity * 0.5, authorSeen.get(post.author.id) ?? 0) * Math.pow(1 - diversity, sameNetwork);
+      const repeat = post.author.id === previousAuthor ? 0.01 : 1;
+      const adjusted = score * repeat * Math.pow(fatigue, authorSeen.get(post.author.id) ?? 0) * Math.pow(1 - diversity, sameNetwork);
       if (adjusted > bestScore) { best = index; bestScore = adjusted; }
     }
     const [{ post }] = remaining.splice(best, 1);
@@ -428,6 +499,20 @@ export function runLens(posts: SocialPost[], lens: FeedLens, context: LensContex
     authorSeen.set(post.author.id, (authorSeen.get(post.author.id) ?? 0) + 1);
   }
   return ordered;
+}
+
+/**
+ * Keeps the Feed still while someone reads (ADR 0030). The posts already on screen keep their
+ * places; posts that arrive later (a slower network, the next page) are ranked among themselves
+ * and added below. A new ranking from the top happens only when asked for: a refresh, new posts
+ * shown, or another lens.
+ */
+export function keepOrder(previous: readonly string[], ranked: SocialPost[]): SocialPost[] {
+  if (!previous.length) return ranked;
+  const byId = new Map(ranked.map((post) => [post.id, post]));
+  const kept = previous.flatMap((id) => { const post = byId.get(id); return post ? [post] : []; });
+  const placed = new Set(kept.map((post) => post.id));
+  return [...kept, ...ranked.filter((post) => !placed.has(post.id))];
 }
 
 export interface LensExplanation {
@@ -447,9 +532,15 @@ export interface LensExplanation {
 export function describeScore(post: SocialPost, lens: FeedLens, context: LensContext = {}): string[] {
   if (lens.order === 'newest') return [`${lens.name} is newest first: posts have no score`];
   const parts = lensScoreParts(post, lens, context);
-  const lines = [`Score ${Math.round(parts.score)} of 100`, parts.objectives.map((part) => `${part.label} ${Math.round(part.points)} of ${Math.round(part.max)}`).join(' · ')];
+  const relevance = parts.objectives.length ? `Fit ${Math.round(parts.relevance)} of 100 (${parts.objectives.map((part) => `${part.label.toLocaleLowerCase()} ${Math.round(part.points)} of ${Math.round(part.max)}`).join(', ')})` : '';
+  const newness = lens.objectives.recency ? `Newness ${Math.round(parts.freshness)} of 100` : '';
+  const lines = [`Score ${Math.round(parts.score)} of 100`, [relevance, newness].filter(Boolean).join(' × ')];
+  // A busy author's posts each count for less, so say so where it happened.
+  const signals = permittedSignals(lens, context);
+  const volume = signals.volumes?.get(post.author.id) ?? 0;
+  if (isFollowed(post, signals) && volume > fullWeightPostsPerDay && lens.objectives.follows) lines.push(`${post.author.displayName} posted ${volume} times in the last day, so each post counts ${Math.round(Math.sqrt(fullWeightPostsPerDay / volume) * 100)}% of a follow`);
   if (parts.boosts.length) lines.push(`${parts.boosts.map((item) => `${item.rule} ×${formatFactor(item.factor)}`).join(' · ')}${parts.factor !== parts.boosts.reduce((product, item) => product * item.factor, 1) ? ` (capped at ×${formatFactor(parts.factor)})` : ''}`);
-  if (lens.objectives.diversity) lines.push('Then spread out so one author or network can’t fill the Feed');
+  if (lens.objectives.diversity) lines.push('Then spread out: the same author never twice in a row, and each further post by them counts less');
   return lines;
 }
 

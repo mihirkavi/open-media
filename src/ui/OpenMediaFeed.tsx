@@ -22,7 +22,7 @@ import { cleanPostMarkdown, looksLikeMarkdown, parseMarkdown, previewBlocks, tid
 import { crossPostVideo, discardPreparedVideo, draftCrossPostVideo, prepareVideo, PreparedVideo, uploadPostVideo, UploadedVideo, VideoError } from '../data/videoUpload';
 import { CrossPostOutcome, CrossPostVideo, destinationSummary, outcomeSummary, prepareCrossPost } from '../domain/crossPosting';
 import { NetworkId, networks, safeHttpsUrl, sourceName } from '../domain/networkPosts';
-import { FeedLens, LensContext, ownCopyId, relevantLens } from '../domain/feedLenses';
+import { authorVolumes, FeedLens, keepOrder, LensContext, ownCopyId, relevantLens } from '../domain/feedLenses';
 import { explainFeedPost, FeedMode, selectFeed, SocialPost } from '../domain/posts';
 import { formatBytes, formatDuration, maxVideoBytes, maxVideoSeconds } from '../domain/postVideo';
 import { formatRelativeTime, maxPostLength } from '../domain/publicPosts';
@@ -73,7 +73,29 @@ export function FeedView({ lens, lenses, onLensChange, lensContext, posts, loadi
   // Upcoming public events are part of the mixed Feed: the lens filters and ranks them with every
   // other post, so the person's own algorithm decides where (and whether) they appear.
   const events = useUpcomingEvents(Boolean(sources));
-  const ordered = useMemo(() => selectFeed(events.length ? [...posts, ...events.filter((event) => !posts.some((post) => post.id === event.id))] : posts, lens, lensContext), [posts, lens, lensContext, events]);
+  const candidates = useMemo(() => (events.length ? [...posts, ...events.filter((event) => !posts.some((post) => post.id === event.id))] : posts), [posts, events]);
+  // A still Feed (ADR 0030): the ranking clock is fixed until the reader asks for a new order (new
+  // posts shown, another lens, a refresh), and posts already on screen keep their places while
+  // slower networks and older pages arrive below them.
+  const [rankedAt, setRankedAt] = useState(() => Date.now());
+  const shownOrder = useRef<{ key: string; ids: string[] }>({ key: '', ids: [] });
+  // Web feeds the person follows count as follows everywhere, including “Why this?”'s hint.
+  const rankingContext = useMemo<LensContext>(() => {
+    const feeds = candidates.filter((post) => post.webFeed && post.relevance.followsAuthor).map((post) => post.author.id);
+    const followedAuthorIds = feeds.length ? new Set([...(lensContext?.followedAuthorIds ?? []), ...feeds]) : lensContext?.followedAuthorIds;
+    return { ...lensContext, followedAuthorIds, now: rankedAt, authorVolumes: authorVolumes(candidates, rankedAt) };
+  }, [lensContext, rankedAt, candidates]);
+  const orderKey = `${lens.id}:${lens.version}:${rankedAt}:${lensContext?.followedAuthorIds?.size ?? 0}:${(lensContext?.interests ?? []).join(',')}`;
+  const settled = !loading && !loadingMore;
+  const ordered = useMemo(() => {
+    const ranked = selectFeed(candidates, lens, rankingContext);
+    const previous = shownOrder.current.key === orderKey ? shownOrder.current.ids : [];
+    const next = keepOrder(previous, ranked);
+    // Until every source has answered the first time, the order may still settle.
+    shownOrder.current = { key: orderKey, ids: settled || previous.length ? next.map((post) => post.id) : [] };
+    return next;
+  }, [candidates, lens, rankingContext, orderKey, settled]);
+  const rerank = useCallback(() => setRankedAt(Date.now()), []);
   const unreachable = (sources ?? []).filter((item) => item.error);
   const sourceNames = sources ? sources.map((item) => sourceName(item.id)) : ['Open Media'];
   const subtitle = `Public posts from ${listFormat(sourceNames)}.${viewer ? '' : ' No account needed to read.'}`;
@@ -82,7 +104,7 @@ export function FeedView({ lens, lenses, onLensChange, lensContext, posts, loadi
   // the reader is at the very top, otherwise a pill offers them so nothing moves under the reader.
   const scroller = useRef<ScrollView>(null);
   const [atTop, setAtTop] = useState(true);
-  useEffect(() => { if (atTop && pendingCount && onShowPending) onShowPending(); }, [atTop, pendingCount, onShowPending]);
+  useEffect(() => { if (atTop && pendingCount && onShowPending) { onShowPending(); rerank(); } }, [atTop, pendingCount, onShowPending, rerank]);
   const canLoadMore = !loading && !loadingMore && !error && hasMore;
   const onScroll = ({ nativeEvent }: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = nativeEvent;
@@ -99,17 +121,18 @@ export function FeedView({ lens, lenses, onLensChange, lensContext, posts, loadi
     const timer = setTimeout(() => { extraPages.current.count += 1; onLoadMore(); }, 1500);
     return () => clearTimeout(timer);
   }, [lens.id, canLoadMore, ordered.length, posts.length, onLoadMore]);
-  const jumpToNew = () => { onShowPending?.(); scroller.current?.scrollTo({ y: 0, animated: true }); };
+  const jumpToNew = () => { onShowPending?.(); rerank(); scroller.current?.scrollTo({ y: 0, animated: true }); };
+  const retry = () => { rerank(); onRetry(); };
   // iOS moves focused fields above the keyboard through the scroll view's insets; Android (edge to edge) needs the screen to shrink.
   return <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'android' ? 'height' : undefined}>
   {pendingCount > 0 && !atTop ? <Pressable accessibilityRole="button" accessibilityLabel={`Show ${pendingCount} new ${pendingCount === 1 ? 'post' : 'posts'}`} onPress={jumpToNew} style={styles.newPosts}><Ionicons name="arrow-up" size={14} color={colors.surface} /><Text style={styles.newPostsText}>{pendingCount} new {pendingCount === 1 ? 'post' : 'posts'}</Text></Pressable> : null}
   <ScrollView ref={scroller} onScroll={onScroll} scrollEventThrottle={64} style={styles.screen} contentContainerStyle={styles.stream} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
     <View style={styles.header}><View style={styles.headerCopy}><Text style={styles.title}>Feed</Text><Text style={styles.subtitle}>{subtitle}</Text></View><FeedPicker value={lens.id} lenses={lenses} onChange={onLensChange} /></View>
     {showComposer ? <Composer viewer={viewer} open={composing} onOpenChange={onComposingChange} onPublished={onPublished} /> : null}
-    {!error && unreachable.length ? <View style={styles.sourceNotice}><Text accessibilityLiveRegion="polite" style={styles.sourceNoticeText}>{unreachable.map((item) => sourceName(item.id)).join(', ')} {unreachable.length === 1 ? 'isn’t' : 'aren’t'} loading right now. Everything else is up to date.</Text><Pressable accessibilityRole="button" onPress={onRetry} style={styles.sourceNoticeButton}><Text style={styles.statusButtonText}>Retry</Text></Pressable></View> : null}
-    {ordered.map((post) => <PostCard key={post.id} post={post} mode={lens} lensContext={lensContext} viewer={viewer} onDelete={onDeletePost} onReport={onReportPost} />)}
+    {!error && unreachable.length ? <View style={styles.sourceNotice}><Text accessibilityLiveRegion="polite" style={styles.sourceNoticeText}>{unreachable.map((item) => sourceName(item.id)).join(', ')} {unreachable.length === 1 ? 'isn’t' : 'aren’t'} loading right now. Everything else is up to date.</Text><Pressable accessibilityRole="button" onPress={retry} style={styles.sourceNoticeButton}><Text style={styles.statusButtonText}>Retry</Text></Pressable></View> : null}
+    {ordered.map((post) => <PostCard key={post.id} post={post} mode={lens} lensContext={rankingContext} viewer={viewer} onDelete={onDeletePost} onReport={onReportPost} />)}
     {loading || loadingMore ? <View style={styles.status}><Loader color={colors.text} /></View> : null}
-    {!loading && error ? <View style={styles.status}><Text accessibilityLiveRegion="assertive" style={styles.statusText}>{error}</Text><Pressable accessibilityRole="button" onPress={onRetry} style={styles.statusButton}><Text style={styles.statusButtonText}>Try again</Text></Pressable></View> : null}
+    {!loading && error ? <View style={styles.status}><Text accessibilityLiveRegion="assertive" style={styles.statusText}>{error}</Text><Pressable accessibilityRole="button" onPress={retry} style={styles.statusButton}><Text style={styles.statusButtonText}>Try again</Text></Pressable></View> : null}
     {!loading && !loadingMore && !error && !ordered.length ? <View style={styles.status}><Ionicons name="newspaper-outline" size={26} color={colors.textSecondary} /><Text style={styles.emptyTitle}>{posts.length ? `Nothing here fits ${lens.name}` : 'No public posts yet'}</Text><Text style={styles.statusText}>{posts.length ? `${lens.name} keeps only posts that match its rules. Choose Relevant or Raw to see everything, or older posts may fit.` : viewer ? 'Be the first to share something.' : 'Sign in to share the first one.'}</Text></View> : null}
     {canLoadMore ? <Pressable accessibilityRole="button" onPress={onLoadMore} style={[styles.statusButton, styles.loadMore]}><Text style={styles.statusButtonText}>Load older posts</Text></Pressable> : null}
   </ScrollView>

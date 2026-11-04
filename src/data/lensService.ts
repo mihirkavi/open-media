@@ -78,3 +78,15 @@ export async function revertMyLens(key: string, version: number): Promise<Stored
   const row = await rpc<LensRow>('open_media_revert_feed_lens', { p_key: key, p_version: version });
   return fromRow(row);
 }
+
+/** The topics the signed-in person chose for Relevant, kept in their account (ADR 0030). */
+export async function loadMyInterests(): Promise<string[]> {
+  const rows = await rpc<string[] | null>('open_media_my_feed_interests', {});
+  return Array.isArray(rows) ? rows.filter((item): item is string => typeof item === 'string') : [];
+}
+
+/** Replaces the signed-in person's topics; returns the cleaned list the account kept. */
+export async function saveMyInterests(interests: string[]): Promise<string[]> {
+  const rows = await rpc<string[] | null>('open_media_set_feed_interests', { p_interests: interests });
+  return Array.isArray(rows) ? rows : interests;
+}
