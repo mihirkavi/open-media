@@ -11,7 +11,7 @@
 import { Platform } from 'react-native';
 import type { Factor } from '@supabase/supabase-js';
 
-import { passkeyRelyingParty, passkeysSwitchedOffError, passwordProblem } from '../domain/passwordRules';
+import { passkeyRelyingParty, passkeysSwitchedOffError, passwordProblem, weakPasswordMessage } from '../domain/passwordRules';
 import { getSupabaseClient } from './supabase';
 
 function client() {
@@ -20,11 +20,11 @@ function client() {
   return supabase;
 }
 
-function friendly(error: { message?: string; code?: string } | null | undefined, fallback: string): Error {
+function friendly(error: { message?: string; code?: string; reasons?: string[] } | null | undefined, fallback: string): Error {
   const message = error?.message ?? '';
   if (error?.code === 'invalid_credentials' || /invalid login credentials/i.test(message)) return new Error('That email and password don’t match. Check them, or reset your password.');
   if (error?.code === 'email_not_confirmed' || /email not confirmed/i.test(message)) return new Error('Confirm your email first: enter the code we sent when you signed up, or sign up again to get a new one.');
-  if (error?.code === 'weak_password' || /password should be/i.test(message)) return new Error('Choose a longer password (at least 8 characters).');
+  if (error?.code === 'weak_password' || /password should (be|contain)/i.test(message)) return new Error(weakPasswordMessage((error as { reasons?: string[] } | null)?.reasons ?? (/contain/i.test(message) ? ['characters'] : ['length']), message));
   if (error?.code === 'over_email_send_rate_limit' || /rate limit|security purposes/i.test(message)) return new Error('Too many emails were sent just now. Wait a minute, then try again.');
   if (error?.code === 'same_password') return new Error('That is already your password. Choose a different one.');
   if (/otp|token|expired|invalid/i.test(message)) return new Error('That code is invalid or has expired. Request a new one and try again.');
@@ -89,6 +89,13 @@ export function passwordResetWaitingForPasskey(): boolean { return pendingNewPas
 
 /** Forgets a reset that was waiting for the passkey (for example after signing out). */
 export function forgetPendingPasswordReset(): void { pendingNewPassword = undefined; }
+
+/** Whether the signed-in person's account has a password (open_media_has_password; true or false only). */
+export async function hasPassword(): Promise<boolean> {
+  const { data, error } = await client().rpc('open_media_has_password');
+  if (error) throw friendly(error, 'Could not check your password.');
+  return data === true;
+}
 
 /** Sets or changes the signed-in person's password (accounts made with email codes can add one). */
 export async function setPassword(newPassword: string, email?: string): Promise<void> {

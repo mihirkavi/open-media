@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { getSupabaseClient } from '../auth/supabase';
-import { PasskeysSwitchedOff, addPasskey, listPasskeys, Passkey, passkeysSupportedHere, removePasskey, setPassword } from '../auth/accountSecurity';
+import { PasskeysSwitchedOff, addPasskey, hasPassword, listPasskeys, Passkey, passkeysSupportedHere, removePasskey, setPassword } from '../auth/accountSecurity';
 import { passwordProblem } from '../domain/passwordRules';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
@@ -30,6 +30,9 @@ export function SignInSecuritySettings() {
   useEffect(() => { getSupabaseClient()?.auth.getSession().then(({ data }) => setEmail(data.session?.user.email ?? undefined)).catch(() => undefined); }, []);
   const problem = passwordProblem(password, email);
 
+  // Unknown until checked; the button says "Set password" or "Change password" accordingly.
+  const [passwordSet, setPasswordSet] = useState<boolean>();
+  useEffect(() => { hasPassword().then(setPasswordSet).catch(() => undefined); }, []);
   const refresh = useCallback(async () => setPasskeys(await listPasskeys()), []);
   useEffect(() => { refresh().catch((reason) => setError(reason instanceof Error ? reason.message : 'Could not load your passkeys.')); }, [refresh]);
 
@@ -43,7 +46,7 @@ export function SignInSecuritySettings() {
     }
     finally { setBusy(''); }
   };
-  const savePassword = () => run('password', async () => { await setPassword(password, email); setPasswordValue(''); setEditingPassword(false); }, 'Password saved. You can now sign in with your email and password.');
+  const savePassword = () => run('password', async () => { await setPassword(password, email); setPasswordValue(''); setEditingPassword(false); setPasswordSet(true); }, passwordSet ? 'Password changed. Use the new one next time you sign in.' : 'Password saved. You can now sign in with your email and password.');
   const add = () => run('add', async () => { await addPasskey(deviceName()); await refresh(); }, 'Passkey added. From now on, signing in asks for it after your password or email code.');
   const remove = (passkey: Passkey) => run(`remove-${passkey.id}`, async () => { await removePasskey(passkey.id); setConfirmRemove(undefined); await refresh(); }, `Removed “${passkey.name}”.`);
 
@@ -54,15 +57,15 @@ export function SignInSecuritySettings() {
         <Ionicons name="key-outline" size={20} color={colors.text} />
         <View style={styles.grow}>
           <Text style={styles.rowTitle}>Password</Text>
-          <Text style={styles.hint}>Sign in on any device with {email ? email : 'your email'} and a password, instead of waiting for an email code.</Text>
+          <Text style={styles.hint}>{passwordSet ? `You can sign in on any device with ${email ?? 'your email'} and your password.` : `Sign in on any device with ${email ?? 'your email'} and a password, instead of waiting for an email code.`}</Text>
         </View>
-        {editingPassword ? null : <Pressable accessibilityRole="button" disabled={Boolean(busy)} onPress={() => { setError(''); setMessage(''); setEditingPassword(true); }} style={styles.small}><Text style={styles.smallText}>Set password</Text></Pressable>}
+        {editingPassword ? null : <Pressable accessibilityRole="button" disabled={Boolean(busy)} onPress={() => { setError(''); setMessage(''); setEditingPassword(true); }} style={styles.small}><Text style={styles.smallText}>{passwordSet ? 'Change password' : 'Set password'}</Text></Pressable>}
       </View>
       {editingPassword ? <View style={styles.block}>
-        <TextInput accessibilityLabel="New password" secureTextEntry autoCapitalize="none" autoComplete="new-password" textContentType="newPassword" value={password} onChangeText={setPasswordValue} onSubmitEditing={!problem && !busy ? savePassword : undefined} placeholder="New password (at least 8 characters)" placeholderTextColor={colors.textTertiary} style={styles.input} />
+        <TextInput accessibilityLabel="New password" secureTextEntry autoCapitalize="none" autoComplete="new-password" textContentType="newPassword" value={password} onChangeText={setPasswordValue} onSubmitEditing={!problem && !busy ? savePassword : undefined} placeholder={passwordSet ? 'New password' : 'Password (at least 8 characters)'} placeholderTextColor={colors.textTertiary} style={styles.input} />
         {password && problem ? <Text style={styles.hint}>{problem}</Text> : null}
         <View style={styles.actions}>
-          <Pressable accessibilityRole="button" disabled={Boolean(busy) || Boolean(problem)} onPress={savePassword} style={[styles.small, styles.smallOn, (Boolean(busy) || Boolean(problem)) && styles.disabled]}>{busy === 'password' ? <Loader color={colors.surface} /> : <Text style={styles.smallTextOn}>Save password</Text>}</Pressable>
+          <Pressable accessibilityRole="button" disabled={Boolean(busy) || Boolean(problem)} onPress={savePassword} style={[styles.small, styles.smallOn, (Boolean(busy) || Boolean(problem)) && styles.disabled]}>{busy === 'password' ? <Loader color={colors.surface} /> : <Text style={styles.smallTextOn}>{passwordSet ? 'Save new password' : 'Save password'}</Text>}</Pressable>
           <Pressable accessibilityRole="button" disabled={Boolean(busy)} onPress={() => { setEditingPassword(false); setPasswordValue(''); }} style={styles.small}><Text style={styles.smallText}>Cancel</Text></Pressable>
         </View>
       </View> : null}

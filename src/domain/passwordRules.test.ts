@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { passkeyRelyingParty, passkeysSwitchedOffError, passwordProblem } from './passwordRules';
+import { passkeyRelyingParty, passkeysSwitchedOffError, passwordProblem, weakPasswordMessage } from './passwordRules';
 
 test('passwords need 8 characters and fit the 72-byte hash limit', () => {
   assert.match(passwordProblem('short') ?? '', /at least 8/);
@@ -24,4 +24,13 @@ test('passkeys switched off on the server are recognised, other errors are not',
   assert.equal(passkeysSwitchedOffError('AuthApiError MFA enroll is disabled for WebAuthn mfa_webauthn_enroll_not_enabled'), true);
   assert.equal(passkeysSwitchedOffError('MFA verify is disabled for WebAuthn'), true);
   assert.equal(passkeysSwitchedOffError('NotAllowedError The operation either timed out or was not allowed'), false);
+});
+
+test('weak-password messages follow the server’s actual reasons', () => {
+  const groups = 'Password should contain at least one character of each: abcdefghijklmnopqrstuvwxyz, ABCDEFGHIJKLMNOPQRSTUVWXYZ, 0123456789, !@#$%^&*()_+-=[]{};\'\\:"|<>?,./`~.';
+  assert.equal(weakPasswordMessage(['characters'], groups), 'Include at least one of each: a lowercase letter, an uppercase letter, a number and a symbol (like ! @ # $).');
+  assert.equal(weakPasswordMessage(['characters'], 'Password should contain at least one character of each: abcdefghijklmnopqrstuvwxyz, 0123456789.'), 'Include at least one of each: a lowercase letter and a number.');
+  assert.match(weakPasswordMessage(['pwned'], 'Password is known to be weak and easy to guess, please choose a different one.'), /data breach/);
+  assert.equal(weakPasswordMessage(['length'], 'Password should be at least 12 characters.'), 'Use at least 12 characters.');
+  assert.equal(weakPasswordMessage(undefined), 'Choose a stronger password.');
 });
