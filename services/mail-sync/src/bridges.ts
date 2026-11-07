@@ -236,11 +236,17 @@ export class Bridges {
     const others = [...members.entries()].filter(([id]) => id !== this.mxid && !this.isBot(id));
     // Open Media names every bridge's users (`whatsapp_…`), so that decides; the room's m.bridge protocol is the fallback.
     const network = others.map(([id]) => this.networkOfUser(id)).find(Boolean) ?? networkOfProtocol((bridgeInfo?.content?.protocol as { id?: string } | undefined)?.id);
+    // A bridged chat's m.bridge names its remote chat (`channel.id`). It counts even when the other
+    // side never joins: Signal contacts known only by phone number (PNI) have no user in the room.
+    const channel = bridgeInfo?.content?.channel as { id?: unknown; displayname?: unknown } | undefined;
+    const portal = typeof channel?.id === 'string' && channel.id.length > 0;
     // Management rooms (only the bridge bot) and non-bridged rooms aren't chats.
-    if (!network || !bridgeNetworks[network] || others.length === 0) return null;
-    const name = typeof state.findLast((event) => event.type === 'm.room.name')?.content?.name === 'string'
-      ? String(state.findLast((event) => event.type === 'm.room.name')?.content?.name)
-      : others.map(([, displayName]) => displayName).join(', ');
+    if (!network || !bridgeNetworks[network] || (others.length === 0 && !portal)) return null;
+    const roomName = state.findLast((event) => event.type === 'm.room.name')?.content?.name;
+    const name = typeof roomName === 'string' && roomName
+      ? roomName
+      : others.length ? others.map(([, displayName]) => displayName).join(', ')
+        : typeof channel?.displayname === 'string' && channel.displayname ? channel.displayname : `${bridgeNetworks[network].name} chat`;
     const timeline = room.timeline?.events ?? [];
     const receipts = readReceipts(room);
     const position = (eventId?: string) => (eventId ? timeline.findIndex((event) => event.event_id === eventId) : -1);

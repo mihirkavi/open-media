@@ -95,6 +95,23 @@ test('Messenger chats are recognised even though its bridge calls itself "facebo
   assert.equal(networkOfProtocol('carrier-pigeon'), undefined);
 });
 
+test('a bridged chat shows even when the other side never joins (Signal contacts known only by number); management rooms and spaces stay hidden', async () => {
+  const me = '@om_4493a42e416b41d0baeaaed2666f5225:openmedia.test';
+  const bot = { type: 'm.room.member', state_key: '@signalbot:openmedia.test', content: { membership: 'join' } };
+  const self = { type: 'm.room.member', state_key: me, content: { membership: 'join' } };
+  const sync = { rooms: { join: {
+    '!chat:openmedia.test': {
+      state: { events: [{ type: 'm.bridge', state_key: 'x', content: { protocol: { id: 'signal' }, channel: { id: 'PNI:1', displayname: 'Alex' } } }, bot, self] },
+      timeline: { events: [{ type: 'm.room.message', event_id: '$1', sender: me, origin_server_ts: 1, content: { msgtype: 'm.text', body: 'hi' } }] },
+    },
+    '!manage:openmedia.test': { state: { events: [bot, self] }, timeline: { events: [] } },
+    '!space:openmedia.test': { state: { events: [{ type: 'm.room.create', state_key: '', content: { type: 'm.space' } }, { type: 'm.bridge', state_key: 'x', content: { protocol: { id: 'signal' }, channel: { id: 'space' } } }, bot, self] }, timeline: { events: [] } },
+  } } };
+  let result: Awaited<ReturnType<Bridges['conversations']>> | undefined;
+  await withFetch((url) => url.includes('/sync') ? sync : {}, async () => { result = await new Bridges({ ...env, BRIDGES_SIGNAL_URL: 'http://signal.test' }, userId).conversations(); });
+  assert.deepEqual(result?.rooms.map((room) => [room.id, room.network, room.name, room.events.length]), [['!chat:openmedia.test', 'signal', 'Alex', 1]]);
+});
+
 test('Discord uses its older sign-in API: token sign-in, status from ping, logout', async () => {
   const discordEnv = { ...env, BRIDGES_DISCORD_URL: 'http://discord.test' };
   const bridges = new Bridges(discordEnv, userId);
