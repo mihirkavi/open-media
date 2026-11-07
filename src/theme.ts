@@ -1,7 +1,8 @@
 /**
  * Open Media's visual system: black, white, and a few warm neutral grays.
  * `accent` is deliberately the text color, so emphasis comes from contrast
- * and weight rather than hue. `success` and `danger` are the only colors.
+ * and weight rather than hue. The only colors are `success`, `danger` and
+ * `unread`, a calm blue kept for unread conversations so they stand out.
  */
 export const lightColors = {
   accent: '#111111',
@@ -17,6 +18,10 @@ export const lightColors = {
   textTertiary: '#7E7E78',
   success: '#2F7D47',
   danger: '#B42318',
+  /** Unread conversations: the count badge and time. White text on it is 5.2:1. */
+  unread: '#2563EB',
+  /** The wash behind an unread row. */
+  unreadSoft: '#EFF4FE',
 };
 
 export type ThemeColors = typeof lightColors;
@@ -35,6 +40,8 @@ export const darkColors: ThemeColors = {
   textTertiary: '#8A8A83',
   success: '#7BC795',
   danger: '#FF8A7A',
+  unread: '#6EA2FF',
+  unreadSoft: '#0F1828',
 };
 
 export const radii = {
