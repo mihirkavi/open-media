@@ -17,6 +17,14 @@ This checklist defines “production ready” for the current onboarding private
 - [x] Local browser flow: magic-link onboarding, callback cleanup, profile creation, profile search, direct conversation, send, realtime receive, account export, and responsive layout.
 - [x] Latest signed iOS Store build finished successfully: build 9, EAS `f5916bd3-c316-487a-bbed-f6085bc38fcc`.
 
+## Passwords and passkeys (ADR 0034; deployed 2026-11-07)
+
+- [x] Owner said "commit push and deploy please!". Pushed `d3c22c2` to `main`. Applied `20261121120000_passkey_second_step.sql` with `npx supabase db push --linked` after a dry run (only that migration was pending). Deployed with `npm run deploy`: Worker `convo-mail-sync` version `541d441c-7332-451d-b85c-9210fd6c8116`, rollback `86ebbce2-422b-4452-8648-4ccbf779a041`.
+- [x] Live checks: openmedia.site serves the new sign-in screen (email and password, Forgot password?, Email me a code instead, Create an account) with no console errors; `/v1/posts` answers 200 without an account; `/v1/mail-accounts` refuses without a token (401).
+- [ ] Supabase dashboard (owner; not done by the agent, which could not reach the Management API): Email → Confirm email on, minimum password length 8; Multi-Factor → WebAuthn enroll and verify on, relying party `openmedia.site`, origins `https://openmedia.site` and `https://www.openmedia.site`, display name `Open Media`; Emails → Reset password template from `supabase/templates/recovery.html`, subject "Your Open Media password reset code". Until then, password sign-in and email codes work; password reset by code and passkeys don't.
+- [ ] Signed-in production check after the dashboard step: sign in, add a password and a passkey, sign out and back in.
+- Not verified in production: iOS and Android (not run, at the owner's request).
+
 ## Profile fields and /@handle addresses (ADR 0019; deployed 2026-10-29)
 
 - [x] Applied `supabase/migrations/20261102120000_profile_fields.sql` on 2026-10-29 after a dry run.
