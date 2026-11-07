@@ -78,19 +78,60 @@ export function signInEmailHasCode(): boolean {
   return signInEmailsIncludeCode(process.env.EXPO_PUBLIC_SUPABASE_URL, process.env.EXPO_PUBLIC_SIGN_IN_EMAIL_CODES);
 }
 
-export async function waitForLocalSignInCode(email: string, since: Date, timeoutMs = 30_000): Promise<string | undefined> {
-  const api = (process.env.EXPO_PUBLIC_OPEN_MEDIA_API_URL ?? '').replace(/\/$/, '');
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
+/**
+ * Local Mac setup only: waits until this window can finish signing in, either from the code in the
+ * local test inbox or from a sign-in link opened in another browser (see handOffSignInLink).
+ * Codes in `skip` were already tried (for example an older email) and are ignored.
+ */
+export async function waitForLocalSignIn(email: string, since: Date, options: { timeoutMs: number; skip?: Set<string>; cancelled?: () => boolean }): Promise<{ code: string } | { linkCode: string } | undefined> {
+  const api = localAPI();
+  const deadline = Date.now() + options.timeoutMs;
+  while (Date.now() < deadline && !options.cancelled?.()) {
     try {
+      const handoff = await fetch(`${api}/local/sign-in-handoff`);
+      if (handoff.status === 200) {
+        const { code } = (await handoff.json()) as { code?: string };
+        if (code) return { linkCode: code };
+      }
       const response = await fetch(`${api}/local/sign-in-code?email=${encodeURIComponent(email.trim())}&since=${encodeURIComponent(since.toISOString())}`);
-      if (response.ok) return ((await response.json()) as { code?: string }).code;
+      if (response.status === 200) {
+        const { code } = (await response.json()) as { code?: string };
+        if (code && !options.skip?.has(code)) return { code };
+      }
     } catch {
       // The local service may still be starting; keep waiting.
     }
     await new Promise((resolve) => setTimeout(resolve, 1000));
   }
   return undefined;
+}
+
+/** Finishes sign-in with a link's one-time code that another browser handed to this window. */
+export async function completeHandedOffSignIn(linkCode: string): Promise<void> {
+  const supabase = getSupabaseClient();
+  if (!supabase) throw new Error('Supabase Auth is not configured for this build.');
+  const { error } = await supabase.auth.exchangeCodeForSession(linkCode);
+  if (error) throw new Error(friendlyLinkError(`${error.name} ${error.message}`));
+}
+
+/** Thrown when this browser passed a sign-in link on to the Open Media window that asked for it. */
+export class SignInHandedOff extends Error {
+  constructor() { super('You’re signed in in the Open Media window. You can close this tab.'); }
+}
+
+function localAPI() { return (process.env.EXPO_PUBLIC_OPEN_MEDIA_API_URL ?? '').replace(/\/$/, ''); }
+
+/**
+ * Local Mac setup only: the link was opened in a browser that didn't ask to sign in, so it can't
+ * use the link itself (PKCE). Hand the code to the local service for the window that asked.
+ */
+async function handOffSignInLink(code: string): Promise<boolean> {
+  try {
+    const response = await fetch(`${localAPI()}/local/sign-in-handoff`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code }) });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 /** Signs in with the one-time code from the sign-in email. Works on any browser or device. */
@@ -112,7 +153,13 @@ export async function completeSignInURL(url: string): Promise<boolean> {
     if (callback.error) throw new Error(friendlyLinkError(callback.error));
     if (!callback.code) return false;
     const { error } = await supabase.auth.exchangeCodeForSession(callback.code);
-    if (error) throw new Error(friendlyLinkError(`${error.name} ${error.message}`));
+    if (error) {
+      // Opened in a different browser than the one that asked (the code isn't spent yet, since the
+      // check happens before any request). On this Mac's local setup, pass it to that window.
+      const otherBrowser = (error as { code?: string }).code === 'pkce_code_verifier_not_found';
+      if (otherBrowser && Platform.OS === 'web' && localAutoSignInAvailable() && await handOffSignInLink(callback.code)) throw new SignInHandedOff();
+      throw new Error(friendlyLinkError(`${error.name} ${error.message}`));
+    }
     return true;
   } finally {
     // Never leave a used or failed one-time code in the address bar.

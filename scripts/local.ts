@@ -45,7 +45,7 @@ async function main() {
   }
 
   step('Starting local Supabase (database, auth, test inbox)');
-  run('npx', ['supabase', 'start'], { quiet: true });
+  await startSupabase();
   run('npx', ['supabase', 'migration', 'up', '--local'], { quiet: true });
   const status = JSON.parse(run('npx', ['supabase', 'status', '-o', 'json'], { quiet: true })) as Record<string, string>;
   const supabaseURL = status.API_URL;
@@ -156,6 +156,26 @@ async function ensureDocker() {
     if (dockerReady()) return;
   }
   throw new Error('Docker did not start within 3 minutes. Open Docker Desktop, wait until it is running, then try again.');
+}
+
+/**
+ * `supabase start`, retried while its containers are still booting. Right after Docker Desktop
+ * opens, the CLI often reports "container is not ready: starting" and gives up; the containers
+ * become healthy a little later, so waiting and retrying is enough.
+ */
+async function startSupabase() {
+  const transient = /not ready|starting|already running|unhealthy|timed out|connection refused/i;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      run('npx', ['supabase', 'start'], { quiet: true });
+      return;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (attempt >= 12 || !transient.test(message)) throw error;
+      console.log(`  Supabase is still starting (attempt ${attempt}); waiting…`);
+      await sleep(10000);
+    }
+  }
 }
 
 function dockerReady(): boolean {

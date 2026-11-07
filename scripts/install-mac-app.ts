@@ -59,17 +59,36 @@ notify() { osascript -e "display notification \\"$1\\" with title \\"Open Media\
 
 ready() { curl -s -m 2 -o /dev/null "$URL" && curl -s -m 2 -o /dev/null http://127.0.0.1:8787/health; }
 
+# True when the saved pid is still our \`npm run local\` (not a reused pid of some other process).
+starting() {
+  local pid
+  pid="$(cat "$REPO/.local/local.pid" 2>/dev/null)"
+  [ -n "$pid" ] && ps -p "$pid" -o command= 2>/dev/null | grep -q -e 'npm run local' -e 'scripts/local.ts'
+}
+
+fail() {
+  local detail
+  detail="$(grep -E '✗|[Ee]rror' "$LOGS/local.log" 2>/dev/null | tail -3 | perl -pe 's/\\e\\[[0-9;]*m//g' | tr '"\\\\' "'/" | cut -c1-300)"
+  osascript -e "display alert \\"Open Media could not start\\" message \\"$1\\n\\n\${detail:-No error in the log.}\\n\\nFull log: .local/logs/local.log in the project folder.\\"" >/dev/null 2>&1
+  exit 1
+}
+
 if ! ready; then
-  notify "Starting Open Media… this takes up to a minute the first time."
-  if [ ! -f "$REPO/.local/local.pid" ] || ! kill -0 "$(cat "$REPO/.local/local.pid")" 2>/dev/null; then
-    cd "$REPO" && OPEN_MEDIA_NO_BROWSER=1 nohup npm run local >"$LOGS/local.log" 2>&1 &
+  if ! command -v npm >/dev/null 2>&1; then fail "Node.js 22 or newer was not found (looked in ~/.nvm)."; fi
+  if [ ! -d /Applications/Docker.app ] && ! command -v docker >/dev/null 2>&1; then fail "Docker Desktop is not installed."; fi
+  notify "Starting Open Media… the first start after a restart can take a few minutes."
+  if ! starting; then
+    mkdir -p "$REPO/.local"
+    (cd "$REPO" && OPEN_MEDIA_NO_BROWSER=1 exec nohup npm run local >"$LOGS/local.log" 2>&1) &
     echo $! > "$REPO/.local/local.pid"
   fi
-  for _ in $(seq 1 120); do ready && break; sleep 2; done
-  if ! ready; then
-    osascript -e 'display alert "Open Media could not start" message "See .local/logs/local.log in the project folder. Docker Desktop must be installed."' >/dev/null 2>&1
-    exit 1
-  fi
+  # Docker (up to 3 min) + Supabase + mail service + the first web bundle: allow up to 10 minutes.
+  for _ in $(seq 1 300); do
+    ready && break
+    starting || { sleep 2; ready && break; fail "The local stack stopped while starting."; }
+    sleep 2
+  done
+  ready || fail "It did not become ready within 10 minutes."
 fi
 
 # OPEN_MEDIA_NO_WINDOW=1 starts the stack without opening a window (for testing).

@@ -15,7 +15,7 @@ import { findSenderIcon, isIconDomain } from './senderIcons.js';
 import { resolveMailHost } from './networkSafety.js';
 import { handleAgentRequest, isAgentPath } from './agentApi.js';
 import { handlePublicApiRequest, isPublicApiPath } from './publicApi.js';
-import { authenticate } from './session.js';
+import { authenticate, PasskeyStepRequired } from './session.js';
 import { appReturnURL, authorizeURL, exchangeCode, isSocialNetwork, parsePost, parseSession, publishSocial, refreshSession, SocialOAuthEnv, socialStatus } from './socialOAuth.js';
 import { runSearchAssist, SearchAssistEnv } from './searchAssist.js';
 import { AiChatEnv, ownSearchModel, recordSearch } from './aiChat.js';
@@ -138,7 +138,7 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
         ? { texts: [url.searchParams.get('text') ?? ''], to: url.searchParams.get('to') ?? undefined, from: url.searchParams.get('from') ?? undefined }
         : await readJSON(request, 98_304);
       const privacy = request.method === 'POST' && (input as { private?: unknown } | null)?.private === true ? 'private' : 'public';
-      const caller = privacy === 'private' ? `user:${(await authenticate(request, env.SUPABASE_URL)).userId}` : `ip:${request.headers.get('cf-connecting-ip') ?? 'local'}`;
+      const caller = privacy === 'private' ? `user:${(await authenticate(request, env.SUPABASE_URL, env.SUPABASE_PUBLISHABLE_KEY)).userId}` : `ip:${request.headers.get('cf-connecting-ip') ?? 'local'}`;
       const limiter = env.PUBLIC_API_RATE_LIMITER;
       if (limiter && !(await limiter.limit({ key: `translate:${caller}` })).success) return rateLimited(headers);
       if (!env.AI) return json(503, { error: 'Translation isn’t available on this server.' }, headers);
@@ -150,7 +150,7 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
     if (url.pathname === '/v1/dictate' && request.method === 'GET') return json(200, { available: Boolean(env.AI), model: env.AI ? 'whisper-large-v3-turbo' : undefined }, headers);
     if (url.pathname === '/v1/dictate' && request.method === 'POST') {
       const signedIn = /^Bearer \S+$/.test(request.headers.get('authorization') ?? '');
-      const caller = signedIn ? `user:${(await authenticate(request, env.SUPABASE_URL)).userId}` : `ip:${request.headers.get('cf-connecting-ip') ?? 'local'}`;
+      const caller = signedIn ? `user:${(await authenticate(request, env.SUPABASE_URL, env.SUPABASE_PUBLISHABLE_KEY)).userId}` : `ip:${request.headers.get('cf-connecting-ip') ?? 'local'}`;
       const limiter = env.DICTATION_RATE_LIMITER ?? env.PUBLIC_API_RATE_LIMITER;
       if (limiter && !(await limiter.limit({ key: `dictate:${caller}` })).success) return rateLimited(headers);
       if (!env.AI) return json(503, { error: 'Dictation isn’t available on this server.' }, headers);
@@ -172,7 +172,7 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
 
     // Unknown paths are a 404 for everyone, so agents learn a URL is wrong rather than that they need a token.
     if (!/^\/v1\/(mail-accounts|bridges|cross-posting|social)(\/|$)/.test(url.pathname)) return json(404, { error: 'Not found. Start at /llms.txt or /docs.' }, headers);
-    const session = await authenticate(request, env.SUPABASE_URL);
+    const session = await authenticate(request, env.SUPABASE_URL, env.SUPABASE_PUBLISHABLE_KEY);
     const repository = new SupabaseRestRepository(env.SUPABASE_URL, env.SUPABASE_PUBLISHABLE_KEY, session.token);
 
     if (request.method === 'GET' && url.pathname === '/v1/mail-accounts') {
@@ -350,7 +350,7 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
       ? describeValidationError(error)
       : error instanceof UserFacingError ? error.message
       : error instanceof Error ? error.message.replace(/password[^ ]*/gi, 'credential') : 'Request failed.';
-    const status = message.includes('session') ? 401 : 400;
+    const status = error instanceof PasskeyStepRequired ? 403 : message.includes('session') ? 401 : 400;
     console.error(JSON.stringify({ event: 'mail_request_failed', method: request.method, path, status, errorType: error instanceof Error ? error.name : 'UnknownError' }));
     return json(status, { error: message }, headers);
   }

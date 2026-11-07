@@ -7,7 +7,7 @@ import { createServer } from 'node:http';
 import { fileURLToPath } from 'node:url';
 
 import { handleMailRequest, Limiter, MailEnv } from './mailHandler.js';
-import { latestSignInCode } from './localSignIn.js';
+import { createSignInHandoff, latestSignInCode } from './localSignIn.js';
 import { AiBinding } from './searchAssist.js';
 import { PaymentsEnv } from './payments.js';
 import { VerificationEnv } from './verification.js';
@@ -86,11 +86,32 @@ if (process.env.OPEN_MEDIA_LOCAL_AI === 'true') {
 
 const inboxURL = process.env.LOCAL_INBOX_URL;
 const appOrigin = process.env.CONVO_APP_ORIGIN ?? 'http://localhost:8081';
+const signInHandoff = createSignInHandoff();
 
 createServer(async (incoming, outgoing) => {
   try {
-    // Local-only: hand the app the sign-in code from the local test inbox.
     const requestURL = new URL(incoming.url ?? '/', 'http://local');
+    // Local-only: a sign-in link opened in another browser hands its code to the app window.
+    // Only the app's own origin may use it (any browser on this Mac opening the app sends it).
+    if (inboxURL && requestURL.pathname === '/local/sign-in-handoff') {
+      const headers = { 'access-control-allow-origin': appOrigin, 'access-control-allow-methods': 'GET, POST', 'access-control-allow-headers': 'content-type', 'cache-control': 'no-store', 'content-type': 'application/json' };
+      if (incoming.method === 'OPTIONS') { outgoing.writeHead(204, headers); return outgoing.end(); }
+      if (incoming.headers.origin !== appOrigin) { outgoing.writeHead(403, headers); return outgoing.end(JSON.stringify({ error: 'Forbidden.' })); }
+      if (incoming.method === 'POST') {
+        let body = '';
+        for await (const chunk of incoming) { body += chunk; if (body.length > 2000) break; }
+        let code = '';
+        try { code = String((JSON.parse(body) as { code?: unknown }).code ?? ''); } catch { /* bad JSON */ }
+        const accepted = signInHandoff.put(code);
+        outgoing.writeHead(accepted ? 204 : 400, headers);
+        return outgoing.end(accepted ? undefined : JSON.stringify({ error: 'Bad request.' }));
+      }
+      const code = signInHandoff.take();
+      // 204 while there's nothing yet: the app polls, and browsers log every 404 to the console.
+      outgoing.writeHead(code ? 200 : 204, headers);
+      return outgoing.end(code ? JSON.stringify({ code }) : undefined);
+    }
+    // Local-only: hand the app the sign-in code from the local test inbox.
     if (inboxURL && requestURL.pathname === '/local/sign-in-code') {
       const headers = { 'access-control-allow-origin': appOrigin, 'cache-control': 'no-store', 'content-type': 'application/json' };
       if (incoming.method === 'OPTIONS') { outgoing.writeHead(204, headers); return outgoing.end(); }
@@ -107,8 +128,8 @@ createServer(async (incoming, outgoing) => {
         return outgoing.end(JSON.stringify({ error: 'Bad request.' }));
       }
       const code = await latestSignInCode(inboxURL, email, since);
-      outgoing.writeHead(code ? 200 : 404, headers);
-      return outgoing.end(JSON.stringify(code ? { code } : { error: 'No code yet.' }));
+      outgoing.writeHead(code ? 200 : 204, headers);
+      return outgoing.end(code ? JSON.stringify({ code }) : undefined);
     }
     const chunks: Buffer[] = [];
     for await (const chunk of incoming) chunks.push(Buffer.from(chunk));

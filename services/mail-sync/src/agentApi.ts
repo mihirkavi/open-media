@@ -50,7 +50,7 @@ import { AgentAuthEnv, AgentAuthError, agentFromRequest, registerAgent } from '.
 import { refreshSignIn, requestSignInCode, SignInError, signOut, verifySignInCode } from './personSignIn.js';
 import { handleSiteRequest, isSitePath, llmsTxt as siteLlmsTxt, searchDocs } from './agentSite.js';
 import { appViewHtml, appViewUri, mcpAppMimeType, postsViewUri } from './mcpAppView.js';
-import { authenticate } from './session.js';
+import { authenticate, PasskeyStepRequired } from './session.js';
 import { confirmEvidence, MarketplaceEnv, MarketplaceError, marketplaceConfigured, readEvidence, serviceRpc } from './marketplace.js';
 import { verifyWebBotAuth } from './webBotAuth.js';
 import { runTranslate, TranslateEnv } from './translate.js';
@@ -431,11 +431,13 @@ export class Account {
 
   static async fromRequest(request: Request, env: AgentEnv, origin: string, internal?: InternalHandler): Promise<Account> {
     try {
-      const { token, userId } = await authenticate(request, env.SUPABASE_URL.replace(/\/$/, ''));
+      const { token, userId } = await authenticate(request, env.SUPABASE_URL, env.SUPABASE_PUBLISHABLE_KEY);
       // Agents that sign their requests (Web Bot Auth) are recognised; it never widens access.
       const signed = await verifyWebBotAuth(request).catch(() => undefined);
       return new Account(env, token, userId, origin, internal, signed?.agent);
-    } catch {
+    } catch (error) {
+      // The account has a passkey and this token was made without it (for example by /v1/auth/verify).
+      if (error instanceof PasskeyStepRequired) throw new AgentError(403, 'passkey_required', 'This account uses a passkey, so this token isn’t enough. Copy a token from the app after signing in with your passkey: Settings → Developers and agents.');
       throw new AgentError(401, 'unauthorized', 'Send your Open Media access token as “Authorization: Bearer …”. Sign in with POST /v1/auth/email-code and /v1/auth/verify, or copy one in the app: Settings → Developers and agents.');
     }
   }

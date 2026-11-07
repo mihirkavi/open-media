@@ -169,6 +169,7 @@ Open Media is in **public beta**. Everything below is in the code today.
 | Area | Available now | Status |
 | --- | --- | --- |
 | **Feed** | One feed mixing Open Media with Bluesky, Mastodon, Nostr, Farcaster, Lens, Hive and DeSo. Raw and Relevant modes. "Why this?" on every ranked post. Readable without an account. | ✅ Live |
+| **Sign-in and security** | Sign in with email and password, or with a 6-digit code emailed to you; both work on any browser or device. New accounts confirm their email with a code, and forgotten passwords are reset with one. Add a passkey (Touch ID, Face ID, Windows Hello, your phone or a security key) as a second step: from then on a password alone can't get in, and the database itself refuses sessions that skipped it. See [ADR 0034](docs/adrs/0034-passwords-and-passkeys.md). | 🧪 Beta: built and tested locally on the web; not in production yet. Phones: passwords work, passkeys come next |
 | **Web feeds (RSS, Atom, JSON Feed)** | Follow blogs, news sites, podcasts and weather alerts in your Feed by typing or pasting a site in Search ("theverge.com", "bbc", "weather california"), through an agent, or by importing OPML. Cards show the headline, a short excerpt, one image and a link to the publisher, never the full article. Official feeds of 41 major news outlets, the US National Weather Service and the UK Met Office carry a blue tick labelled "Official feed". Read politely: conditional requests, at most every 30 minutes, robots.txt for discovery. See [ADR 0024](docs/adrs/0024-web-feeds-rss-atom-json-feed.md). | 🧪 Tested on the web locally; not deployed; phone apps not tested |
 | **Feed lenses** | Every feed algorithm, Raw and Relevant included, is an open JSON manifest run by [one runner](src/domain/feedLenses.ts). Write one in plain words in Search or with an AI agent, keep it across devices, share it publicly or install someone else's. Lenses read only the signals they declare. See [ADR 0017](docs/adrs/0017-feed-lenses.md). | ✅ Live |
 | **Your own algorithm** | Tune the lens you use in plain words in Search: "less hive", "a lot more videos", "more new voices", "show hive again". Relevant becomes your own "My Relevant"; the built-ins never change. "Why this?" shows each post's score under your weights, every change is a version you can undo ("undo" in Search), and agents can tune, read the history and go back through MCP and REST. See [ADR 0021](docs/adrs/0021-your-own-feed-algorithm.md). | 🧪 Built and tested on the web locally; not deployed, phones not yet tested |
@@ -374,7 +375,7 @@ Not today. Those companies do not offer open access for apps like Open Media, an
 <details>
 <summary><strong>Do I need a crypto wallet?</strong></summary>
 <br>
-No. You sign in with your email. Some open networks use blockchain technology behind the scenes, but you never need to understand it, hold tokens or pay fees to read the feed.
+No. You sign in with your email and a password, or with a code emailed to you, and can add a passkey for extra protection. Some open networks use blockchain technology behind the scenes, but you never need to understand it, hold tokens or pay fees to read the feed.
 </details>
 
 <details>
@@ -422,7 +423,7 @@ npm install
 npm run local
 ```
 
-This starts everything on your computer (database, sign-in, email service, public API and the web app) and opens <http://localhost:8081>. Sign-in codes go to a local test inbox and are filled in for you. Stop the database with `npm run local:stop`.
+This starts everything on your computer (database, sign-in, email service, public API and the web app) and opens <http://localhost:8081>. Sign-in, sign-up and password reset codes go to a local test inbox and are filled in for you, and a sign-in link opened in any other browser signs in the app window. Stop the database with `npm run local:stop`.
 
 Run on a phone simulator:
 
