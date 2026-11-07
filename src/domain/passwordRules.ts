@@ -20,3 +20,8 @@ export function passwordProblem(password: string, email = ''): string | undefine
 export function passkeyRelyingParty(location: { hostname: string; origin: string }): { rpId: string; rpOrigins: string[] } {
   return { rpId: location.hostname.replace(/^www\./, ''), rpOrigins: [location.origin] };
 }
+
+/** True when Supabase refused because passkeys (WebAuthn MFA) are switched off on the server. */
+export function passkeysSwitchedOffError(detail: string): boolean {
+  return /mfa_webauthn_(enroll|verify)_not_enabled|MFA (enroll|verify) is disabled for WebAuthn/i.test(detail);
+}

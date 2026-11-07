@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { getSupabaseClient } from '../auth/supabase';
-import { addPasskey, listPasskeys, Passkey, passkeysSupportedHere, removePasskey, setPassword } from '../auth/accountSecurity';
+import { PasskeysSwitchedOff, addPasskey, listPasskeys, Passkey, passkeysSupportedHere, removePasskey, setPassword } from '../auth/accountSecurity';
 import { passwordProblem } from '../domain/passwordRules';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
@@ -24,7 +24,8 @@ export function SignInSecuritySettings() {
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [confirmRemove, setConfirmRemove] = useState<string>();
-  const supported = passkeysSupportedHere();
+  const [switchedOff, setSwitchedOff] = useState(false);
+  const supported = passkeysSupportedHere() && !switchedOff;
   const [email, setEmail] = useState<string>();
   useEffect(() => { getSupabaseClient()?.auth.getSession().then(({ data }) => setEmail(data.session?.user.email ?? undefined)).catch(() => undefined); }, []);
   const problem = passwordProblem(password, email);
@@ -35,7 +36,11 @@ export function SignInSecuritySettings() {
   const run = async (label: string, action: () => Promise<void>, done: string) => {
     setBusy(label); setError(''); setMessage('');
     try { await action(); setMessage(done); }
-    catch (reason) { setError(reason instanceof Error ? reason.message : 'That didn’t work. Try again.'); }
+    catch (reason) {
+      // The server has passkeys off: say so once and stop offering the button, instead of an error.
+      if (reason instanceof PasskeysSwitchedOff) { setSwitchedOff(true); return; }
+      setError(reason instanceof Error ? reason.message : 'That didn’t work. Try again.');
+    }
     finally { setBusy(''); }
   };
   const savePassword = () => run('password', async () => { await setPassword(password, email); setPasswordValue(''); setEditingPassword(false); }, 'Password saved. You can now sign in with your email and password.');
@@ -69,7 +74,8 @@ export function SignInSecuritySettings() {
           <Text style={styles.hint}>{passkeys?.length
             ? 'Signing in asks for a passkey after your password or email code, so a stolen password alone can’t get in.'
             : 'Add a second step: after your password or email code, confirm with Touch ID, Face ID, Windows Hello, your phone or a security key.'}</Text>
-          {!supported ? <Text style={styles.hint}>Add passkeys from Open Media on the web. The phone app gets passkeys next.</Text> : null}
+          {switchedOff ? <Text style={styles.hint}>Passkeys aren’t switched on for Open Media yet. Your password and email codes work as usual.</Text>
+            : !supported ? <Text style={styles.hint}>Add passkeys from Open Media on the web. The phone app gets passkeys next.</Text> : null}
         </View>
         {supported ? <Pressable accessibilityRole="button" disabled={Boolean(busy)} onPress={add} style={styles.small}>{busy === 'add' ? <Loader color={colors.text} /> : <Text style={styles.smallText}>Add passkey</Text>}</Pressable> : null}
       </View>

@@ -11,7 +11,7 @@
 import { Platform } from 'react-native';
 import type { Factor } from '@supabase/supabase-js';
 
-import { passkeyRelyingParty, passwordProblem } from '../domain/passwordRules';
+import { passkeyRelyingParty, passkeysSwitchedOffError, passwordProblem } from '../domain/passwordRules';
 import { getSupabaseClient } from './supabase';
 
 function client() {
@@ -181,8 +181,14 @@ export async function completePasskeyStep(): Promise<void> {
   throw passkeyError(lastError as Error, 'Could not confirm with your passkey.');
 }
 
+/** The server has passkeys (WebAuthn MFA) switched off, so offering them would only fail. */
+export class PasskeysSwitchedOff extends Error {
+  constructor() { super('Passkeys aren’t switched on for Open Media yet. Try again later.'); }
+}
+
 function passkeyError(error: Error, fallback: string): Error {
-  const detail = `${error?.name ?? ''} ${error?.message ?? ''}`;
+  const detail = `${error?.name ?? ''} ${error?.message ?? ''} ${(error as { code?: string })?.code ?? ''}`;
+  if (passkeysSwitchedOffError(detail)) return new PasskeysSwitchedOff();
   if (/NotAllowedError|cancel|abort|timed out/i.test(detail)) return new Error('The passkey prompt was closed or timed out. Try again.');
   if (/InvalidStateError|already registered/i.test(detail)) return new Error('This device already has a passkey for your account.');
   if (/SecurityError|rp ?id|origin/i.test(detail)) return new Error('Passkeys aren’t available at this web address.');
