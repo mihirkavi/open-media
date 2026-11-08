@@ -1,5 +1,5 @@
 import Ionicons from "./Icon";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { PropsWithChildren, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, Animated, Easing, Image, Keyboard, LayoutChangeEvent, Linking, Modal, PanResponder, Platform, Pressable, ScrollView, StyleProp, StyleSheet, TextStyle, View, ViewStyle, useWindowDimensions } from "react-native";
 import { Loader } from "./Loader";
 import { PullToRefresh } from "./PullToRefresh";
@@ -544,6 +544,7 @@ function MessageThread({
   };
   const byId = useMemo(() => new Map(conversation.messages.map((message) => [message.id, message])), [conversation.messages]);
   const isGroup = conversation.participants.length > 1;
+  const groupEmail = isGroup && Boolean(conversation.email);
   const senderOf = (message: Message) => conversation.participants.find((person) => person.id === message.senderPersonId) ?? otherPerson;
   const senderLabel = (message: Message) => message.direction === "outbound" ? "You" : (senderOf(message)?.name ?? "Them");
   const lastOutboundId = [...conversation.messages].reverse().find((message) => message.direction === "outbound")?.id;
@@ -733,7 +734,7 @@ function MessageThread({
             <Ionicons name="chevron-back" size={22} color={colors.text} />
           </Pressable>
         ) : null}
-        <PersonLink target={threadTarget(conversation, otherPerson)} label={`Open ${conversationTitle(conversation)}’s profile`} style={styles.threadHeadingLink}>
+        <GroupAwareHeading group={groupEmail} target={threadTarget(conversation, otherPerson)} label={`Open ${conversationTitle(conversation)}’s profile`} style={styles.threadHeadingLink}>
         <View style={styles.threadHeading}>
           <VerifiedAvatar people={conversation.participants} size={44} />
           <View style={[styles.rowTitleLine, styles.threadNameLine]}>
@@ -758,8 +759,9 @@ function MessageThread({
                   ? "Open Media · private to conversation members"
                   : "Imported conversation · reply unavailable"}
           </Text>
+          {groupEmail && conversation.email ? <GroupEmailPeople people={conversation.participants} ownAddress={conversation.email.accountEmail} /> : null}
         </View>
-        </PersonLink>
+        </GroupAwareHeading>
         {channelPerson &&
         !conversation.groupTitle &&
         via.sourceSummary.includes("open_media") ? (
@@ -1481,6 +1483,51 @@ function Avatar({ initials, imageUrls = [], size = 40 }: { initials: string; ima
         />
       ) : null}
     </View>
+  );
+}
+
+/** The thread heading: one profile link for a person, plain for a group email (its people have their own chips). */
+function GroupAwareHeading({ group, target, label, style, children }: PropsWithChildren<{ group: boolean; target: PersonTarget; label: string; style: StyleProp<ViewStyle> }>) {
+  if (group) return <View style={style}>{children}</View>;
+  return <PersonLink target={target} label={label} style={style}>{children}</PersonLink>;
+}
+
+/**
+ * Everyone on a group email (To and Cc), each a chip with their picture and name that previews
+ * their profile on hover and opens it (or their contact card) on tap; you come last. The row
+ * scrolls sideways when there are many people.
+ */
+function GroupEmailPeople({ people, ownAddress }: { people: Person[]; ownAddress: string }) {
+  const { colors } = useOpenMediaTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      accessibilityLabel={`${people.length + 1} people on this email`}
+      style={styles.groupPeople}
+      contentContainerStyle={styles.groupPeopleContent}
+    >
+      {people.map((person) => {
+        const address = person.identities.find((identity) => identity.kind === "email")?.value ?? person.name;
+        return (
+          <PersonLink
+            key={person.id}
+            target={{ ref: { kind: "email", address }, name: person.name, avatarUrl: person.avatarUrls?.[0] }}
+            label={`Open ${person.name}’s profile (${address})`}
+            style={styles.groupPerson}
+          >
+            <View style={styles.groupPersonInner}>
+              <Avatar initials={person.initials} imageUrls={person.avatarUrls} size={22} />
+              <Text numberOfLines={1} style={styles.groupPersonName}>{person.name}</Text>
+            </View>
+          </PersonLink>
+        );
+      })}
+      <View accessibilityLabel={`You (${ownAddress})`} style={[styles.groupPerson, styles.groupPersonInner, styles.groupPersonYou]}>
+        <Text numberOfLines={1} style={[styles.groupPersonName, styles.groupPersonYouText]}>You</Text>
+      </View>
+    </ScrollView>
   );
 }
 
@@ -2253,6 +2300,14 @@ function createStyles(colors: ThemeColors) {
     rowCopy: { flex: 1, minWidth: 0 },
     rowTitleLine: { flexDirection: "row", alignItems: "center", gap: 7 },
     rowTitle: { flexShrink: 1, color: colors.text, fontSize: 15, fontWeight: "600" },
+    // A group email's people: a row of chips under the title.
+    groupPeople: { alignSelf: "stretch", marginTop: 8, flexGrow: 0 },
+    groupPeopleContent: { flexGrow: 1, justifyContent: "center", gap: 6, paddingHorizontal: 12 },
+    groupPerson: { borderRadius: 16 },
+    groupPersonInner: { flexDirection: "row", alignItems: "center", gap: 6, maxWidth: 180, paddingLeft: 3, paddingRight: 10, paddingVertical: 3, borderRadius: 16, backgroundColor: colors.chrome },
+    groupPersonName: { flexShrink: 1, color: colors.text, fontSize: 12.5, fontWeight: "600" },
+    groupPersonYou: { paddingLeft: 10, backgroundColor: "transparent", borderWidth: 1, borderColor: colors.border },
+    groupPersonYouText: { color: colors.textSecondary },
     // Unread rows: a soft blue wash, a bolder name and preview, a blue time and a count pill.
     rowUnread: { backgroundColor: colors.unreadSoft },
     rowTitleUnread: { fontWeight: "700" },
