@@ -45,6 +45,8 @@ import { useOpenMediaTheme } from "../themeContext";
 import { ClipsView } from "./ClipsView";
 import { AskMark } from "./AiMark";
 import { SearchView } from "./SearchView";
+import type { SettingFocus } from "./SettingAnchor";
+import { settingForSection } from "../domain/settings";
 import { FeedView } from "./OpenMediaFeed";
 import { lazyComponent, whenIdle } from "./lazyComponent";
 import { useMixedFeed } from "./useMixedFeed";
@@ -324,7 +326,8 @@ export function OpenMediaApp({
   const [aiRecords, setAiRecords] = useState<AiRecord[] | null>(null);
   // What Open Media AI did on this device (theme, translation, feed) or where it is taking the person.
   const [aiActions, setAiActions] = useState<AiAction[]>([]);
-  const [settingsFocus, setSettingsFocus] = useState<{ section: string; at: number }>();
+  const [settingsFocus, setSettingsFocus] = useState<SettingFocus>();
+  const [profileFocus, setProfileFocus] = useState<SettingFocus>();
   const refreshAi = useCallback(async () => {
     if (messageMode !== "open_media" || !currentUserId) return;
     try {
@@ -539,6 +542,21 @@ export function OpenMediaApp({
       setLastPrimary(next as PrimaryDestination);
     setDestination(next);
     writeDestinationToURL(next);
+    // Going somewhere by hand starts at the top; only openSetting below lands on one setting.
+    setSettingsFocus(undefined);
+    setProfileFocus(undefined);
+  };
+  /**
+   * Opens one setting where it lives, from Search, Settings' own search or Open Media AI: the page
+   * that holds it, scrolled to its section (the settings graph in src/domain/settings.ts says where).
+   */
+  const openSetting = (id: string) => {
+    setPerson(undefined);
+    const entry = settingForSection(id);
+    const focus = entry ? { id: entry.id, at: Date.now() } : undefined;
+    if (entry?.page === "profile" || entry?.page === "edit-profile") { navigate("profile"); setProfileFocus(focus); }
+    else if (entry?.page === "search") { setSearchQuery("read receipts"); navigate("search"); }
+    else { navigate("settings"); setSettingsFocus(focus); }
   };
 
   useEffect(() => {
@@ -550,14 +568,7 @@ export function OpenMediaApp({
         const wanted = action.value.replace(/-/g, " ");
         const lens = lenses.lenses.find((item) => item.id === action.value || item.name.toLowerCase() === wanted);
         if (lens) lenses.choose(lens.id);
-      } else if (action.type === "open") {
-        // Privacy and who can message you live on Profile; everything else in Settings.
-        if (action.value === "privacy" || action.value === "messages") navigate("profile");
-        else {
-          setSettingsFocus({ section: action.value, at: Date.now() });
-          navigate("settings");
-        }
-      }
+      } else if (action.type === "open") openSetting(action.value);
     }
     setAiActions([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -649,6 +660,7 @@ export function OpenMediaApp({
             viewer={viewer}
             lenses={lenses}
             onNavigate={navigate}
+            onOpenSetting={openSetting}
             onOpenConversation={(id) => { setOpenConversationId(id); navigate("messages"); }}
             onAsk={aiRecords !== null && messageMode === "open_media" ? (text) => { setAiAsk({ text, at: Date.now() }); setOpenConversationId(aiConversationId); navigate("messages"); } : undefined}
             onDismiss={() => navigate(lastPrimary)}
@@ -661,11 +673,13 @@ export function OpenMediaApp({
             onSignOut={onSignOut}
             onAccountDeleted={onAccountDeleted}
             onProfileChange={onProfileChange}
+            focus={profileFocus}
           />
         ) : null}
         {!person && destination === "settings" ? (
           <OpenMediaSettings
             focus={settingsFocus}
+            onOpenSetting={openSetting}
             lenses={lenses}
             signedIn={Boolean(currentUserId)}
             posts={feed.posts}

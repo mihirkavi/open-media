@@ -38,7 +38,7 @@ import { validateOndcStore } from '../../../src/domain/ondc';
 import { isPaymentChain, onchainTransfer, Payment, paymentBreakdown, PaymentChain, PaymentRail, previewCharge } from '../../../src/domain/payments';
 import { maxPostLength, PublicPostRecord, socialPostFromPublic } from '../../../src/domain/publicPosts';
 import { parseSearchQuery, postMatchesSearch } from '../../../src/domain/searchQuery';
-import { searchSettings, settingIndex } from '../../../src/domain/settings';
+import { relatedSettings, searchSettings, settingIndex } from '../../../src/domain/settings';
 import { availableNetworks, BridgesEnv } from './bridges.js';
 import { contactsKey, ContactsEnv, openCard, sealCard, validCards } from './contactsStore.js';
 import { callRpc, formatPost, formatProfile, openApiDocument, PublicApiEnv, UpstreamPost, UpstreamProfile, withinLimit } from './publicApi.js';
@@ -349,7 +349,9 @@ export function networksDescription(env: AgentEnv) {
 
 export function settingsLookup(query: string | null) {
   const entries = query ? searchSettings(query) : settingIndex;
-  return { query: query ?? '', data: entries.map((entry) => ({ ...entry, where: `Settings → ${entry.title}` })) };
+  // Each setting comes with where it really lives and its linked settings, so an agent can send
+  // the person to the right screen and suggest neighbours.
+  return { query: query ?? '', data: entries.map((entry) => ({ ...entry, where: entry.path.join(' → '), related: relatedSettings(entry).map(({ id, title }) => ({ id, title })) })) };
 }
 
 export function aboutOpenMedia(origin: string) {
@@ -1572,7 +1574,7 @@ const assistantPrivateReads = ['list_conversations', 'list_email', 'list_bridged
 const assistantReads = ['search', 'get_feed', ...assistantPrivateReads, 'about_open_media', 'find_setting', 'list_feed_lenses', 'get_feed_lens', 'draft_feed_lens', 'list_my_feed_lenses', 'get_my_feed_lens_history', 'get_me', 'get_profile_fields', 'get_professional_profile', 'list_web_feeds', 'preview_web_feed', 'list_my_follows', 'list_mailboxes', 'list_chat_networks', 'cross_posting_status'];
 /** What it may change, each only after the person says yes. Publishing, sending, paying, deleting and passwords stay with the person. */
 const assistantChanges = ['tune_feed_lens', 'revert_feed_lens', 'install_feed_lens', 'follow_web_feed', 'unfollow_web_feed', 'follow', 'unfollow', 'set_profile_fields', 'set_professional_profile', 'set_my_privacy', 'set_read_receipts'];
-const settingsSections = ['appearance', 'feed', 'language', 'messages', 'email', 'chat-networks', 'cross-posting', 'ai', 'privacy', 'data', 'profile', 'about'] as const;
+const settingsSections = ['appearance', 'feed', 'language', 'messages', 'email', 'chat-networks', 'cross-posting', 'ai', 'privacy', 'data', 'profile', 'about', 'security', 'payments', 'store', 'people', 'contacts', 'account'] as const;
 
 /**
  * Open Media AI's tools for one message: the same tools agents use, run as the person, plus two
@@ -1652,7 +1654,7 @@ export function assistantToolkit(env: AgentEnv, origin: string, account: Account
     },
   });
   tools.open_settings = aiTool({
-    description: 'Take the person to a part of Settings when they want to set something up themselves: email (connect a mailbox), chat-networks (WhatsApp, Signal and others), cross-posting, ai (to add, remove or choose their own AI provider keys: always send people here for keys), privacy, feed (their algorithm), language, appearance, messages, data, profile or about.',
+    description: 'Take the person to a part of Settings when they want to set something up themselves: email (connect a mailbox), chat-networks (WhatsApp, Signal and others), cross-posting, ai (to add, remove or choose their own AI provider keys: always send people here for keys), privacy (who can see their posts, their shown name, identity verification), feed (their algorithm), language, appearance, messages (read receipts), data (export), profile (edit profile), security (password and passkeys), payments (card, wallets, tips), store (ONDC), people (their accounts elsewhere), contacts, account (sign out or delete) or about. The app opens the exact screen and scrolls to it.',
     inputSchema: z.object({ section: z.enum(settingsSections) }),
     execute: async ({ section }: { section: string }) => { actions.push({ type: 'open', value: section }); used.push('open_settings'); return `Opening Settings → ${section} for the person now.`; },
   });

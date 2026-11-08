@@ -32,7 +32,9 @@ export function useUniversalSearch(query: string, loadedPosts: SocialPost[], con
   const parsed = useMemo(() => parseSearchQuery(active), [active]);
   const searchable = parsed.raw.length > 0;
 
-  const settings: SettingIndexEntry[] = useMemo(() => (searchable ? searchSettings(parsed.raw.toLocaleLowerCase()).slice(0, 4) : []), [parsed, searchable]);
+  // Settings are a small local index, ranked in well under a millisecond, so they follow every key
+  // press instead of waiting for the debounce that holds back the network searches.
+  const settings: SettingIndexEntry[] = useMemo(() => (query.trim() ? searchSettings(query).slice(0, 4) : []), [query]);
   const messages = useMemo(() => (searchable && parsed.keywords.length ? conversations.filter((conversation) => {
     const text = [conversationTitle(conversation), conversation.preview, ...conversation.messages.map((message) => message.body)].join(' ').toLocaleLowerCase();
     return parsed.keywords.every((keyword) => text.includes(keyword));

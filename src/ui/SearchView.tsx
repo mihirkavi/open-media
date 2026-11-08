@@ -16,6 +16,7 @@ import { recentSearchesKey, rememberSearch } from '../domain/recentSearches';
 import { formatEmailBody } from '../domain/emailBody';
 import { highlightTerms, snippetAround } from '../domain/searchHighlight';
 import { conversationTitle } from '../domain/selectors';
+import { settingPath } from '../domain/settings';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { AiMark } from './AiMark';
@@ -44,19 +45,20 @@ interface ResultItem { key: string; section: string; icon: keyof typeof Ionicons
  * result, which sends it to the AI chat, where the assistant can read the person's messages,
  * email and Open Media to answer.
  */
-export function SearchView({ posts, conversations, viewer, lenses, onNavigate, onOpenConversation, onClose, onDismiss, onAsk, initialQuery = '' }: { posts: SocialPost[]; conversations: Conversation[]; viewer?: FeedViewer; lenses?: FeedLenses; onNavigate?: (target: SearchTarget) => void; onOpenConversation?: (id: string) => void; onClose?: () => void; /** Esc on an empty field: back to where the person was. */ onDismiss?: () => void; /** Signed in: send this to Open Media AI. */ onAsk?: (text: string) => void; initialQuery?: string }) {
+export function SearchView({ posts, conversations, viewer, lenses, onNavigate, onOpenSetting, onOpenConversation, onClose, onDismiss, onAsk, initialQuery = '' }: { posts: SocialPost[]; conversations: Conversation[]; viewer?: FeedViewer; lenses?: FeedLenses; onNavigate?: (target: SearchTarget) => void; /** Opens one setting where it lives, scrolled to it. */ onOpenSetting?: (id: string) => void; onOpenConversation?: (id: string) => void; onClose?: () => void; /** Esc on an empty field: back to where the person was. */ onDismiss?: () => void; /** Signed in: send this to Open Media AI. */ onAsk?: (text: string) => void; initialQuery?: string }) {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
   const [query, setQuery] = useState(initialQuery);
   // A hashtag tapped in a post opens Search with it filled in.
   useEffect(() => { if (initialQuery) setQuery(initialQuery); }, [initialQuery]);
   const search = useUniversalSearch(query, posts, conversations);
   const byId = useMemo(() => new Map(search.posts.map((post) => [post.id, post])), [search.posts]);
-  const hasQuery = Boolean(search.parsed.raw);
+  // Results show from the first key press; settings match at once, network results follow the debounce.
+  const hasQuery = Boolean(query.trim());
   const lensRows = useLensRows(search.parsed.raw, lenses, Boolean(viewer));
   const profileRows = useProfileRows(query, Boolean(viewer));
   const receiptRows = useReadReceiptRows(query, Boolean(viewer));
   const feedRows = useWebFeedRows(query, Boolean(viewer));
-  const nothing = hasQuery && !search.searching && !search.posts.length && !search.settings.length && !search.messages.length && !lensRows.length && !profileRows.length && !feedRows.length;
+  const nothing = Boolean(search.parsed.raw) && !search.searching && !search.posts.length && !search.settings.length && !search.messages.length && !lensRows.length && !profileRows.length && !feedRows.length;
   // Choosing a lens shows the Feed through it.
   const showFeed = () => { if (onNavigate) onNavigate('feed'); else onClose?.(); };
 
@@ -83,7 +85,9 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
     ...feedRows.map((row) => ({ key: row.key, section: 'Web feeds', icon: 'logo-rss' as const, title: row.title, subtitle: row.subtitle, run: () => { row.run().then((leave) => { if (leave) showFeed(); }).catch(() => undefined); } })),
     ...receiptRows.map((row) => ({ key: row.key, section: 'Messages', icon: 'checkmark-done-outline' as const, title: row.title, subtitle: row.subtitle, run: () => { row.run().catch(() => undefined); } })),
     ...profileRows.map((row) => ({ key: row.key, section: 'Your profile', icon: 'briefcase-outline' as const, title: row.title, subtitle: row.subtitle, run: () => { row.run().catch(() => undefined); } })),
-    ...search.settings.map((setting) => ({ key: setting.id, section: 'Settings', icon: 'settings-outline' as const, title: setting.title, subtitle: setting.description, run: () => onNavigate?.('settings') })),
+    // A setting opens where it lives (Profile › Sign-in and security, Settings › Feed…), scrolled to it.
+    // Read receipts are changed right here, so their row fills the field instead.
+    ...search.settings.filter((setting) => !(setting.page === 'search' && receiptRows.length)).map((setting) => ({ key: setting.id, section: 'Settings', icon: 'settings-outline' as const, title: setting.title, subtitle: `${settingPath(setting)} · ${setting.description}`, run: () => setting.page === 'search' ? setQuery('read receipts') : onOpenSetting ? onOpenSetting(setting.id) : onNavigate?.('settings') })),
     ...search.messages.map((conversation) => ({ key: conversation.id, section: 'Messages and email', icon: (conversation.email ? 'mail-outline' : 'chatbubble-outline') as keyof typeof Ionicons.glyphMap, title: conversationTitle(conversation), subtitle: matchingLine(conversation), run: () => onOpenConversation ? onOpenConversation(conversation.id) : onNavigate?.('messages') })),
     ...(asking ? [] : askItem),
   ].map((item) => ({ ...item, run: remember(item.run) })) : [

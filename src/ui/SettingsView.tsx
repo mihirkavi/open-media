@@ -1,5 +1,5 @@
 import Ionicons from './Icon';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { Text, TextInput } from './Text';
 
@@ -12,8 +12,9 @@ import { radii, ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { BridgedChatsSettings } from './BridgedChatsSettings';
 import { Loader } from './Loader';
+import { SettingAnchor, SettingAnchorScope } from './SettingAnchor';
 
-interface SettingsViewProps { onClose: () => void; onMailSynced: () => void; }
+interface SettingsViewProps { onClose: () => void; onMailSynced: () => void; /** The section a search result opened this page for. */ focus?: { anchor: string; at: number } }
 
 /** Form state: the account plus whether to send mail and whether servers were typed by hand. */
 interface MailForm extends Omit<MailAccountConfiguration, 'smtp'> {
@@ -57,8 +58,9 @@ function toConfiguration(form: MailForm): MailAccountConfiguration {
   return { ...account, email: account.email.trim(), username: account.username.trim(), host: account.host.trim(), ...(sendEnabled ? { smtp: { host: smtpHost.trim(), port: smtpPort, security: smtpSecurity } } : {}) };
 }
 
-export function SettingsView({ onClose, onMailSynced }: SettingsViewProps) {
+export function SettingsView({ onClose, onMailSynced, focus }: SettingsViewProps) {
   const { colors } = useOpenMediaTheme();
+  const scroller = useRef<ScrollView>(null);
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [mailForm, setMailForm] = useState<MailForm>();
   const [detected, setDetected] = useState<DetectedMailProvider>();
@@ -253,12 +255,14 @@ export function SettingsView({ onClose, onMailSynced }: SettingsViewProps) {
 
   return (
     // The keyboard pushes the page up so sign-in fields for chat networks stay visible.
-    <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+    <ScrollView ref={scroller} style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+      <SettingAnchorScope scroller={scroller} anchor={focus?.anchor} at={focus?.at}>
       <View style={styles.titleRow}>
         <Pressable accessibilityRole="button" accessibilityLabel="Back to Settings" onPress={onClose} style={styles.back}><Ionicons name="chevron-back" size={22} color={colors.text} /></Pressable>
         <Text style={styles.title}>Email & connections</Text>
       </View>
 
+      <SettingAnchor id="email">
       <Text style={styles.sectionTitle}>Email</Text>
       <Text style={styles.sectionCopy}>Your email shows up in Messages next to everyone else, and you can reply from there.</Text>
       <View style={styles.card}>
@@ -287,8 +291,9 @@ export function SettingsView({ onClose, onMailSynced }: SettingsViewProps) {
       {mailBusy && !mailForm ? <Loader style={styles.inlineSpinner} color={colors.text} /> : null}
       {mailError && !mailForm ? <Text accessibilityRole="alert" style={styles.error}>{mailError}</Text> : null}
       <Text style={styles.footnote}>Passwords are encrypted by the mail service and never stored in the app.</Text>
+      </SettingAnchor>
 
-      {Platform.OS !== 'web' ? <>
+      {Platform.OS !== 'web' ? <SettingAnchor id="device-contacts">
         <Text style={styles.sectionTitle}>Contacts</Text>
         <Text style={styles.sectionCopy}>Tidy email and phone formatting on this device. Every change is shown for review first.</Text>
         <View style={styles.card}>
@@ -305,11 +310,13 @@ export function SettingsView({ onClose, onMailSynced }: SettingsViewProps) {
           ))}
         </View>
         {contactsError ? <Text style={styles.error}>{contactsError}</Text> : null}
-      </> : null}
+      </SettingAnchor> : null}
 
+      <SettingAnchor id="chat-networks">
       <Text style={styles.sectionTitle}>Chat networks</Text>
       <BridgedChatsSettings />
-
+      </SettingAnchor>
+      </SettingAnchorScope>
     </ScrollView>
   );
 }

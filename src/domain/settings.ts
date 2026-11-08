@@ -1,38 +1,227 @@
-export type SettingRoute = 'appearance' | 'feed' | 'language' | 'messages' | 'email' | 'connected-apps' | 'cross-posting' | 'ai' | 'privacy' | 'data' | 'profile' | 'about';
+/**
+ * The settings graph: every setting in Open Media, where it lives, and how settings relate.
+ *
+ * Each entry is a node with its exact place in the app (the page and the anchor of the section that
+ * holds it) and the breadcrumb a person sees on the way there. `related` links are the edges, so a
+ * search for one setting can offer its neighbours. In-app Search, Settings' own search field, Open
+ * Media AI and the agent API all read this one graph, so a setting is findable everywhere as soon
+ * as it is listed here. When a setting moves or a new one ships, update its entry in the same change.
+ */
+
+/** The broad areas Open Media AI can open (the `open_settings` tool). Kept for agents and older clients. */
+export type SettingRoute =
+  | 'appearance' | 'feed' | 'language' | 'messages' | 'email' | 'connected-apps' | 'cross-posting' | 'ai' | 'privacy' | 'data' | 'profile' | 'about'
+  | 'security' | 'payments' | 'store' | 'people' | 'contacts' | 'account';
+
+/**
+ * The page a setting is on. `settings` is the Settings tab, `connections` its Email & connections
+ * page, `profile` the Profile tab, `edit-profile` the editor opened from Profile, and `mission` / `developers` the About pages. `search` settings are changed by
+ * typing in Search itself (“turn off read receipts”).
+ */
+export type SettingPage = 'settings' | 'connections' | 'profile' | 'edit-profile' | 'mission' | 'developers' | 'search';
+
+/** Section anchors the screens mark with `SettingAnchor`, so a result can scroll straight to them. */
+export type SettingAnchorId =
+  | 'appearance' | 'default-feed' | 'feed-algorithm' | 'translation' | 'connections' | 'cross-posting' | 'ai' | 'your-data' | 'professional' | 'about'
+  | 'email' | 'device-contacts' | 'chat-networks'
+  | 'profile-actions' | 'security' | 'people' | 'identity' | 'payments' | 'store' | 'delete-account';
 
 export interface SettingIndexEntry {
   id: string;
   title: string;
   description: string;
   route: SettingRoute;
+  page: SettingPage;
+  /** The section to scroll to and outline on that page. */
+  anchor?: SettingAnchorId;
+  /** What a person taps on the way there, ending with the section, e.g. Profile › Sign-in and security. */
+  path: string[];
   keywords: string[];
+  /** Neighbouring settings: the graph's edges. */
+  related?: string[];
 }
 
 export const settingIndex: SettingIndexEntry[] = [
-  { id: 'appearance', title: 'Appearance', description: 'Use System, Light, or Dark appearance.', route: 'appearance', keywords: ['dark mode', 'light mode', 'theme', 'system'] },
-  { id: 'feed-mode', title: 'Feed mode', description: 'Choose transparent Relevant, chronological Raw or Work for jobs and networking, and write your own algorithm in plain words under Your algorithm.', route: 'feed', keywords: ['chronological feed', 'raw', 'relevant', 'work', 'jobs feed', 'networking', 'algorithm', 'feed lens', 'lenses', 'my feed', 'feed filters', 'why am i seeing this', 'my algorithm', 'write algorithm', 'tune feed', 'customize feed'] },
-  { id: 'professional', title: 'Professional profile', description: 'Your headline, experience and skills, and whether you’re open to work or hiring. Type it in Search (“my headline is…”, “I’m open to work”) or ask an agent to import your resume or LinkedIn export. Jobs and networking are in the Work feed.', route: 'profile', keywords: ['professional profile', 'headline', 'resume', 'cv', 'linkedin', 'open to work', 'hiring', 'jobs', 'job search', 'networking', 'career', 'work experience', 'skills'] },
-  { id: 'translation', title: 'Translation', description: 'Show posts, comments, captions, events and messages in other languages in English automatically, with a note to see the original.', route: 'language', keywords: ['translate', 'translation', 'language', 'english', 'foreign language', 'show original', 'auto translate', 'spanish', 'portuguese', 'japanese'] },
-  { id: 'message-privacy', title: 'Message privacy', description: 'Control who can message you.', route: 'messages', keywords: ['who can message me', 'direct messages', 'dm privacy'] },
-  { id: 'email', title: 'Email', description: 'Connect and manage mail accounts.', route: 'email', keywords: ['connect gmail', 'connect outlook', 'imap', 'mail'] },
-  { id: 'feed-networks', title: 'Networks in Feed', description: 'Feed mixes public posts from Open Media, Bluesky, Mastodon, Nostr, Farcaster, Lens, Hive, and DeSo into one stream.', route: 'feed', keywords: ['blockchain', 'bluesky', 'mastodon', 'fediverse', 'nostr', 'farcaster', 'lens', 'hive', 'deso', 'web3', 'decentralized', 'sources'] },
-  { id: 'web-feeds', title: 'Web feeds (RSS, Atom, JSON Feed)', description: 'Follow blogs, news sites, podcasts and weather alerts in your Feed: type or paste a site in Search (“theverge.com”, “bbc”, “weather california”), “unfollow …” to stop, and “import opml” or “export opml” to move feeds between readers. Official feeds from major news outlets and weather services carry the blue tick.', route: 'feed', keywords: ['rss', 'atom', 'json feed', 'web feeds', 'feed reader', 'subscribe', 'blogs', 'news', 'news channels', 'weather', 'weather alerts', 'podcasts', 'opml', 'import feeds', 'export feeds'] },
-  { id: 'connected-apps', title: 'Connected apps', description: 'Review authorized networks and capabilities.', route: 'connected-apps', keywords: ['disconnect instagram', 'connections', 'providers'] },
-  { id: 'cross-posting', title: 'Cross-posting', description: 'Connect Bluesky, Mastodon, Nostr, Farcaster, Lens, Hive, DeSo, X, Threads, LinkedIn, Instagram and Facebook; every post goes to all connected networks unless you turn one off.', route: 'cross-posting', keywords: ['stop posting to farcaster', 'stop posting to linkedin', 'publish everywhere', 'destinations', 'connect bluesky', 'connect mastodon', 'connect nostr', 'connect farcaster', 'connect lens', 'connect hive', 'connect deso', 'connect x', 'connect twitter', 'connect threads', 'connect linkedin', 'connect instagram', 'connect facebook', 'fediverse', 'post everywhere'] },
-  { id: 'open-media-ai', title: 'Open Media AI', description: 'Add your own API key for ChatGPT, Claude, Gemini, OpenRouter, Groq, Mistral, DeepSeek or Grok, choose which model answers, or remove a key. Keys are encrypted and never shown again.', route: 'ai', keywords: ['api key', 'api keys', 'ai key', 'byok', 'bring your own key', 'openai', 'chatgpt', 'gpt', 'claude', 'anthropic', 'gemini', 'openrouter', 'groq', 'mistral', 'deepseek', 'grok', 'xai', 'llama', 'ai model', 'which model', 'ai chat'] },
-  { id: 'privacy', title: 'Privacy', description: 'Manage privacy and recommendation data boundaries.', route: 'privacy', keywords: ['private', 'recommendation data', 'tracking'] },
-  { id: 'export', title: 'Export your data', description: 'Download portable account data.', route: 'data', keywords: ['export my data', 'download', 'portability'] },
-  { id: 'chat-networks', title: 'Chat networks', description: 'Bring WhatsApp, Signal, Instagram, Messenger, Discord and other chat apps into Messages through opt-in bridges.', route: 'connected-apps', keywords: ['whatsapp', 'signal', 'telegram', 'instagram dms', 'messenger', 'discord', 'slack', 'linkedin messages', 'bridges', 'beeper'] },
-  { id: 'mission', title: 'Our mission', description: 'Why Open Media exists, its principles, and where it is going.', route: 'about', keywords: ['about', 'mission', 'principles', 'roadmap', 'vision', 'open source'] },
-  { id: 'developers', title: 'Developers and agents', description: 'Use Open Media from code or an AI assistant: APIs, MCP servers and your access token.', route: 'about', keywords: ['api', 'mcp', 'agent', 'ai assistant', 'claude', 'chatgpt', 'developer', 'token', 'automation', 'llms.txt'] },
+  // Settings tab
+  { id: 'appearance', title: 'Appearance', description: 'Use System, Light, or Dark appearance.', route: 'appearance', page: 'settings', anchor: 'appearance', path: ['Settings', 'Appearance'], keywords: ['dark mode', 'light mode', 'night mode', 'theme', 'system', 'colors', 'colours', 'display'], related: ['translation'] },
+  { id: 'feed-mode', title: 'Feed mode', description: 'Choose transparent Relevant, chronological Raw or Work for jobs and networking.', route: 'feed', page: 'settings', anchor: 'default-feed', path: ['Settings', 'Feed'], keywords: ['default feed', 'chronological feed', 'chronological', 'newest first', 'raw', 'relevant', 'work', 'jobs feed', 'networking', 'feed lens', 'lenses', 'my feed', 'feed filters'], related: ['feed-algorithm', 'feed-networks', 'web-feeds'] },
+  { id: 'feed-algorithm', title: 'Your algorithm', description: 'Write your own feed algorithm in plain words (“a bit more about design”, “newest first”, “undo”) and see why each post is shown.', route: 'feed', page: 'settings', anchor: 'feed-algorithm', path: ['Settings', 'Feed', 'Your algorithm'], keywords: ['algorithm', 'my algorithm', 'write algorithm', 'tune feed', 'customize feed', 'customise feed', 'why am i seeing this', 'ranking', 'recommendations', 'less noisy', 'manifest'], related: ['feed-mode', 'privacy'] },
+  { id: 'feed-networks', title: 'Networks in Feed', description: 'Feed mixes public posts from Open Media, Bluesky, Mastodon, Nostr, Farcaster, Lens, Hive, and DeSo into one stream.', route: 'feed', page: 'settings', anchor: 'default-feed', path: ['Settings', 'Feed'], keywords: ['blockchain', 'bluesky', 'mastodon', 'fediverse', 'nostr', 'farcaster', 'lens', 'hive', 'deso', 'web3', 'decentralized', 'sources'], related: ['feed-mode', 'cross-posting'] },
+  { id: 'web-feeds', title: 'Web feeds (RSS, Atom, JSON Feed)', description: 'Follow blogs, news sites, podcasts and weather alerts in your Feed: type or paste a site in Search (“theverge.com”, “bbc”, “weather california”), “unfollow …” to stop, and “import opml” or “export opml” to move feeds between readers.', route: 'feed', page: 'settings', anchor: 'default-feed', path: ['Settings', 'Feed'], keywords: ['rss', 'atom', 'json feed', 'web feeds', 'feed reader', 'subscribe', 'blogs', 'news', 'news channels', 'weather', 'weather alerts', 'podcasts', 'opml', 'import feeds', 'export feeds'], related: ['feed-mode'] },
+  { id: 'translation', title: 'Translation', description: 'Show posts, comments, captions, events and messages in other languages in English automatically, with a note to see the original.', route: 'language', page: 'settings', anchor: 'translation', path: ['Settings', 'Translation'], keywords: ['translate', 'translation', 'language', 'english', 'foreign language', 'show original', 'auto translate', 'spanish', 'portuguese', 'japanese'], related: ['appearance'] },
+  { id: 'connected-apps', title: 'Connected apps', description: 'Review authorized networks and capabilities.', route: 'connected-apps', page: 'settings', anchor: 'connections', path: ['Settings', 'Connections'], keywords: ['disconnect instagram', 'connections', 'providers', 'integrations', 'linked apps'], related: ['email', 'chat-networks', 'cross-posting'] },
+  { id: 'cross-posting', title: 'Cross-posting', description: 'Connect Bluesky, Mastodon, Nostr, Farcaster, Lens, Hive, DeSo, X, Threads, LinkedIn, Instagram and Facebook; every post goes to all connected networks unless you turn one off.', route: 'cross-posting', page: 'settings', anchor: 'cross-posting', path: ['Settings', 'Cross-posting'], keywords: ['stop posting to farcaster', 'stop posting to linkedin', 'publish everywhere', 'destinations', 'connect bluesky', 'connect mastodon', 'connect nostr', 'connect farcaster', 'connect lens', 'connect hive', 'connect deso', 'connect x', 'connect twitter', 'connect threads', 'connect linkedin', 'connect instagram', 'connect facebook', 'fediverse', 'post everywhere', 'share to'], related: ['connected-apps', 'people-accounts'] },
+  { id: 'open-media-ai', title: 'Open Media AI', description: 'Add your own API key for ChatGPT, Claude, Gemini, OpenRouter, Groq, Mistral, DeepSeek or Grok, choose which model answers, or remove a key. Keys are encrypted and never shown again.', route: 'ai', page: 'settings', anchor: 'ai', path: ['Settings', 'Open Media AI'], keywords: ['api key', 'api keys', 'ai key', 'byok', 'bring your own key', 'openai', 'chatgpt', 'gpt', 'claude', 'anthropic', 'gemini', 'openrouter', 'groq', 'mistral', 'deepseek', 'grok', 'xai', 'llama', 'ai model', 'which model', 'who answers', 'ai chat', 'assistant'], related: ['developers'] },
+  { id: 'export', title: 'Export your data', description: 'Download a readable copy of your account. Encrypted mailbox credentials are never included.', route: 'data', page: 'profile', anchor: 'profile-actions', path: ['Profile', 'Export my data'], keywords: ['export my data', 'download my data', 'download', 'portability', 'backup', 'takeout', 'copy of my data', 'gdpr'], related: ['delete-account', 'contacts'] },
+  { id: 'professional', title: 'Professional profile', description: 'Your headline, experience and skills, and whether you’re open to work or hiring. Type it in Search (“my headline is…”, “I’m open to work”) or ask an agent to import your resume or LinkedIn export.', route: 'profile', page: 'edit-profile', path: ['Profile', 'Edit profile', 'Work'], keywords: ['professional profile', 'headline', 'resume', 'cv', 'linkedin', 'open to work', 'hiring', 'jobs', 'job search', 'networking', 'career', 'work experience', 'experience', 'education', 'skills', 'projects', 'work status'], related: ['edit-profile', 'feed-mode'] },
+  { id: 'mission', title: 'Our mission', description: 'Why Open Media exists, its principles, and where it is going.', route: 'about', page: 'mission', anchor: 'about', path: ['Settings', 'About Open Media', 'Our mission'], keywords: ['about', 'mission', 'principles', 'roadmap', 'vision', 'open source'], related: ['developers'] },
+  { id: 'developers', title: 'Developers and agents', description: 'Use Open Media from code or an AI assistant: APIs, MCP servers and your access token.', route: 'about', page: 'developers', anchor: 'about', path: ['Settings', 'About Open Media', 'Developers and agents'], keywords: ['api', 'mcp', 'agent', 'ai assistant', 'claude', 'chatgpt', 'developer', 'token', 'access token', 'automation', 'llms.txt', 'plugin'], related: ['open-media-ai'] },
+
+  // Settings › Email & connections
+  { id: 'email', title: 'Email', description: 'Connect, sync and remove mail accounts: Gmail, iCloud, Yahoo, Fastmail, Zoho, or any IMAP/SMTP provider. Email shows up in Messages.', route: 'email', page: 'connections', anchor: 'email', path: ['Settings', 'Email & connections', 'Email'], keywords: ['add email account', 'connect gmail', 'connect outlook', 'connect icloud', 'imap', 'pop', 'pop3', 'smtp', 'mail', 'mailbox', 'inbox', 'app password', 'sync email', 'remove mailbox', 'outgoing mail'], related: ['chat-networks', 'device-contacts'] },
+  { id: 'chat-networks', title: 'Chat networks', description: 'Bring WhatsApp, Signal, Instagram, Messenger, Discord and other chat apps into Messages through opt-in bridges.', route: 'connected-apps', page: 'connections', anchor: 'chat-networks', path: ['Settings', 'Email & connections', 'Chat networks'], keywords: ['whatsapp', 'signal', 'telegram', 'instagram dms', 'messenger', 'discord', 'slack', 'linkedin messages', 'bridges', 'bridged chats', 'beeper', 'disconnect whatsapp'], related: ['email', 'connected-apps'] },
+  { id: 'device-contacts', title: 'Contacts on this device', description: 'Tidy email and phone formatting in your phone’s contacts. Every change is shown for review first. Phone app only.', route: 'contacts', page: 'connections', anchor: 'device-contacts', path: ['Settings', 'Email & connections', 'Contacts'], keywords: ['phone contacts', 'address book', 'clean contacts', 'tidy contacts', 'contact cleanup', 'format phone numbers'], related: ['contacts', 'email'] },
+
+  // Profile tab
+  { id: 'edit-profile', title: 'Edit profile', description: 'Change your name, picture, bio, location, links and the open networks shown on your profile.', route: 'profile', page: 'edit-profile', path: ['Profile', 'Edit profile'], keywords: ['profile picture', 'avatar', 'photo', 'change picture', 'display name', 'change my name', 'bio', 'about me', 'location', 'links', 'website', 'username', 'open networks'], related: ['professional', 'identity-name'] },
+  { id: 'password', title: 'Password', description: 'Set or change the password you sign in with on any device, instead of waiting for an email code.', route: 'security', page: 'profile', anchor: 'security', path: ['Profile', 'Sign-in and security'], keywords: ['password', 'change password', 'set password', 'reset password', 'new password', 'sign in', 'login', 'log in', 'email code', 'security'], related: ['passkeys', 'sign-out'] },
+  { id: 'passkeys', title: 'Passkeys', description: 'Add or remove passkeys, used as a second step after your password.', route: 'security', page: 'profile', anchor: 'security', path: ['Profile', 'Sign-in and security'], keywords: ['passkey', 'passkeys', 'two factor', 'two-factor', '2fa', 'mfa', 'second step', 'face id', 'touch id', 'security key', 'webauthn'], related: ['password'] },
+  { id: 'people-accounts', title: 'Your accounts elsewhere', description: 'Link your accounts on other networks so people who know you there can find you here.', route: 'people', page: 'profile', anchor: 'people', path: ['Profile', 'Your accounts elsewhere'], keywords: ['linked accounts', 'other accounts', 'my accounts', 'bluesky handle', 'mastodon handle', 'find me', 'link account'], related: ['cross-posting', 'contacts'] },
+  { id: 'contacts', title: 'Your contacts', description: 'See the people you saved and review suggested matches. Only you can see your contacts; a saved name shows everywhere.', route: 'contacts', page: 'profile', anchor: 'people', path: ['Profile', 'Your contacts'], keywords: ['contacts', 'people', 'address book', 'contact list', 'merge contacts', 'duplicates', 'saved contacts'], related: ['contacts-import', 'device-contacts', 'people-accounts'] },
+  { id: 'contacts-import', title: 'Import contacts', description: 'Add contacts from your phone, the browser’s contact picker, or a vCard or CSV file from Apple, Google or Outlook. You review them before anything is saved.', route: 'contacts', page: 'profile', anchor: 'people', path: ['Profile', 'Your contacts'], keywords: ['import contacts', 'add contacts', 'vcard', 'vcf', 'csv contacts', 'upload contacts', 'google contacts', 'outlook contacts'], related: ['contacts', 'device-contacts'] },
+  { id: 'privacy', title: 'Who can see your posts', description: 'Make your account private so only you see your posts, or public so anyone can read them.', route: 'privacy', page: 'profile', anchor: 'identity', path: ['Profile', 'Privacy and identity'], keywords: ['privacy', 'private', 'private account', 'public account', 'make account private', 'hide my posts', 'visibility', 'who can see', 'recommendation data', 'tracking'], related: ['identity-name', 'followers', 'feed-algorithm'] },
+  { id: 'identity-name', title: 'Name others see', description: 'Choose the name shown on your posts, and verify your identity with Stripe Identity for the blue tick. Your legal name stays private unless you show it.', route: 'privacy', page: 'profile', anchor: 'identity', path: ['Profile', 'Privacy and identity'], keywords: ['shown name', 'real name', 'legal name', 'verify identity', 'verification', 'verified', 'blue tick', 'blue check', 'checkmark', 'stripe identity', 'id check'], related: ['privacy', 'edit-profile'] },
+  { id: 'followers', title: 'Follower requests', description: 'With a private account, approve or decline people who ask to follow you.', route: 'privacy', page: 'profile', anchor: 'identity', path: ['Profile', 'Privacy and identity', 'Followers'], keywords: ['followers', 'follow requests', 'approve follower', 'remove follower', 'who follows me'], related: ['privacy'] },
+  { id: 'payments', title: 'Payments', description: 'Get paid by card with Stripe, link USDC wallets, and see your payment history.', route: 'payments', page: 'profile', anchor: 'payments', path: ['Profile', 'Payments'], keywords: ['payments', 'get paid', 'card payments', 'stripe', 'payouts', 'wallet', 'wallets', 'usdc', 'crypto', 'payment history', 'money', 'bank'], related: ['tips', 'store'] },
+  { id: 'tips', title: 'Accept tips', description: 'Let people tip you from any of your posts, by card or USDC.', route: 'payments', page: 'profile', anchor: 'payments', path: ['Profile', 'Payments'], keywords: ['tips', 'tipping', 'accept tips', 'donations', 'support me'], related: ['payments'] },
+  { id: 'store', title: 'Sell on ONDC (India)', description: 'Set up your ONDC store: category, time to ship, returns and cancellation.', route: 'store', page: 'profile', anchor: 'store', path: ['Profile', 'Sell on ONDC (India)'], keywords: ['ondc', 'store', 'shop', 'sell', 'seller', 'india', 'returns', 'cancellation', 'shipping', 'products', 'listings'], related: ['payments'] },
+  { id: 'sign-out', title: 'Sign out', description: 'Sign out of Open Media on this device.', route: 'account', page: 'profile', anchor: 'profile-actions', path: ['Profile', 'Sign out'], keywords: ['sign out', 'log out', 'logout', 'switch account'], related: ['password'] },
+  { id: 'delete-account', title: 'Delete account', description: 'Permanently remove your profile, private mailbox data, authored messages and direct conversations.', route: 'account', page: 'profile', anchor: 'delete-account', path: ['Profile', 'Delete account'], keywords: ['delete account', 'remove account', 'close account', 'deactivate', 'erase my data'], related: ['export'] },
+
+  // Changed by typing in Search
+  { id: 'read-receipts', title: 'Read receipts', description: 'Choose whether people see when you’ve read their messages: type “turn off read receipts” or “turn on read receipts” in Search.', route: 'messages', page: 'search', path: ['Search'], keywords: ['read receipts', 'seen', 'blue ticks', 'message privacy', 'dm privacy', 'messages privacy'], related: ['privacy'] },
 ];
 
-export function searchSettings(query: string): SettingIndexEntry[] {
-  const normalized = query.trim().toLocaleLowerCase();
-  if (!normalized) return settingIndex;
-  const meaningfulTokens = normalized.split(/\s+/).filter((token) => !['a', 'an', 'the', 'to', 'my', 'use', 'show', 'me', 'please'].includes(token));
-  return settingIndex.filter((entry) => {
-    const searchable = [entry.title, entry.description, ...entry.keywords].join(' ').toLocaleLowerCase();
-    return searchable.includes(normalized) || meaningfulTokens.every((token) => searchable.includes(token));
+const byId = new Map(settingIndex.map((entry) => [entry.id, entry]));
+
+export function settingById(id: string): SettingIndexEntry | undefined {
+  return byId.get(id);
+}
+
+/** “Profile › Sign-in and security”: where a setting is, as a person would read it. */
+export function settingPath(entry: SettingIndexEntry): string {
+  return entry.path.join(' › ');
+}
+
+/** The settings linked to this one, nearest first. */
+export function relatedSettings(entry: SettingIndexEntry): SettingIndexEntry[] {
+  return (entry.related ?? []).map((id) => byId.get(id)).filter((item): item is SettingIndexEntry => Boolean(item));
+}
+
+/** The entry Open Media AI's `open_settings` sections and older focus values stand for. */
+const sectionEntries: Record<string, string> = {
+  appearance: 'appearance', feed: 'feed-algorithm', language: 'translation', messages: 'read-receipts', email: 'email',
+  'connected-apps': 'connected-apps', 'chat-networks': 'chat-networks', 'cross-posting': 'cross-posting', ai: 'open-media-ai',
+  privacy: 'privacy', data: 'export', profile: 'edit-profile', about: 'mission', security: 'password', payments: 'payments',
+  store: 'store', people: 'people-accounts', contacts: 'contacts', account: 'sign-out',
+};
+
+/** Resolves a setting id, or an AI section name like “feed”, to its entry. */
+export function settingForSection(section: string): SettingIndexEntry | undefined {
+  return byId.get(section) ?? byId.get(sectionEntries[section] ?? '');
+}
+
+// ---------------------------------------------------------------------------------------------
+// Ranked search. The index is tokenized once, when this module loads; each search then scores
+// every entry with plain string and set operations, so it stays fast enough to run on every key.
+
+const stopWords = new Set(['a', 'an', 'the', 'to', 'my', 'i', 'me', 'use', 'show', 'please', 'how', 'do', 'can', 'where', 'is', 'are', 'of', 'for', 'in', 'on', 'turn', 'set', 'change', 'want', 'find', 'open', 'go', 'settings', 'setting']);
+
+/** Words people use for the same thing. Each query word also matches its synonyms. */
+const synonyms: Record<string, string[]> = {
+  theme: ['appearance', 'dark', 'light'], night: ['dark'], colour: ['color'], colours: ['colors'],
+  login: ['sign', 'password'], logon: ['sign'], signin: ['sign'], logout: ['sign', 'out'], pw: ['password'], pass: ['password'], pwd: ['password'],
+  '2fa': ['passkeys'], mfa: ['passkeys'], authentication: ['password', 'passkeys'],
+  avatar: ['picture', 'photo'], pfp: ['picture', 'photo'], photo: ['picture'], username: ['handle', 'name'],
+  mail: ['email'], gmail: ['email'], outlook: ['email'], inbox: ['email'], mailbox: ['email'],
+  dm: ['messages'], dms: ['messages'], chat: ['messages', 'chat'], chats: ['chat'],
+  twitter: ['x'], fb: ['facebook'], ig: ['instagram'], insta: ['instagram'],
+  pay: ['payments'], paid: ['payments'], money: ['payments'], crypto: ['wallets', 'usdc'], tip: ['tips'],
+  delete: ['delete', 'remove'], remove: ['remove', 'delete'], erase: ['delete'],
+  download: ['export'], backup: ['export'], ai: ['ai', 'model'], llm: ['ai', 'model'], key: ['key', 'api'],
+  algo: ['algorithm'], ranking: ['algorithm'], timeline: ['feed'], language: ['translation', 'translate'],
+  private: ['privacy', 'private'], visibility: ['privacy'], verify: ['verification', 'verified'], tick: ['verified'], check: ['verified'],
+  shop: ['store'], sell: ['store'], contact: ['contacts'], vcard: ['vcf'],
+};
+
+interface IndexedEntry { entry: SettingIndexEntry; title: string; titleWords: Set<string>; keywords: string[]; words: Set<string>; text: string }
+
+const words = (text: string) => text.toLocaleLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').split(/[^a-z0-9.]+/).filter(Boolean);
+/** Light stemming: “passkeys” and “passkey”, “translating” and “translate” match. */
+const stem = (word: string) => word.length > 4 ? word.replace(/(ings?|ed|es|s)$/, '') : word;
+
+const indexed: IndexedEntry[] = settingIndex.map((entry) => {
+  const all = [entry.title, entry.description, ...entry.keywords, ...entry.path];
+  const wordSet = new Set(all.flatMap(words).flatMap((word) => [word, stem(word)]));
+  return {
+    entry,
+    title: entry.title.toLocaleLowerCase(),
+    titleWords: new Set(words(entry.title).flatMap((word) => [word, stem(word)])),
+    keywords: entry.keywords.map((keyword) => keyword.toLocaleLowerCase()),
+    words: wordSet,
+    text: all.join(' ').toLocaleLowerCase(),
+  };
+});
+
+/** True when the two words are at most one edit apart (a typo: one letter added, missing, changed or swapped). */
+function oneEditApart(a: string, b: string): boolean {
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0; let j = 0; let edits = 0;
+  while (i < a.length && j < b.length) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++edits > 1) return false;
+    if (a.length > b.length) i++;
+    else if (b.length > a.length) j++;
+    else if (a[i + 1] === b[j] && a[i] === b[j + 1]) { i += 2; j += 2; }
+    else { i++; j++; }
+  }
+  return edits + (a.length - i) + (b.length - j) <= 1;
+}
+
+/** How well one query word matches an entry: 0 for no match. */
+function wordScore(token: string, item: IndexedEntry, last: boolean): number {
+  const variants = [token, stem(token), ...(synonyms[token] ?? [])];
+  let best = 0;
+  for (const variant of variants) {
+    if (item.titleWords.has(variant)) best = Math.max(best, 6);
+    else if (item.words.has(variant)) best = Math.max(best, 3);
+  }
+  if (best) return best;
+  // The word still being typed matches the start of a word: “passw” finds Password.
+  if (last && token.length >= 2) {
+    for (const word of item.titleWords) if (word.startsWith(token)) return 4;
+    for (const word of item.words) if (word.startsWith(token)) return 2;
+  }
+  // A typo in a longer word: “pasword”, “apperance”.
+  if (token.length >= 5) for (const word of item.words) if (word.length >= 4 && oneEditApart(token, word)) return item.titleWords.has(word) ? 3 : 1.5;
+  return 0;
+}
+
+/** Scores an entry against the query; 0 means it doesn't match. */
+function scoreEntry(item: IndexedEntry, phrase: string, tokens: string[]): number {
+  let score = 0;
+  if (item.title === phrase) score += 40;
+  else if (item.title.startsWith(phrase)) score += 24;
+  else if (item.title.includes(phrase)) score += 14;
+  if (item.keywords.includes(phrase)) score += 20;
+  else if (phrase.length >= 3 && item.keywords.some((keyword) => keyword.startsWith(phrase) || keyword.includes(` ${phrase}`))) score += 8;
+  if (phrase.length >= 3 && item.text.includes(phrase)) score += 4;
+  if (!tokens.length) return score;
+  let matched = 0;
+  tokens.forEach((token, index) => {
+    const value = wordScore(token, item, index === tokens.length - 1);
+    if (value) { matched++; score += value; }
   });
+  // Every meaningful word should match; one stray word in a longer sentence is forgiven.
+  const allowedMisses = tokens.length >= 4 ? 1 : 0;
+  if (tokens.length - matched > allowedMisses) return score >= 20 ? score : 0;
+  return score;
+}
+
+/**
+ * Settings that match a natural query (“dark mode”, “change my password”, “stop posting to
+ * linkedin”), best first. Matches the exact phrase, every word, synonyms, a word still being typed
+ * and small typos.
+ */
+export function searchSettings(query: string): SettingIndexEntry[] {
+  const phrase = query.trim().toLocaleLowerCase().replace(/\s+/g, ' ');
+  if (!phrase) return settingIndex;
+  const tokens = words(phrase).filter((token) => !stopWords.has(token));
+  const ranked = indexed
+    .map((item, order) => ({ item, order, score: scoreEntry(item, phrase, tokens) }))
+    .filter((result) => result.score > 0)
+    .sort((a, b) => b.score - a.score || a.order - b.order);
+  // Weak matches far below the best one are noise (“delete account” shouldn't offer Email).
+  const floor = (ranked[0]?.score ?? 0) * 0.3;
+  return ranked.filter((result) => result.score >= floor).map((result) => result.item.entry);
 }
