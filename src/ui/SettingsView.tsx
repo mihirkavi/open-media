@@ -194,7 +194,7 @@ export function SettingsView({ onClose, onMailSynced, focus }: SettingsViewProps
     return (
       <ScrollView style={styles.screen} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
         <View style={styles.titleRow}>
-          <Pressable accessibilityRole="button" accessibilityLabel="Back to Email & connections" onPress={closeForm} style={styles.back}><Ionicons name="chevron-back" size={22} color={colors.text} /></Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel="Back to Email and chat apps" onPress={closeForm} style={styles.back}><Ionicons name="chevron-back" size={22} color={colors.text} /></Pressable>
           <Text style={styles.title}>Add email account</Text>
         </View>
         <Text style={styles.sectionCopy}>Connect any mailbox. Its email appears in Messages and you can reply from there.</Text>
@@ -259,7 +259,7 @@ export function SettingsView({ onClose, onMailSynced, focus }: SettingsViewProps
       <SettingAnchorScope scroller={scroller} anchor={focus?.anchor} at={focus?.at}>
       <View style={styles.titleRow}>
         <Pressable accessibilityRole="button" accessibilityLabel="Back to Settings" onPress={onClose} style={styles.back}><Ionicons name="chevron-back" size={22} color={colors.text} /></Pressable>
-        <Text style={styles.title}>Email & connections</Text>
+        <Text style={styles.title}>Email and chat apps</Text>
       </View>
 
       <SettingAnchor id="email">

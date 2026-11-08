@@ -494,7 +494,7 @@ Open Media is an open-source project in public beta. These terms describe how it
 
 ## Your content and your account
 
-- What you post, send and save stays yours. You can export it (Profile → Export my data, or \`${origin}/v1/me/export\`) and delete your account at any time.
+- What you post, send and save stays yours. You can export it (Settings → Account → Export my data, or \`${origin}/v1/me/export\`) and delete your account at any time.
 - Posts and profiles are public unless your account is private. Messages, email, chats and contacts are private to you; see [privacy](${origin}/privacy).
 
 ## What is not allowed

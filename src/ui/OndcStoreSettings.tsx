@@ -29,7 +29,8 @@ const fields: { key: Field; label: string; placeholder: string; keyboard?: 'nume
  * store turned on, your public products priced in rupees appear in ONDC buyer apps. The store holds
  * what those apps need and a listing does not. Orders through ONDC come in a later phase.
  */
-export function OndcStoreSettings() {
+/** `titled={false}` when the page around it already names the store. */
+export function OndcStoreSettings({ titled = true }: { titled?: boolean } = {}) {
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [open, setOpen] = useState(false);
@@ -68,7 +69,7 @@ export function OndcStoreSettings() {
   </View>;
 
   return <>
-    <Text style={styles.title}>Sell on ONDC (India)</Text>
+    {titled ? <Text style={styles.title}>Sell on ONDC (India)</Text> : null}
     <View style={styles.card}>
       <Pressable accessibilityRole="button" accessibilityState={{ expanded: open }} onPress={() => setOpen((value) => !value)} style={styles.row}>
         <Ionicons name="storefront-outline" size={20} color={colors.text} />

@@ -85,9 +85,9 @@ export function SearchView({ posts, conversations, viewer, lenses, onNavigate, o
     ...feedRows.map((row) => ({ key: row.key, section: 'Web feeds', icon: 'logo-rss' as const, title: row.title, subtitle: row.subtitle, run: () => { row.run().then((leave) => { if (leave) showFeed(); }).catch(() => undefined); } })),
     ...receiptRows.map((row) => ({ key: row.key, section: 'Messages', icon: 'checkmark-done-outline' as const, title: row.title, subtitle: row.subtitle, run: () => { row.run().catch(() => undefined); } })),
     ...profileRows.map((row) => ({ key: row.key, section: 'Your profile', icon: 'briefcase-outline' as const, title: row.title, subtitle: row.subtitle, run: () => { row.run().catch(() => undefined); } })),
-    // A setting opens where it lives (Profile › Sign-in and security, Settings › Feed…), scrolled to it.
-    // Read receipts are changed right here, so their row fills the field instead.
-    ...search.settings.filter((setting) => !(setting.page === 'search' && receiptRows.length)).map((setting) => ({ key: setting.id, section: 'Settings', icon: 'settings-outline' as const, title: setting.title, subtitle: `${settingPath(setting)} · ${setting.description}`, run: () => setting.page === 'search' ? setQuery('read receipts') : onOpenSetting ? onOpenSetting(setting.id) : onNavigate?.('settings') })),
+    // A setting opens where it lives (Settings › Account, Settings › Your algorithm…), scrolled to it.
+    // When the read receipts row above already answers, the setting would only repeat it.
+    ...search.settings.filter((setting) => !(setting.id === 'read-receipts' && receiptRows.length)).map((setting) => ({ key: setting.id, section: 'Settings', icon: 'settings-outline' as const, title: setting.title, subtitle: `${settingPath(setting)} · ${setting.description}`, run: () => onOpenSetting ? onOpenSetting(setting.id) : onNavigate?.('settings') })),
     ...search.messages.map((conversation) => ({ key: conversation.id, section: 'Messages and email', icon: (conversation.email ? 'mail-outline' : 'chatbubble-outline') as keyof typeof Ionicons.glyphMap, title: conversationTitle(conversation), subtitle: matchingLine(conversation), run: () => onOpenConversation ? onOpenConversation(conversation.id) : onNavigate?.('messages') })),
     ...(asking ? [] : askItem),
   ].map((item) => ({ ...item, run: remember(item.run) })) : [
@@ -265,7 +265,7 @@ const originalRelevantPattern = /\b(original|default|reset|plain|built[- ]?in|op
  * follow, no crypto” becomes one result row showing the lens it understood, and choosing the row
  * switches the Feed to it. Saved lenses can be switched to, shared or removed by name, and lenses
  * other people shared are offered for the same words. Words like “less hive” or “more videos” tune
- * the lens in use, and “undo” goes back a version (ADR 0021). Settings → Feed offers the same rows
+ * the lens in use, and “undo” goes back a version (ADR 0021). Settings › Your algorithm offers the same rows
  * under “Your algorithm”, for people who look for their algorithm there.
  */
 export function useLensRows(query: string, lenses: FeedLenses | undefined, signedIn: boolean): LensRow[] {
