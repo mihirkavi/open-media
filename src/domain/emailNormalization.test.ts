@@ -126,3 +126,17 @@ test('unread email counts come from the mail server\'s read state, and sent emai
   assert.deepEqual([...unreadMailIn(conversation, stored)], [['acct-1', ['<c@x>']], ['acct-2', ['<d@x>']]]);
   assert.equal(normalizeStoredEmail(stored.map((item) => ({ ...item, unread: false })))[0].unreadCount, 0);
 });
+
+test('company mail is marked as a company; a person at a company is not', () => {
+  const conversations = normalizeStoredEmail([
+    mail({ sourceMessageId: '<n@x>', from: 'Vivino <news@vivino.com>' }),
+    mail({ sourceMessageId: '<b@x>', from: 'Bank <onlinebanking@ealerts.bankofamerica.com>' }),
+    mail({ sourceMessageId: '<p@x>', from: 'Alice <alice@acme.com>' }),
+    mail({ sourceMessageId: '<f@x>', from: 'Ana <ana@gmail.com>' }),
+  ]);
+  const byName = new Map(conversations.map((conversation) => [conversation.participants[0].name, conversation.company]));
+  assert.equal(byName.get('Vivino'), 'vivino.com');
+  assert.equal(byName.get('Bank'), 'bankofamerica.com');
+  assert.equal(byName.get('Alice'), undefined);
+  assert.equal(byName.get('Ana'), undefined);
+});

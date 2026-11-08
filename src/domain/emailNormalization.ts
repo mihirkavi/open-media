@@ -94,6 +94,7 @@ export function normalizeStoredEmail(messages: StoredMailMessage[], { iconServic
       id: conversationId,
       participants, sourceSummary: [source], lastMessageAt: latest.sentAt,
       ...(people.length ? { groupTitle: groupTitle(participants) } : {}),
+      ...(company && !people.length ? { company } : {}),
       preview: latestAuthor ? `${latestAuthor}: ${latestText}` : latestText, unreadCount: inboundItems.filter((item) => item.unread).length, labels: [],
       email: {
         accountId: replyTarget.accountId, accountEmail: replyTarget.accountEmail, address: replyTarget.address, latestSubject: replyTarget.subject, latestMessageId: replyTarget.sourceMessageId,

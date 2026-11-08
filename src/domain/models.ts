@@ -114,6 +114,12 @@ export interface Conversation {
   /** The viewer's contact this conversation belongs to (ADR 0023). */
   contactId?: string;
   /**
+   * Set when this is a company's mail rather than a person's (no-reply, newsletter and support
+   * addresses, a company's mail subdomain, or a brand-verified sender): its organization's domain.
+   * The People filter leaves these out.
+   */
+  company?: string;
+  /**
    * For a person's merged conversation: the original chats and email threads it is made of,
    * newest first. Replies go through one of them.
    */

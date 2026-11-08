@@ -56,3 +56,12 @@ test('identity matching remains confidence-based and review-gated', () => {
   assert.equal(canMergeIdentity(suggestion), false);
   assert.equal(canMergeIdentity({ ...suggestion, status: 'accepted' }), true);
 });
+
+test('People leaves out company mail', () => {
+  const person = mockConversations.find((conversation) => conversation.id === 'maya-direct')!;
+  const company = { ...person, id: 'vivino', company: 'vivino.com' };
+  const people = filterConversations([person, company], { peopleFilter: 'direct', query: '', unreadOnly: false });
+  assert.deepEqual(people.map((conversation) => conversation.id), ['maya-direct']);
+  const all = filterConversations([person, company], { peopleFilter: 'all', query: '', unreadOnly: false });
+  assert.equal(all.length, 2, 'All still shows it');
+});

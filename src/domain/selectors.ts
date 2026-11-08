@@ -14,7 +14,8 @@ export function filterConversations(
 
   return conversations
     .filter((conversation) => {
-      if (filters.peopleFilter === 'direct') return conversation.participants.length === 1;
+      // People means people: one person, and never a company's mail (newsletters, receipts, alerts).
+      if (filters.peopleFilter === 'direct') return conversation.participants.length === 1 && !conversation.company;
       if (filters.peopleFilter === 'groups') return conversation.participants.length > 1;
       if (filters.peopleFilter === 'favorites') return conversation.participants.some((person) => person.favorite);
       return true;
