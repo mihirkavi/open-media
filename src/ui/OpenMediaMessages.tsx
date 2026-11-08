@@ -272,38 +272,37 @@ export function OpenMediaMessages({
               >
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`${conversationTitle(conversation)}. ${listPreview(conversation.preview)}`}
+                accessibilityLabel={`${conversationTitle(conversation)}. ${conversation.unreadCount ? `${conversation.unreadCount} unread. ` : ""}${listPreview(conversation.preview)}`}
                 onPress={() => setSelectedId(conversation.id)}
                 style={({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) => [
                   styles.row,
                   onToggleRead && !isAiConversation(conversation) && conversation.messages.length ? styles.rowInSwipe : null,
+                  conversation.unreadCount > 0 && styles.rowUnread,
                   (hovered || pressed) && styles.rowHover,
                   selected?.id === conversation.id && styles.rowActive,
                 ]}
               >
-                <ConversationAvatar people={conversation.participants} size={48} />
+                <VerifiedAvatar people={conversation.participants} size={48} />
                 <View style={styles.rowCopy}>
                   <View style={styles.rowTitleLine}>
-                    <Text numberOfLines={1} style={styles.rowTitle}>
+                    <Text numberOfLines={1} style={[styles.rowTitle, conversation.unreadCount > 0 && styles.rowTitleUnread]}>
                       {conversationTitle(conversation)}
                     </Text>
-                    {conversation.participants[0]?.verifiedDomain ? <VerifiedBadge domain={conversation.participants[0].verifiedDomain} /> : null}
-                    {!conversation.groupTitle && conversation.participants[0]?.verified ? <VerifiedTick /> : null}
-                    {conversation.unreadCount ? (
-                      <View style={styles.unread} />
-                    ) : null}
-                    {conversation.messages[0]?.id === "ai:welcome" ? null : <Text numberOfLines={1} style={styles.rowTime}>{formatListTime(new Date(conversation.lastMessageAt))}</Text>}
+                    {conversation.messages[0]?.id === "ai:welcome" ? null : <Text numberOfLines={1} style={[styles.rowTime, conversation.unreadCount > 0 && styles.rowTimeUnread]}>{formatListTime(new Date(conversation.lastMessageAt))}</Text>}
                   </View>
-                  {conversation.channels ? (
-                    <View style={styles.previewLine}>
+                  <View style={styles.previewLine}>
+                    {conversation.channels ? (
                       <SourceMarker source={conversation.messages[conversation.messages.length - 1]?.source ?? conversation.sourceSummary[0]} />
-                      <Text numberOfLines={2} style={[styles.preview, styles.previewShrink]}>{listPreview(conversation.preview)}</Text>
-                    </View>
-                  ) : (
-                    <Text numberOfLines={2} style={styles.preview}>
+                    ) : null}
+                    <Text numberOfLines={2} style={[styles.preview, styles.previewShrink, conversation.unreadCount > 0 && styles.previewUnread]}>
                       {listPreview(conversation.preview)}
                     </Text>
-                  )}
+                    {conversation.unreadCount > 0 ? (
+                      <View style={styles.unreadBadge}>
+                        <Text style={styles.unreadBadgeText}>{conversation.unreadCount > 99 ? "99+" : conversation.unreadCount}</Text>
+                      </View>
+                    ) : null}
+                  </View>
                 </View>
               </Pressable>
               </SwipeToToggleRead>
@@ -736,13 +735,11 @@ function MessageThread({
         ) : null}
         <PersonLink target={threadTarget(conversation, otherPerson)} label={`Open ${conversationTitle(conversation)}’s profile`} style={styles.threadHeadingLink}>
         <View style={styles.threadHeading}>
-          <ConversationAvatar people={conversation.participants} size={44} />
+          <VerifiedAvatar people={conversation.participants} size={44} />
           <View style={[styles.rowTitleLine, styles.threadNameLine]}>
             <Text numberOfLines={1} style={styles.threadTitle}>
               {conversationTitle(conversation)}
             </Text>
-            {otherPerson?.verifiedDomain ? <VerifiedBadge domain={otherPerson.verifiedDomain} /> : null}
-            {otherPerson?.verified ? <VerifiedTick /> : null}
           </View>
           <Text numberOfLines={1} style={styles.threadMeta}>
             {channels.length
@@ -1487,9 +1484,69 @@ function Avatar({ initials, imageUrls = [], size = 40 }: { initials: string; ima
   );
 }
 
-/** The blue tick for senders that passed DMARC and publish a BIMI mark certificate. */
-function VerifiedBadge({ domain }: { domain: string }) {
-  return <VerifiedTick size={15} label={`Verified sender: ${domain}`} />;
+/** What a blue tick stands for, from the facts Open Media actually holds about this person. */
+function verificationOf(person?: Person): { title: string; subject: string; proof: string; spoken: string } | null {
+  if (!person || person.id === aiPersonId) return null;
+  // ADR 0013: set only by the server after an ID document and live selfie check.
+  if (person.verified) {
+    return { title: "Verified person", subject: person.name, proof: "Photo ID · live selfie", spoken: "Identity checked with a photo ID and a live selfie." };
+  }
+  // Set only when the mail passed DMARC and the domain publishes a BIMI mark certificate.
+  if (person.verifiedDomain) {
+    return {
+      title: "Verified sender",
+      subject: person.verifiedDomain,
+      proof: "DMARC passed · BIMI certificate",
+      spoken: `Mail passed DMARC, so it really comes from ${person.verifiedDomain}, and its logo is backed by a BIMI mark certificate.`,
+    };
+  }
+  return null;
+}
+
+/**
+ * The profile picture with the blue tick on its corner, where it is easy to spot. Hovering the
+ * tick (or tapping it on a phone) shows what was verified, in a card beside the picture. The card
+ * stays inside the row, since swipeable rows clip anything that spills out of them.
+ */
+function VerifiedAvatar({ people, size }: { people: Person[]; size: number }) {
+  const { colors } = useOpenMediaTheme();
+  const styles = useMemo(() => createStyles(colors), [colors]);
+  const [open, setOpen] = useState(false);
+  const verification = people.length === 1 ? verificationOf(people[0]) : null;
+  if (!verification) return <ConversationAvatar people={people} size={size} />;
+  const ring = Math.round(size * 0.42);
+  const label = `${verification.title}: ${verification.subject}. ${verification.spoken}`;
+  return (
+    <View style={[{ width: size, height: size }, open && styles.verifiedAvatarOpen]}>
+      <ConversationAvatar people={people} size={size} />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        hitSlop={6}
+        onHoverIn={() => setOpen(true)}
+        onHoverOut={() => setOpen(false)}
+        onPress={(event) => {
+          // The row and the header open something themselves; the tick only shows its card.
+          event.stopPropagation?.();
+          event.preventDefault?.();
+          setOpen((value) => !value);
+        }}
+        style={[styles.verifiedSeal, { width: ring, height: ring, borderRadius: ring / 2, right: -Math.round(ring * 0.18), bottom: -Math.round(ring * 0.18) }]}
+      >
+        <VerifiedTick size={ring - 4} label={label} />
+      </Pressable>
+      {open ? (
+        <View style={[styles.verifiedCard, { left: size + 10, top: Math.round(size / 2) - 32 }]}>
+          <View style={styles.verifiedCardTitleLine}>
+            <VerifiedTick size={13} label="" />
+            <Text numberOfLines={1} style={styles.verifiedCardTitle}>{verification.title}</Text>
+          </View>
+          <Text numberOfLines={1} style={styles.verifiedCardSubject}>{verification.subject}</Text>
+          <Text numberOfLines={1} style={styles.verifiedCardLine}>{verification.proof}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
 }
 
 /** "Verified sender · coursera.org · via you@…", without repeating an address that is already the title. */
@@ -2241,12 +2298,51 @@ function createStyles(colors: ThemeColors) {
     rowCopy: { flex: 1, minWidth: 0 },
     rowTitleLine: { flexDirection: "row", alignItems: "center", gap: 7 },
     rowTitle: { flexShrink: 1, color: colors.text, fontSize: 15, fontWeight: "600" },
-    unread: {
-      width: 7,
-      height: 7,
-      borderRadius: 4,
-      backgroundColor: colors.accent,
+    // The blue tick on a profile picture's corner, ringed in the page colour, and its credentials card.
+    verifiedAvatarOpen: { zIndex: 30, elevation: 30 },
+    verifiedSeal: {
+      position: "absolute",
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: colors.surface,
     },
+    verifiedCard: {
+      position: "absolute",
+      pointerEvents: "none",
+      width: 236,
+      paddingHorizontal: 11,
+      paddingVertical: 8,
+      gap: 2,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      boxShadow: "0 6px 20px rgba(0, 0, 0, 0.14)",
+      elevation: 8,
+    },
+    verifiedCardTitleLine: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 1 },
+    verifiedCardTitle: { flexShrink: 1, color: colors.text, fontSize: 13, fontWeight: "700" },
+    verifiedCardSubject: { color: colors.text, fontSize: 12, lineHeight: 16, fontWeight: "600" },
+    verifiedCardLine: { color: colors.textSecondary, fontSize: 12, lineHeight: 16 },
+    // Unread rows: a soft blue wash, a bolder name and preview, a blue time and a count pill.
+    rowUnread: { backgroundColor: colors.unreadSoft },
+    rowTitleUnread: { fontWeight: "700" },
+    rowTimeUnread: { color: colors.unread, fontWeight: "600" },
+    previewUnread: { color: colors.text, fontWeight: "500" },
+    unreadBadge: {
+      minWidth: 20,
+      height: 20,
+      marginTop: 1,
+      marginLeft: 4,
+      paddingHorizontal: 6,
+      flexShrink: 0,
+      alignSelf: "flex-start",
+      alignItems: "center",
+      justifyContent: "center",
+      borderRadius: 10,
+      backgroundColor: colors.unread,
+    },
+    unreadBadgeText: { color: colors.surface, fontSize: 11, lineHeight: 14, fontWeight: "700", fontVariant: ["tabular-nums"] },
     preview: { marginTop: 2, color: colors.textSecondary, fontSize: 13, lineHeight: 18 },
     threadPane: { flex: 1, minWidth: 0 },
     thread: { flex: 1, backgroundColor: colors.surface },
