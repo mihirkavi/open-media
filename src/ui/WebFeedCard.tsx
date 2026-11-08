@@ -11,7 +11,7 @@ import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { Text } from './Text';
 import { TranslationNote, useTranslation } from './useTranslation';
-import { VerifiedTick } from './VerifiedTick';
+import { VerifiedSeal, officialFeedVerification } from './VerifiedSeal';
 import { OriginalLink } from './OriginalLink';
 import { PostActions } from './PostActions';
 import { usePeople, webFeedTarget } from './people';
@@ -48,9 +48,10 @@ export function WebFeedCard({ post, mode, lensContext, signedIn = false, inProfi
   return <View style={styles.card}>
     <View style={styles.header}>
       <Pressable accessibilityRole="link" accessibilityLabel={`Open ${feed.siteName}’s profile`} disabled={!openProfile} onPress={openProfile} style={styles.site}>
-        <SiteIcon url={feed.iconUrl} name={feed.siteName} styles={styles} />
+        <VerifiedSeal verification={feed.official ? officialFeedVerification(feed.official.name, feed.official.domain) : undefined} size={28}>
+          <SiteIcon url={feed.iconUrl} name={feed.siteName} styles={styles} />
+        </VerifiedSeal>
         <Text numberOfLines={1} style={styles.siteName}>{feed.siteName}</Text>
-        {feed.official ? <VerifiedTick size={14} label={`Official feed from ${feed.official.domain}`} /> : null}
       </Pressable>
       <Text style={styles.time}>{formatRelativeTime(post.createdAt)}</Text>
     </View>
@@ -136,8 +137,8 @@ function createStyles(colors: ThemeColors) { return StyleSheet.create({
   card: { paddingVertical: 22, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
   header: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   site: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  icon: { width: 22, height: 22, borderRadius: 6, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.chrome, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
-  iconImage: { width: 22, height: 22 },
+  icon: { width: 28, height: 28, borderRadius: 7, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.chrome, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
+  iconImage: { width: 28, height: 28 },
   iconLetter: { color: colors.textSecondary, fontSize: 11, fontWeight: '800' },
   siteName: { flexShrink: 1, color: colors.text, fontSize: 13, fontWeight: '700', letterSpacing: 0.1 },
   time: { color: colors.textTertiary, fontSize: 13 },

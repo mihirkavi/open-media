@@ -11,7 +11,7 @@ import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { Portal } from './Portal';
 import { Text } from './Text';
-import { VerifiedTick } from './VerifiedTick';
+import { VerifiedSeal, personVerification } from './VerifiedSeal';
 
 /**
  * Opening a person from anywhere (ADR 0013): every name and avatar in Feed, Clips, Messages and
@@ -208,9 +208,9 @@ function ProfilePreview({ target, onOpen }: { target: PersonTarget; onOpen: () =
   const name = person?.displayName ?? target.name ?? handle;
   return <View style={styles.card}>
     <View style={styles.cardTop}>
-      {avatar ? <Image source={{ uri: avatar }} style={styles.avatar} /> : <View style={[styles.avatar, styles.avatarEmpty]}><Text style={styles.initials}>{(name.replace(/^@/, '')[0] ?? '?').toUpperCase()}</Text></View>}
+      <VerifiedSeal verification={person?.verified ? personVerification(name) : undefined} size={44}>{avatar ? <Image source={{ uri: avatar }} style={styles.avatar} /> : <View style={[styles.avatar, styles.avatarEmpty]}><Text style={styles.initials}>{(name.replace(/^@/, '')[0] ?? '?').toUpperCase()}</Text></View>}</VerifiedSeal>
       <View style={styles.cardCopy}>
-        <View style={styles.nameLine}><Text numberOfLines={1} style={[styles.name, styles.shrink]}>{name}</Text>{person?.verified ? <VerifiedTick size={15} /> : null}</View>
+        <View style={styles.nameLine}><Text numberOfLines={1} style={[styles.name, styles.shrink]}>{name}</Text></View>
         <Text numberOfLines={1} style={styles.meta}>{[handle, where].filter(Boolean).join(' · ')}</Text>
       </View>
     </View>
