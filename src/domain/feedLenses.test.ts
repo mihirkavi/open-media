@@ -257,9 +257,9 @@ test('“Why this?” shows the post’s score under the person’s own weights,
   const tuned = tuneLens(tuneLens(relevantLens, 'less hive').lens, 'more videos').lens;
   const explained = explainLensPost(item, tuned, { now });
   assert.deepEqual(explained.scoring.slice(0, 3), ['Score 30 of 100', 'Fit 10 of 100 (who you follow 0 of 60, your topics 0 of 40) × Newness 100 of 100', 'Less Hive ×0.75 · More videos ×1.25']);
-  assert.equal(explained.tuneHint, 'My Relevant has only newness and the network mix to go on: you follow no one yet and chose no topics. Follow people, or type “more about design” (any topic), and it will lift those posts. To change My Relevant, type “less hive” or “more videos” in Settings → Feed or in Search.');
+  assert.equal(explained.tuneHint, 'My Relevant has only newness and the network mix to go on: you follow no one yet and chose no topics. Follow people, or type “more about design” (any topic), and it will lift those posts. To change My Relevant, type “less hive” or “more videos” in Settings › Your algorithm or in Search.');
   // Once there is something to go on, only the tuning words are shown.
-  assert.equal(explainLensPost(item, tuned, { now, interests: ['design'] }).tuneHint, 'To change My Relevant, type “less hive” or “more videos” in Settings → Feed or in Search.');
+  assert.equal(explainLensPost(item, tuned, { now, interests: ['design'] }).tuneHint, 'To change My Relevant, type “less hive” or “more videos” in Settings › Your algorithm or in Search.');
   assert.deepEqual(explainLensPost(item, rawLens, { now }).scoring, ['Raw is newest first: posts have no score']);
 });
 

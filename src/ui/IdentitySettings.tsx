@@ -22,7 +22,8 @@ const tierCopy: Record<MyIdentity['tier'], string> = {
  * Privacy and identity on your own profile (ADR 0013, phase 2): who can see your posts, which name
  * others see, verification, and follow requests. The server computes the tier and the tick.
  */
-export function IdentitySettings({ handle }: { handle: string }) {
+/** `titled={false}` when the page around it already says Privacy and identity. */
+export function IdentitySettings({ handle, titled = true }: { handle: string; titled?: boolean }) {
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const people = usePeople();
@@ -59,7 +60,7 @@ export function IdentitySettings({ handle }: { handle: string }) {
 
   const status = identity?.verification?.status;
   return <>
-    <Text style={styles.title}>Privacy and identity</Text>
+    {titled ? <Text style={styles.title}>Privacy and identity</Text> : null}
     <View style={styles.card}>
       {identity ? <>
         <View style={styles.block}>

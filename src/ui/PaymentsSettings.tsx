@@ -25,7 +25,8 @@ export function shortAddress(address: string) {
  * Payments on your own profile (ADR 0013, phase 5): getting paid by card through Stripe, the
  * wallets you proved you control, and your payment history. Open Media never holds money.
  */
-export function PaymentsSettings() {
+/** `titled={false}` when the page around it already says Payments. */
+export function PaymentsSettings({ titled = true }: { titled?: boolean } = {}) {
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [setup, setSetup] = useState<PaymentSetup>();
@@ -62,7 +63,7 @@ export function PaymentsSettings() {
   });
 
   return <>
-    <Text style={styles.title}>Payments</Text>
+    {titled ? <Text style={styles.title}>Payments</Text> : null}
     {setup ? <Text style={styles.copy}>{setup.available.note} Open Media never holds your money.</Text> : null}
     <View style={styles.card}>
       {setup ? <>

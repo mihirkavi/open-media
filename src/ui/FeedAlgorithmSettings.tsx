@@ -1,10 +1,11 @@
 import Ionicons from './Icon';
 import { useMemo, useState } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from './Text';
 
 import { describeLensRules, FeedLens, forbiddenSignals, lensFromRequest, looksLikeLensRequest, looksLikeTuneRequest, tuneLens } from '../domain/feedLenses';
 import { changedLines, lensImpact, lensSource, SourceLine, sourceDiff } from '../domain/lensSource';
+import { sourceRepository } from '../domain/about';
 import { SocialPost } from '../domain/posts';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
@@ -14,7 +15,7 @@ import type { FeedLenses } from './useFeedLenses';
 const examples = 'more videos, less hive, only people I follow, mute crypto';
 
 /**
- * Settings → Feed → Your algorithm (ADR 0021, section 9). The builder prompt puts Feed and
+ * Settings › Your algorithm (ADR 0021, section 9). The builder prompt puts Feed and
  * Algorithms in Settings (section 20) and asks for plain words with a confirmation (section 22), so
  * this is a field for writing the algorithm in words. It shows the rules of the lens in use, and the
  * same rows Search offers for the words typed: choosing one is the confirmation that saves it.
@@ -50,14 +51,33 @@ export function FeedAlgorithmSettings({ lenses, signedIn, posts = [] }: { lenses
   const impact = useMemo(() => candidate && posts.length ? lensImpact(posts, lenses.lens, candidate, lenses.context) : [], [candidate, posts, lenses.lens, lenses.context]);
   const status = lenses.saveStatus?.lensId === lenses.lens.id ? lenses.saveStatus : undefined;
 
-  return <View style={styles.box}>
-    <Text style={styles.title}>Your algorithm</Text>
-    <Text style={styles.copy}>Write what you want to see, in your own words. The Feed changes only after you choose the change below.</Text>
-    <View style={styles.current}>
-      <Text style={styles.currentName}>{lenses.lens.name}{base.id !== lenses.lens.id ? ` · your changes are kept in ${base.name}` : ''}</Text>
-      {describeLensRules(lenses.lens).map((rule) => <Text key={rule} style={styles.rule}>· {rule}</Text>)}
+  const [showCode, setShowCode] = useState(false);
+  const weights = useMemo(() => rankingWeights(lenses.lens), [lenses.lens]);
+  // Filters and boosts as short chips; the weights are drawn as bars instead of a sentence.
+  const rules = describeLensRules(lenses.lens).filter((rule) => !/^Ranked by |^Newest first$/.test(rule));
+
+  return <View>
+    <View style={styles.card}>
+      <View style={styles.cardHead}>
+        <Text style={styles.cardLabel}>Your feed now</Text>
+        <Text style={styles.lensName}>{lenses.lens.name}{lenses.lens.builtIn ? '' : ` · v${lenses.lens.version}`}</Text>
+      </View>
+      {lenses.lens.order === 'newest'
+        ? <Text style={styles.copy}>Newest first. Nothing is ranked or hidden by a score.</Text>
+        : <View accessible accessibilityLabel={`Ranked by ${weights.map((item) => `${item.label} ${item.percent}%`).join(', ')}`} style={styles.bars}>
+          {weights.map((item) => <View key={item.label} style={styles.barRow}>
+            <Text style={styles.barLabel}>{item.label}</Text>
+            <View style={styles.barTrack}><View style={[styles.barFill, { width: `${Math.max(item.percent, 3)}%` }]} /></View>
+            <Text style={styles.barValue}>{item.percent}%</Text>
+          </View>)}
+        </View>}
+      {rules.length ? <View style={styles.chips}>{rules.map((rule) => <Text key={rule} style={styles.chip}>{rule}</Text>)}</View> : null}
+      {base.id !== lenses.lens.id ? <Text style={styles.hint}>Your changes are kept in {base.name}.</Text> : null}
     </View>
+
+    <Text style={styles.sectionLabel}>Change it in your own words</Text>
     <TextInput accessibilityLabel="Write your feed algorithm" value={words} onChangeText={(text) => { setWords(text); setSaved(''); }} placeholder={examples} placeholderTextColor={colors.textTertiary} multiline autoCorrect={false} autoCapitalize="none" blurOnSubmit returnKeyType="done" onSubmitEditing={() => { if (rows[0]) run(rows[0]); }} style={styles.input} />
+    {!typed ? <Text style={styles.hint}>Nothing changes until you choose the change that appears here. Type “undo” to go back a version.</Text> : null}
     {rows.length ? <View style={styles.rows}>
       {rows.map((row) => <Pressable key={row.key} accessibilityRole="button" onPress={() => run(row)} style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}>
         <Ionicons name="options-outline" size={17} color={colors.text} />
@@ -75,11 +95,34 @@ export function FeedAlgorithmSettings({ lenses, signedIn, posts = [] }: { lenses
     {status?.state === 'saved' ? <Text style={styles.hint}>Saved to your account as version {status.version}. Your agents and other devices use it too.</Text> : null}
     {status?.state === 'failed' ? <Text accessibilityRole="alert" style={styles.failed}>Not saved to your account: {status.message} It works on this device until it saves.</Text> : null}
     {status?.state === 'device' ? <Text style={styles.hint}>Saved on this device. Sign in to keep it in your account.</Text> : null}
-    <Text style={styles.codeTitle}>The code that runs your Feed · {lenses.lens.name}{lenses.lens.builtIn ? '' : ` · version ${lenses.lens.version}`}</Text>
-    <Text style={styles.hint}>This manifest is the whole algorithm: Open Media's runner reads it and nothing else. Agents can read and change it too.</Text>
-    <Code lines={lensSource(lenses.lens).split('\n').map((text) => ({ kind: 'same' as const, text }))} />
+
+    <Text style={styles.sectionLabel}>Open and inspectable</Text>
+    <View style={styles.links}>
+      <Pressable accessibilityRole="button" accessibilityState={{ expanded: showCode }} onPress={() => setShowCode((value) => !value)} style={({ pressed }) => [styles.linkRow, pressed && styles.rowPressed]}>
+        <Ionicons name="code-slash-outline" size={18} color={colors.text} />
+        <View style={styles.rowCopy}><Text style={styles.rowTitle}>{showCode ? 'Hide the code' : 'Show the code'}</Text><Text style={styles.rowSubtitle}>The manifest for {lenses.lens.name}: the whole algorithm, nothing else is read.</Text></View>
+        <Ionicons name={showCode ? 'chevron-up' : 'chevron-down'} size={17} color={colors.textTertiary} />
+      </Pressable>
+      {showCode ? <View style={styles.codeWrap}><Code lines={lensSource(lenses.lens).split('\n').map((text) => ({ kind: 'same' as const, text }))} /></View> : null}
+      <Pressable accessibilityRole="link" accessibilityHint="Opens GitHub" onPress={() => { Linking.openURL(runnerSourceUrl).catch(() => undefined); }} style={({ pressed }) => [styles.linkRow, styles.linkDivider, pressed && styles.rowPressed]}>
+        <Ionicons name="logo-github" size={18} color={colors.text} />
+        <View style={styles.rowCopy}><Text style={styles.rowTitle}>How the runner works</Text><Text style={styles.rowSubtitle}>runLens in src/domain/feedLenses.ts, open source on GitHub</Text></View>
+        <Ionicons name="open-outline" size={16} color={colors.textTertiary} />
+      </Pressable>
+    </View>
     <Text style={styles.hint}>Never used by any algorithm: {forbiddenSignals.map((signal) => (/^[A-Z][a-z]/.test(signal) ? signal[0].toLocaleLowerCase() + signal.slice(1) : signal)).join(', ')}.</Text>
   </View>;
+}
+
+/** Where the code that runs every lens lives, for anyone who wants to check it. */
+const runnerSourceUrl = `${sourceRepository}/blob/main/src/domain/feedLenses.ts`;
+
+/** The ranking weights as shares of 100, largest first, in the words people use. */
+function rankingWeights(lens: FeedLens) {
+  const { objectives } = lens;
+  const parts: [number, string][] = [[objectives.recency, 'Newer posts'], [objectives.follows, 'People you follow'], [objectives.interests, lens.interests.length ? `Topics: ${lens.interests.slice(0, 3).join(', ')}` : 'Your topics'], [objectives.engagement, 'Likes and reposts'], [objectives.discovery ?? 0, 'New voices']];
+  const total = parts.reduce((sum, [weight]) => sum + weight, 0) || 1;
+  return parts.filter(([weight]) => weight > 0).map(([weight, label]) => ({ label, percent: Math.round((weight / total) * 100) })).sort((a, b) => b.percent - a.percent);
 }
 
 /** A manifest or a patch, in a monospace block; added lines are marked +, removed ones − and struck through. */
@@ -95,27 +138,38 @@ function Code({ lines }: { lines: SourceLine[] }) {
 }
 
 function createStyles(colors: ThemeColors) { return StyleSheet.create({
-  box: { padding: 16, borderTopWidth: 1, borderTopColor: colors.border },
-  title: { color: colors.text, fontSize: 15, fontWeight: '600' },
-  copy: { marginTop: 3, color: colors.textSecondary, fontSize: 13, lineHeight: 18 },
-  current: { marginTop: 12, padding: 12, gap: 3, borderRadius: 12, backgroundColor: colors.chrome },
-  currentName: { color: colors.text, fontSize: 13, fontWeight: '700' },
-  rule: { color: colors.textSecondary, fontSize: 13, lineHeight: 18 },
-  input: { minHeight: 76, marginTop: 12, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 12, color: colors.text, fontSize: 15, lineHeight: 21, textAlignVertical: 'top', borderRadius: 12, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceAlt, outlineStyle: 'none' } as object,
-  rows: { marginTop: 8, gap: 2 },
-  row: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 12, backgroundColor: colors.surfaceAlt },
+  card: { marginTop: 14, padding: 16, gap: 12, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, backgroundColor: colors.surface },
+  cardHead: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 },
+  cardLabel: { color: colors.textTertiary, fontSize: 12, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase' },
+  lensName: { color: colors.text, fontSize: 15, fontWeight: '700' },
+  copy: { color: colors.textSecondary, fontSize: 14, lineHeight: 20 },
+  bars: { gap: 10 },
+  barRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  barLabel: { width: 128, color: colors.text, fontSize: 13, fontWeight: '500' },
+  barTrack: { flex: 1, height: 8, borderRadius: 4, overflow: 'hidden', backgroundColor: colors.chrome },
+  barFill: { height: 8, borderRadius: 4, backgroundColor: colors.text },
+  barValue: { width: 38, textAlign: 'right', color: colors.textSecondary, fontSize: 13, fontWeight: '600', fontVariant: ['tabular-nums'] },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  chip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, overflow: 'hidden', backgroundColor: colors.chrome, color: colors.text, fontSize: 12, fontWeight: '600' },
+  sectionLabel: { marginTop: 26, marginBottom: 8, marginLeft: 4, color: colors.textTertiary, fontSize: 12, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase' },
+  input: { minHeight: 76, paddingHorizontal: 14, paddingTop: 12, paddingBottom: 12, color: colors.text, fontSize: 15, lineHeight: 21, textAlignVertical: 'top', borderRadius: 14, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, backgroundColor: colors.surfaceAlt, outlineStyle: 'none' } as object,
+  rows: { marginTop: 8, gap: 4 },
+  row: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12, backgroundColor: colors.chrome },
   rowPressed: { opacity: 0.7 },
   rowCopy: { flex: 1, minWidth: 0 },
   rowTitle: { color: colors.text, fontSize: 14, fontWeight: '600' },
   rowSubtitle: { marginTop: 2, color: colors.textSecondary, fontSize: 12, lineHeight: 16 },
+  links: { borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, overflow: 'hidden' },
+  linkRow: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 10 },
+  linkDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+  codeWrap: { paddingHorizontal: 12, paddingBottom: 12 },
   hint: { marginTop: 10, color: colors.textTertiary, fontSize: 12, lineHeight: 17 },
   saved: { marginTop: 10, color: colors.text, fontSize: 13, fontWeight: '600' },
   failed: { marginTop: 10, color: colors.danger, fontSize: 12, lineHeight: 17, fontWeight: '600' },
   preview: { marginTop: 10, gap: 6 },
   previewTitle: { color: colors.text, fontSize: 13, fontWeight: '700' },
   impact: { color: colors.textSecondary, fontSize: 12, lineHeight: 17 },
-  codeTitle: { marginTop: 18, color: colors.text, fontSize: 13, fontWeight: '700' },
-  code: { marginTop: 8, borderRadius: 12, backgroundColor: colors.chrome },
+  code: { borderRadius: 12, backgroundColor: colors.chrome },
   codeContent: { padding: 12 },
   codeLine: { color: colors.textSecondary, fontSize: 12, lineHeight: 18, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
   codeAdd: { color: colors.text, fontWeight: '600' },

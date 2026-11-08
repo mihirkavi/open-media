@@ -553,7 +553,7 @@ function tuneHintFor(post: SocialPost, lens: FeedLens, signals: Signals): string
   const kind = postKinds(post)[0];
   const source = sourceName(post.provenance.connectorId).toLocaleLowerCase();
   const name = lens.builtIn ? `your own ${lens.name}` : lens.name;
-  const tune = `To change ${name}, type “less ${source}” or “more ${kindLabels[kind]}” in Settings → Feed or in Search.`;
+  const tune = `To change ${name}, type “less ${source}” or “more ${kindLabels[kind]}” in Settings › Your algorithm or in Search.`;
   // With nobody followed and no topics, a lens that reads only those has little to go on: say so.
   const reads = (lens.objectives.follows > 0 && signals.followsAllowed) || (lens.objectives.interests > 0 && signals.interestsAllowed);
   const hasSignals = signals.followed.size > 0 || signals.interests.length > 0;

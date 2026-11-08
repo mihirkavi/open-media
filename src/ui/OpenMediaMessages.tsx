@@ -1070,7 +1070,7 @@ function MessageThread({
             {blocked
               ? "Unblock this person to send or receive new messages."
               : via.email
-                ? "Add outgoing mail (SMTP) to this mailbox in Settings → Connections to reply from here."
+                ? "Add outgoing mail (SMTP) to this mailbox in Settings › Email and chat apps to reply from here."
                 : "This provider does not offer a working send capability yet."}
           </Text>
         </View>
@@ -1388,7 +1388,7 @@ function NewMessagePanel({
             <Text style={styles.statusText}>No one found. Type an email address to send an email.</Text>
           ) : !writing ? (
             <Text style={styles.statusText}>
-              Message someone on Open Media by name or @handle, or type an email address.{emailFrom ? "" : " Sending email needs a mailbox with outgoing mail in Settings → Connections."}
+              Message someone on Open Media by name or @handle, or type an email address.{emailFrom ? "" : " Sending email needs a mailbox with outgoing mail in Settings › Email and chat apps."}
             </Text>
           ) : recipients.length > 1 ? (
             <Text style={styles.statusText}>Everyone gets the same email and sees who else is on it, like a group.</Text>

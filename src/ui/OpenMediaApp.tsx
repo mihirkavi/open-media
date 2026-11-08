@@ -55,7 +55,7 @@ import { useMixedFeed } from "./useMixedFeed";
 // the web. Messages is preloaded as soon as the app is idle, since it is a main tab.
 const OpenMediaMessages = lazyComponent(() => import("./OpenMediaMessages").then((module) => module.OpenMediaMessages));
 const OpenMediaProfile = lazyComponent(() => import("./OpenMediaUtilities").then((module) => module.OpenMediaProfile));
-const OpenMediaSettings = lazyComponent(() => import("./OpenMediaUtilities").then((module) => module.OpenMediaSettings));
+const OpenMediaSettings = lazyComponent(() => import("./SettingsHome").then((module) => module.OpenMediaSettings));
 import { PeopleProvider, PersonTarget, useContactsStore } from "./people";
 import { PersonProfile } from "./PersonProfile";
 import { encounterForConversation, ownEmails } from "../domain/people";
@@ -328,6 +328,8 @@ export function OpenMediaApp({
   const [aiActions, setAiActions] = useState<AiAction[]>([]);
   const [settingsFocus, setSettingsFocus] = useState<SettingFocus>();
   const [profileFocus, setProfileFocus] = useState<SettingFocus>();
+  // Choosing Settings again returns to its first page, as tapping a tab twice does on a phone.
+  const [settingsVisit, setSettingsVisit] = useState(0);
   const refreshAi = useCallback(async () => {
     if (messageMode !== "open_media" || !currentUserId) return;
     try {
@@ -398,7 +400,7 @@ export function OpenMediaApp({
   const sendNewEmail = useCallback(
     async (addresses: string[], body: string) => {
       const mailbox = sendingMailboxes[0];
-      if (!mailbox) throw new Error("Add outgoing mail (SMTP) to a mailbox in Settings → Connections to send email.");
+      if (!mailbox) throw new Error("Add outgoing mail (SMTP) to a mailbox in Settings › Email and chat apps to send email.");
       await sendMail(mailbox.id, { to: addresses, subject: subjectFromBody(body), text: body });
       await refreshMail();
       return emailConversationId(addresses);
@@ -545,6 +547,7 @@ export function OpenMediaApp({
     // Going somewhere by hand starts at the top; only openSetting below lands on one setting.
     setSettingsFocus(undefined);
     setProfileFocus(undefined);
+    if (next === "settings") setSettingsVisit((visit) => visit + 1);
   };
   /**
    * Opens one setting where it lives, from Search, Settings' own search or Open Media AI: the page
@@ -555,7 +558,6 @@ export function OpenMediaApp({
     const entry = settingForSection(id);
     const focus = entry ? { id: entry.id, at: Date.now() } : undefined;
     if (entry?.page === "profile" || entry?.page === "edit-profile") { navigate("profile"); setProfileFocus(focus); }
-    else if (entry?.page === "search") { setSearchQuery("read receipts"); navigate("search"); }
     else { navigate("settings"); setSettingsFocus(focus); }
   };
 
@@ -670,16 +672,18 @@ export function OpenMediaApp({
           <OpenMediaProfile
             profile={profile}
             onNavigate={navigate}
-            onSignOut={onSignOut}
-            onAccountDeleted={onAccountDeleted}
             onProfileChange={onProfileChange}
             focus={profileFocus}
           />
         ) : null}
         {!person && destination === "settings" ? (
           <OpenMediaSettings
+            key={settingsVisit}
             focus={settingsFocus}
             onOpenSetting={openSetting}
+            handle={profile.handle}
+            onSignOut={onSignOut}
+            onAccountDeleted={onAccountDeleted}
             lenses={lenses}
             signedIn={Boolean(currentUserId)}
             posts={feed.posts}

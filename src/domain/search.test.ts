@@ -16,11 +16,13 @@ test('universal search spans settings, messages, and posts', () => {
 test('a setting result knows the exact place it lives', () => {
   const password = searchSettings('change my password')[0];
   assert.equal(password?.id, 'password');
-  assert.equal(password?.page, 'profile');
+  assert.equal(password?.page, 'settings');
+  assert.equal(password?.screen, 'account');
   assert.equal(password?.anchor, 'security');
-  assert.equal(settingPath(password!), 'Profile › Sign-in and security');
-  assert.equal(searchSettings('whatsapp')[0]?.page, 'connections');
-  assert.equal(searchSettings('write my algorithm')[0]?.anchor, 'feed-algorithm');
+  assert.equal(settingPath(password!), 'Settings › Account › Sign-in and security');
+  assert.equal(searchSettings('whatsapp')[0]?.screen, 'connections');
+  assert.equal(searchSettings('write my algorithm')[0]?.screen, 'algorithm');
+  assert.equal(searchSettings('read receipts')[0]?.screen, 'privacy');
 });
 
 test('settings search forgives typos, half-typed words and other words for the same thing', () => {
@@ -38,13 +40,14 @@ test('settings search leaves out weak matches', () => {
   assert.deepEqual(searchSettings('zzzz qqqq'), []);
 });
 
-test('the settings graph is whole: unique ids, real links, and an anchor wherever a page scrolls', () => {
+test('the settings graph is whole: unique ids, real links, and every setting one tap from Settings or on Profile', () => {
   const ids = settingIndex.map((entry) => entry.id);
   assert.equal(new Set(ids).size, ids.length);
   for (const entry of settingIndex) {
-    assert.ok(entry.path.length > 0, entry.id);
+    assert.ok(entry.path.length > 0 && entry.path.length <= 3, entry.id);
     assert.equal(relatedSettings(entry).length, entry.related?.length ?? 0, `${entry.id} links to a missing setting`);
-    if (['settings', 'connections', 'profile'].includes(entry.page)) assert.ok(entry.anchor, `${entry.id} needs an anchor`);
+    if (entry.page === 'settings') assert.ok(entry.screen, `${entry.id} needs its Settings page`);
+    if (entry.screen === 'home' || entry.page === 'profile') assert.ok(entry.anchor, `${entry.id} needs an anchor`);
   }
 });
 

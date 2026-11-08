@@ -335,7 +335,7 @@ export function networksDescription(env: AgentEnv) {
     }),
     // ADR 0033: closed networks Open Media posts to (never reads) through their official OAuth APIs.
     postingNetworks: socialNetworks.map((id) => ({ id, name: { x: 'X', threads: 'Threads', linkedin: 'LinkedIn', instagram: 'Instagram', facebook: 'Facebook Pages' }[id], kind: 'closed social network, posting only', available: socialStatus(env as unknown as SocialOAuthEnv)[id], how: 'Connect it in the app (Settings → Cross-posting); the network asks you to approve Open Media.' })),
-    email: { id: 'email', name: 'Email', kind: 'IMAP or POP3 with SMTP', capabilities: ['read', 'reply', 'send'], how: 'Connect in the app (Settings → Email & connections), or POST /v1/mail-accounts with your access token.' },
+    email: { id: 'email', name: 'Email', kind: 'IMAP or POP3 with SMTP', capabilities: ['read', 'reply', 'send'], how: 'Connect in the app (Settings → Email and chat apps), or POST /v1/mail-accounts with your access token.' },
     chatNetworks: chatNetworks.map((network) => ({
       id: network.id, name: network.name, kind: 'chat bridge (opt-in)', runningOnThisServer: running.has(network.id), accountRisk: network.risk,
       ...(network.setup && !running.has(network.id) ? { setup: network.setup } : {}),
