@@ -1,6 +1,6 @@
 import Ionicons from './Icon';
 import { useEffect, useMemo, useState } from 'react';
-import { Image, Linking, Pressable, StyleSheet, View } from 'react-native';
+import { Image, Pressable, StyleSheet, View } from 'react-native';
 
 import { FeedLens, LensContext } from '../domain/feedLenses';
 import { safeHttpsUrl } from '../domain/networkPosts';
@@ -14,15 +14,18 @@ import { TranslationNote, useTranslation } from './useTranslation';
 import { VerifiedTick } from './VerifiedTick';
 import { OriginalLink } from './OriginalLink';
 import { PostActions } from './PostActions';
+import { usePeople, webFeedTarget } from './people';
 
 /**
  * An item from a web feed the viewer follows (ADR 0024), laid out like a news card: the site's icon
  * and name, the lead image, the headline, a short excerpt, and the way to the publisher. Only the
- * excerpt is shown; the article is read on the publisher's site. People like, comment on and
+ * excerpt is shown; the article is read on the publisher's site, and only the “Read on …” link
+ * goes there. Tapping the site, headline or image opens the feed's profile in Open Media, with all
+ * of its items, the way a person's name opens theirs. People like, comment on and
  * reshare it in Open Media, under the same icons as any post. Feeds served from a major news
  * outlet's or weather service's own domain carry the blue tick, labelled as an official feed.
  */
-export function WebFeedCard({ post, mode, lensContext, signedIn = false }: { post: SocialPost; mode: FeedMode | FeedLens; lensContext?: LensContext; signedIn?: boolean }) {
+export function WebFeedCard({ post, mode, lensContext, signedIn = false, inProfile = false }: { post: SocialPost; mode: FeedMode | FeedLens; lensContext?: LensContext; signedIn?: boolean; /** Shown on the feed's own profile, where tapping it has nowhere further to go. */ inProfile?: boolean }) {
   const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
   const feed = post.webFeed!;
   const [expanded, setExpanded] = useState(false);
@@ -36,13 +39,15 @@ export function WebFeedCard({ post, mode, lensContext, signedIn = false }: { pos
   // headline instead of being stretched across the card.
   const size = useImageSize(image?.url);
   const thumbnail = Boolean(size && size.width < 480);
-  const open = (url?: string) => { if (url) Linking.openURL(url).catch(() => undefined); };
+  const people = usePeople();
+  const target = webFeedTarget(post);
+  const openProfile = !inProfile && people && target ? () => people.open(target) : undefined;
   // A blog's own name often holds its author's (“Simon Willison's Weblog”); the byline is then left out.
   const byline = [feed.author && !feed.alert && !feed.siteName.toLocaleLowerCase().includes(feed.author.toLocaleLowerCase()) ? `By ${feed.author}` : '', feed.audio ? `Episode${feed.audio.durationSeconds ? ` · ${Math.max(1, Math.round(feed.audio.durationSeconds / 60))} min` : ''}` : ''].filter(Boolean).join(' · ');
 
   return <View style={styles.card}>
     <View style={styles.header}>
-      <Pressable accessibilityRole="link" accessibilityLabel={`Open ${feed.siteName}`} disabled={!siteUrl} onPress={() => open(siteUrl)} style={styles.site}>
+      <Pressable accessibilityRole="link" accessibilityLabel={`Open ${feed.siteName}’s profile`} disabled={!openProfile} onPress={openProfile} style={styles.site}>
         <SiteIcon url={feed.iconUrl} name={feed.siteName} styles={styles} />
         <Text numberOfLines={1} style={styles.siteName}>{feed.siteName}</Text>
         {feed.official ? <VerifiedTick size={14} label={`Official feed from ${feed.official.domain}`} /> : null}
@@ -50,13 +55,13 @@ export function WebFeedCard({ post, mode, lensContext, signedIn = false }: { pos
       <Text style={styles.time}>{formatRelativeTime(post.createdAt)}</Text>
     </View>
     {feed.alert ? <AlertBanner alert={feed.alert} styles={styles} colors={colors} /> : null}
-    {image?.url && size && !thumbnail ? <LeadImage url={image.url} altText={image.altText} aspectRatio={Math.min(2, Math.max(1.2, size.width / size.height))} onPress={articleUrl ? () => open(articleUrl) : undefined} styles={styles} /> : null}
+    {image?.url && size && !thumbnail ? <LeadImage url={image.url} altText={image.altText} aspectRatio={Math.min(2, Math.max(1.2, size.width / size.height))} onPress={openProfile} styles={styles} /> : null}
     <View style={styles.story}>
       <View style={styles.storyText}>
-        {post.title ? <Pressable accessibilityRole="link" disabled={!articleUrl} onPress={() => open(articleUrl)}><Text style={[styles.headline, feed.alert && styles.headlineAlert]}>{title}</Text></Pressable> : null}
+        {post.title ? <Pressable accessibilityRole={openProfile ? 'link' : undefined} disabled={!openProfile} onPress={openProfile}><Text style={[styles.headline, feed.alert && styles.headlineAlert]}>{title}</Text></Pressable> : null}
         {post.body ? <Text numberOfLines={feed.alert ? 6 : 3} style={[styles.excerpt, !post.title && styles.excerptAlone]}>{body}</Text> : null}
       </View>
-      {image?.url && thumbnail ? <Pressable accessibilityRole="link" accessibilityLabel={image.altText} disabled={!articleUrl} onPress={() => open(articleUrl)}><Image source={{ uri: image.url }} accessible accessibilityLabel={image.altText} accessibilityIgnoresInvertColors resizeMode="cover" style={styles.thumbnail} /></Pressable> : null}
+      {image?.url && thumbnail ? <Pressable accessibilityRole={openProfile ? 'link' : undefined} accessibilityLabel={image.altText} disabled={!openProfile} onPress={openProfile}><Image source={{ uri: image.url }} accessible accessibilityLabel={image.altText} accessibilityIgnoresInvertColors resizeMode="cover" style={styles.thumbnail} /></Pressable> : null}
     </View>
     <TranslationNote note={translation.note} />
     {byline ? <Text numberOfLines={1} style={styles.byline}>{byline}</Text> : null}
@@ -122,7 +127,7 @@ function useImageSize(url: string | undefined) {
 function LeadImage({ url, altText, aspectRatio, onPress, styles }: { url: string; altText: string; aspectRatio: number; onPress?: () => void; styles: ReturnType<typeof createStyles> }) {
   const [failed, setFailed] = useState(false);
   if (failed) return null;
-  return <Pressable accessibilityRole="link" accessibilityLabel={altText} disabled={!onPress} onPress={onPress}>
+  return <Pressable accessibilityRole={onPress ? 'link' : undefined} accessibilityLabel={altText} disabled={!onPress} onPress={onPress}>
     <Image source={{ uri: url }} accessible accessibilityLabel={altText} accessibilityIgnoresInvertColors resizeMode="cover" onError={() => setFailed(true)} style={[styles.image, { aspectRatio }]} />
   </Pressable>;
 }

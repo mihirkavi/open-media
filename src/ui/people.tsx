@@ -6,6 +6,7 @@ import { deleteContactCard, loadContactCards, loadPublicPerson, PublicPerson, sa
 import { networks } from '../domain/networkPosts';
 import { cardFor, ContactCard, confirmLink, contactName, Encounter, IdentityRef, importDeviceContacts, LinkSuggestion, reconcile, refKey, rejectSuggestion, unlink } from '../domain/people';
 import { SocialPost } from '../domain/posts';
+import { WebFeedPostInfo } from '../domain/webFeeds';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { Portal } from './Portal';
@@ -17,7 +18,13 @@ import { VerifiedTick } from './VerifiedTick';
  * Search is a PersonLink. Tapping opens the unified profile; on desktop web, hovering briefly
  * shows a small preview. Keyboard and screen readers use the same link.
  */
-export interface PersonTarget { ref: IdentityRef; name?: string; avatarUrl?: string }
+export interface PersonTarget {
+  ref: IdentityRef;
+  name?: string;
+  avatarUrl?: string;
+  /** A web feed opened as a profile (ADR 0024): its items, read live and saved nowhere. `ref` is unused then. */
+  webFeed?: WebFeedPostInfo;
+}
 
 export interface ContactsState {
   cards: ContactCard[];
@@ -53,6 +60,15 @@ export function PeopleProvider({ value, children }: PropsWithChildren<{ value: P
 
 export function usePeople(): PeopleValue | null {
   return useContext(PeopleContext);
+}
+
+/**
+ * A web feed item's site, opened like a person's profile. A feed has no contact identity, so its
+ * ref only carries the feed's address; PersonProfile shows the feed instead of a person.
+ */
+export function webFeedTarget(post: SocialPost): PersonTarget | undefined {
+  if (!post.webFeed) return undefined;
+  return { ref: { kind: 'email', address: post.webFeed.feedUrl }, name: post.webFeed.siteName, avatarUrl: post.webFeed.iconUrl, webFeed: post.webFeed };
 }
 
 export function targetForPost(post: SocialPost): PersonTarget {

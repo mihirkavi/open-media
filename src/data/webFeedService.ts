@@ -50,8 +50,17 @@ export async function unfollowWebFeed(feed: string): Promise<WebFeedSubscription
   return result.unfollowed;
 }
 
-export function loadWebFeedItems(): Promise<WebFeedItems> {
-  return request<WebFeedItems>('/v1/me/web-feeds/items', {}, 'Couldn’t load your web feeds.');
+export function loadWebFeedItems(limit?: number): Promise<WebFeedItems> {
+  return request<WebFeedItems>(`/v1/me/web-feeds/items${limit ? `?limit=${limit}` : ''}`, {}, 'Couldn’t load your web feeds.');
+}
+
+/**
+ * Every item one feed has, for its profile: the same read the Feed makes, narrowed to that feed.
+ * Nothing new is fetched from the publisher or saved on the server for it.
+ */
+export async function loadWebFeedProfile(feedUrl: string): Promise<SocialPost[]> {
+  const result = await loadWebFeedItems(300);
+  return result.posts.filter((post) => post.webFeed?.feedUrl === feedUrl);
 }
 
 /** Lets the person pick an OPML file from another reader and follows its feeds. Undefined when they close the picker. */

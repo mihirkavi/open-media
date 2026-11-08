@@ -17,6 +17,7 @@ import { ContactEditor, kindLabel } from './ContactEditor';
 import { ProfessionalLines } from './ProfessionalLines';
 import { Text } from './Text';
 import { VerifiedTick } from './VerifiedTick';
+import { WebFeedProfile } from './WebFeedProfile';
 
 /**
  * The unified profile (ADR 0013): one view of a person, built for the viewer. The top shows what
@@ -24,7 +25,14 @@ import { VerifiedTick } from './VerifiedTick';
  * name, numbers, notes, and how identities were linked). Below is one timeline of the person's
  * posts across Open Media and their open-network accounts.
  */
-export function PersonProfile({ target, viewerId, onBack, onMessage }: { target: PersonTarget; viewerId?: string; onBack?: () => void; onMessage?: (handle: string) => void }) {
+type PersonProfileProps = { target: PersonTarget; viewerId?: string; onBack?: () => void; onMessage?: (handle: string) => void };
+
+/** A person's profile, or a web feed's when the target is a feed (ADR 0024). */
+export function PersonProfile(props: PersonProfileProps) {
+  return props.target.webFeed ? <WebFeedProfile feed={props.target.webFeed} viewerId={props.viewerId} onBack={props.onBack} /> : <PersonView {...props} />;
+}
+
+function PersonView({ target, viewerId, onBack, onMessage }: PersonProfileProps) {
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const people = usePeople();
