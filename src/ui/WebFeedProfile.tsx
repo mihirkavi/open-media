@@ -10,7 +10,7 @@ import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { Loader } from './Loader';
 import { Text } from './Text';
-import { VerifiedTick } from './VerifiedTick';
+import { VerifiedSeal, officialFeedVerification } from './VerifiedSeal';
 import { WebFeedCard } from './WebFeedCard';
 
 /**
@@ -52,8 +52,10 @@ export function WebFeedProfile({ feed, viewerId, onBack }: { feed: WebFeedPostIn
     {onBack ? <View style={styles.bar}><Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} style={styles.back}><Ionicons name="chevron-back" size={22} color={colors.text} /></Pressable></View> : <View style={styles.barSpace} />}
 
     <View style={styles.header}>
-      <SiteAvatar url={feed.iconUrl} name={feed.siteName} styles={styles} />
-      <View style={styles.nameLine}><Text accessibilityRole="header" style={styles.name}>{feed.siteName}</Text>{feed.official ? <VerifiedTick size={20} label={`Official feed from ${feed.official.domain}`} /> : null}</View>
+      <VerifiedSeal verification={feed.official ? officialFeedVerification(feed.official.name, feed.official.domain) : undefined} size={88}>
+        <SiteAvatar url={feed.iconUrl} name={feed.siteName} styles={styles} />
+      </VerifiedSeal>
+      <View style={styles.nameLine}><Text accessibilityRole="header" style={styles.name}>{feed.siteName}</Text></View>
       <Text style={styles.meta}>{[host, `${formatNames[feed.format]} feed`].filter(Boolean).join(' · ')}</Text>
       {feed.official ? <Text style={styles.small}>Official feed, served from {feed.official.domain}</Text> : null}
       {posts?.length ? <Text style={styles.small}>{`${posts.length} ${posts.length === 1 ? 'item' : 'items'} from the last ${maxItemAgeDays} days`}</Text> : null}

@@ -11,7 +11,7 @@ import { formatRelativeTime } from '../domain/publicPosts';
 import { ClipVideo } from './ClipVideo';
 import { useMixedFeed } from './useMixedFeed';
 import { TranslationNote, useTranslation } from './useTranslation';
-import { VerifiedTick } from './VerifiedTick';
+import { VerifiedTickWithCard, personVerification } from './VerifiedSeal';
 import { Loader } from './Loader';
 
 /**
@@ -109,7 +109,7 @@ function Clip({ post, lens, lensContext, height, active, mounted, muted, onToggl
     </Pressable>
     <Pressable accessibilityRole="button" accessibilityLabel={muted ? 'Turn sound on' : 'Mute'} onPress={onToggleMute} style={styles.mute}><Ionicons name={muted ? 'volume-mute' : 'volume-high'} size={20} color="#FFFFFF" /></Pressable>
     <View pointerEvents="box-none" style={styles.overlay}>
-      <PersonLink target={targetForPost(post)} label={`Open ${post.author.displayName}’s profile`} style={styles.authorLink}><Text style={styles.author}>{post.author.displayName}{post.author.verified ? <> <VerifiedTick size={14} /></> : null} <Text style={styles.handle}>{post.author.handle} · {formatRelativeTime(post.createdAt)}</Text></Text></PersonLink>
+      <PersonLink target={targetForPost(post)} label={`Open ${post.author.displayName}’s profile`} style={styles.authorLink}><Text style={styles.author}>{post.author.displayName}{post.author.verified ? <> <VerifiedTickWithCard verification={personVerification(post.author.displayName)} /></> : null} <Text style={styles.handle}>{post.author.handle} · {formatRelativeTime(post.createdAt)}</Text></Text></PersonLink>
       {post.title || post.body ? <Text numberOfLines={3} style={styles.body}>{translation.texts[0]}</Text> : null}
       <TranslationNote note={translation.note} style={styles.translationNote} />
       <View style={styles.meta}>

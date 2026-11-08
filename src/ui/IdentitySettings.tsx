@@ -8,7 +8,7 @@ import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { usePeople } from './people';
 import { Text } from './Text';
-import { VerifiedTick } from './VerifiedTick';
+import { VerifiedTickWithCard, personVerification } from './VerifiedSeal';
 import { Loader } from './Loader';
 
 const tierCopy: Record<MyIdentity['tier'], string> = {
@@ -77,7 +77,7 @@ export function IdentitySettings({ handle }: { handle: string }) {
             {option('Your name', identity.nameDisclosure === 'declared', () => run('name', () => saveMyIdentity({ nameDisclosure: 'declared' })))}
             {option('Legal name', identity.nameDisclosure === 'verified_legal', () => run('name', () => saveMyIdentity({ nameDisclosure: 'verified_legal' })), !identity.verified)}
           </View>
-          <View style={styles.shownRow}><Text style={styles.hint}>Shown as <Text style={styles.strong}>{identity.shownName}</Text></Text>{identity.verified ? <VerifiedTick size={14} /> : null}</View>
+          <View style={styles.shownRow}><Text style={styles.hint}>Shown as <Text style={styles.strong}>{identity.shownName}</Text></Text>{identity.verified ? <VerifiedTickWithCard verification={personVerification(identity.shownName)} /> : null}</View>
           <Text style={styles.hint}>{tierCopy[identity.tier]}</Text>
         </View>
         <View style={[styles.row, styles.divider]}>
@@ -99,7 +99,7 @@ export function IdentitySettings({ handle }: { handle: string }) {
       {follows.requests.length || follows.followers.length ? <View style={styles.card}>
         {follows.requests.map((person, index) => <View key={`r-${person.id}`} style={[styles.row, index > 0 && styles.divider]}>
           <Pressable accessibilityRole="link" onPress={() => people?.open({ ref: { kind: 'open_media', handle: person.handle } })} style={styles.grow}>
-            <View style={styles.shownRow}><Text style={styles.rowTitle}>{person.displayName}</Text>{person.verified ? <VerifiedTick size={14} /> : null}</View>
+            <View style={styles.shownRow}><Text style={styles.rowTitle}>{person.displayName}</Text>{person.verified ? <VerifiedTickWithCard verification={personVerification(person.displayName)} /> : null}</View>
             <Text style={styles.hint}>@{person.handle} wants to follow you</Text>
           </Pressable>
           <Pressable accessibilityRole="button" disabled={Boolean(busy)} onPress={() => run(`a-${person.id}`, () => answerFollowRequest(person.id, true))} style={[styles.small, styles.smallOn]}><Text style={styles.smallTextOn}>Accept</Text></Pressable>
@@ -107,7 +107,7 @@ export function IdentitySettings({ handle }: { handle: string }) {
         </View>)}
         {follows.followers.map((person, index) => <View key={`f-${person.id}`} style={[styles.row, (index > 0 || follows.requests.length > 0) && styles.divider]}>
           <Pressable accessibilityRole="link" onPress={() => people?.open({ ref: { kind: 'open_media', handle: person.handle } })} style={styles.grow}>
-            <View style={styles.shownRow}><Text style={styles.rowTitle}>{person.displayName}</Text>{person.verified ? <VerifiedTick size={14} /> : null}</View>
+            <View style={styles.shownRow}><Text style={styles.rowTitle}>{person.displayName}</Text>{person.verified ? <VerifiedTickWithCard verification={personVerification(person.displayName)} /> : null}</View>
             <Text style={styles.hint}>@{person.handle}</Text>
           </Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel={`Remove @${person.handle} from your followers`} disabled={Boolean(busy)} onPress={() => run(`x-${person.id}`, () => removeFollower(person.id))} style={styles.small}><Text style={styles.smallText}>Remove</Text></Pressable>

@@ -16,7 +16,7 @@ import { TextInput } from './Text';
 import { ContactEditor, kindLabel } from './ContactEditor';
 import { ProfessionalLines } from './ProfessionalLines';
 import { Text } from './Text';
-import { VerifiedTick } from './VerifiedTick';
+import { VerifiedSeal, personVerification } from './VerifiedSeal';
 import { WebFeedProfile } from './WebFeedProfile';
 
 /**
@@ -114,8 +114,8 @@ function PersonView({ target, viewerId, onBack, onMessage }: PersonProfileProps)
     {onBack ? <View style={styles.bar}><Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} style={styles.back}><Ionicons name="chevron-back" size={22} color={colors.text} /></Pressable></View> : <View style={styles.barSpace} />}
 
     <View style={styles.header}>
-      {avatar ? <Image accessibilityIgnoresInvertColors source={{ uri: avatar }} style={styles.avatar} /> : <View style={[styles.avatar, styles.avatarEmpty]}><Text style={styles.initials}>{(name.replace(/^@/, '')[0] ?? '?').toUpperCase()}</Text></View>}
-      <View style={styles.nameLine}><Text accessibilityRole="header" style={styles.name}>{name}</Text>{person?.verified ? <VerifiedTick size={20} /> : null}</View>
+      <VerifiedSeal verification={person?.verified ? personVerification(name) : undefined} size={88}>{avatar ? <Image accessibilityIgnoresInvertColors source={{ uri: avatar }} style={styles.avatar} /> : <View style={[styles.avatar, styles.avatarEmpty]}><Text style={styles.initials}>{(name.replace(/^@/, '')[0] ?? '?').toUpperCase()}</Text></View>}</VerifiedSeal>
+      <View style={styles.nameLine}><Text accessibilityRole="header" style={styles.name}>{name}</Text></View>
       <Text style={styles.meta}>{[alsoKnownAs, handle ? `@${handle}` : undefined, where].filter(Boolean).join(' · ')}</Text>
       {person?.bio ? <Text style={styles.bio}>{person.bio}</Text> : null}
       <ProfessionalLines profile={person?.professional} />
