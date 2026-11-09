@@ -109,7 +109,27 @@ test('a bridged chat shows even when the other side never joins (Signal contacts
   } } };
   let result: Awaited<ReturnType<Bridges['conversations']>> | undefined;
   await withFetch((url) => url.includes('/sync') ? sync : {}, async () => { result = await new Bridges({ ...env, BRIDGES_SIGNAL_URL: 'http://signal.test' }, userId).conversations(); });
-  assert.deepEqual(result?.rooms.map((room) => [room.id, room.network, room.name, room.events.length]), [['!chat:openmedia.test', 'signal', 'Alex', 1]]);
+  assert.deepEqual(result?.rooms.map((room) => [room.id, room.network, room.name, room.events.length, room.members]), [['!chat:openmedia.test', 'signal', 'Alex', 1, []]]);
+});
+
+test('a chat with someone known only by number gets that number as its member, so it joins the saved contact', async () => {
+  const me = '@om_4493a42e416b41d0baeaaed2666f5225:openmedia.test';
+  const room = (name: string) => ({
+    state: { events: [
+      { type: 'm.bridge', state_key: 'x', content: { protocol: { id: 'signal' }, channel: { id: 'PNI:1', displayname: name } } },
+      { type: 'm.room.name', state_key: '', content: { name } },
+      { type: 'm.room.member', state_key: '@signalbot:openmedia.test', content: { membership: 'join' } },
+      { type: 'm.room.member', state_key: me, content: { membership: 'join' } },
+    ] },
+    timeline: { events: [] },
+  });
+  const sync = { rooms: { join: { '!a:openmedia.test': room('+1 (555) 010-0001'), '!b:openmedia.test': room('Book club') } } };
+  let result: Awaited<ReturnType<Bridges['conversations']>> | undefined;
+  await withFetch((url) => url.includes('/sync') ? sync : {}, async () => { result = await new Bridges({ ...env, BRIDGES_SIGNAL_URL: 'http://signal.test' }, userId).conversations(); });
+  const members = Object.fromEntries((result?.rooms ?? []).map((item) => [item.id, item.members]));
+  assert.equal(members['!a:openmedia.test']?.[0]?.id.replace(/:.*/, ''), '@signal_+15550100001');
+  assert.equal(members['!a:openmedia.test']?.[0]?.displayName, '+1 (555) 010-0001');
+  assert.deepEqual(members['!b:openmedia.test'], []);
 });
 
 test('Discord uses its older sign-in API: token sign-in, status from ping, logout', async () => {
@@ -222,4 +242,47 @@ test('a chat marked unread (m.marked_unread) counts as one unread until read, an
   await assert.rejects(bridges.markUnread('../admin'));
   const read = await withFetch(() => ({}), () => bridges.markRead('!w:openmedia.test', '$f', true));
   assert.match(read[1], /^PUT .*\/account_data\/m\.marked_unread/, 'reading clears the mark');
+});
+
+test('a Signal chat named with a number gives that number to the person, even when they joined under a UUID', async () => {
+  const me = '@om_4493a42e416b41d0baeaaed2666f5225:openmedia.test';
+  const ghost = '@signal_0b9a5a52-1c33-4f0e-9d7e-2f4c8a1b6e10:openmedia.test';
+  const dm = (name: string, members: [string, string][]) => ({
+    state: { events: [
+      { type: 'm.bridge', state_key: 'x', content: { protocol: { id: 'signal' }, channel: { id: 'x', displayname: name } } },
+      { type: 'm.room.name', state_key: '', content: { name } },
+      { type: 'm.room.member', state_key: '@signalbot:openmedia.test', content: { membership: 'join' } },
+      { type: 'm.room.member', state_key: me, content: { membership: 'join' } },
+      ...members.map(([id, displayname]) => ({ type: 'm.room.member', state_key: id, content: { membership: 'join', displayname } })),
+    ] },
+    timeline: { events: [] },
+  });
+  const sync = { rooms: { join: {
+    '!dm:openmedia.test': dm('+1 (555) 010-0002', [[ghost, 'Sam Example']]),
+    '!named:openmedia.test': dm('Sam Example', [[ghost, 'Sam Example']]),
+    '!group:openmedia.test': dm('+1 (555) 010-0003', [[ghost, 'Sam Example'], ['@signal_1f2e3d4c-0000-4000-8000-000000000001:openmedia.test', 'Kai']]),
+  } } };
+  let result: Awaited<ReturnType<Bridges['conversations']>> | undefined;
+  await withFetch((url) => url.includes('/sync') ? sync : {}, async () => { result = await new Bridges({ ...env, BRIDGES_SIGNAL_URL: 'http://signal.test' }, userId).conversations(); });
+  const rooms = Object.fromEntries((result?.rooms ?? []).map((room) => [room.id, room.members]));
+  assert.deepEqual(rooms['!dm:openmedia.test'], [{ id: ghost, displayName: 'Sam Example', phone: '+15550100002' }]);
+  assert.equal(rooms['!named:openmedia.test']?.[0]?.phone, undefined);
+  assert.ok(rooms['!group:openmedia.test']?.every((member) => member.phone === undefined));
+});
+
+test('someone only invited so far stands in under their own Signal account from m.bridge, not a made-up id', async () => {
+  const me = '@om_4493a42e416b41d0baeaaed2666f5225:openmedia.test';
+  const sync = { rooms: { join: { '!dm:openmedia.test': {
+    state: { events: [
+      { type: 'm.bridge', state_key: 'x', content: { protocol: { id: 'signal' }, channel: { id: '0B9A5A52-1C33-4F0E-9D7E-2F4C8A1B6E10', displayname: '+1 555 010 0002' } } },
+      { type: 'm.room.name', state_key: '', content: { name: '+1 555 010 0002' } },
+      { type: 'm.room.member', state_key: '@signalbot:openmedia.test', content: { membership: 'join' } },
+      { type: 'm.room.member', state_key: me, content: { membership: 'join' } },
+      { type: 'm.room.member', state_key: '@signal_0b9a5a52-1c33-4f0e-9d7e-2f4c8a1b6e10:openmedia.test', content: { membership: 'invite' } },
+    ] },
+    timeline: { events: [] },
+  } } } };
+  let result: Awaited<ReturnType<Bridges['conversations']>> | undefined;
+  await withFetch((url) => url.includes('/sync') ? sync : {}, async () => { result = await new Bridges({ ...env, BRIDGES_SIGNAL_URL: 'http://signal.test' }, userId).conversations(); });
+  assert.deepEqual(result?.rooms[0]?.members, [{ id: '@signal_0b9a5a52-1c33-4f0e-9d7e-2f4c8a1b6e10:openmedia.test', displayName: '+1 555 010 0002', phone: '+15550100002' }]);
 });

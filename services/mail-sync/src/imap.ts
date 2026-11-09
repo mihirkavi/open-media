@@ -2,6 +2,7 @@ import { FetchMessageObject, ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
 
 import { UserFacingError } from './errors.js';
+import { bodyTextOf } from './mailBody.js';
 import { collectAttachments, collectRemoteImages } from './mailMedia.js';
 import { verifySender } from './senderVerification.js';
 import { FolderMark, ImapCursor } from './mailCursor.js';
@@ -331,7 +332,7 @@ async function toSyncedMessage(item: FetchMessageObject, source: Buffer | undefi
     from: senderOf(item),
     to: recipientsOf(item),
     sentAt: new Date(item.envelope?.date ?? item.internalDate ?? Date.now()).toISOString(),
-    text: parsed?.text?.slice(0, 50_000) ?? '',
+    text: parsed ? bodyTextOf(parsed) : '',
     senderVerified: brand.verified,
     senderLogoUrl: brand.logoUrl,
     remoteImages: collectRemoteImages(parsed?.html),

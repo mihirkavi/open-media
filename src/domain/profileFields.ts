@@ -172,6 +172,18 @@ export function publicProfileUrl(handleValue: string, origin = 'https://openmedi
   return `${origin}/@${handleValue.replace(/^@/, '').toLowerCase()}`;
 }
 
+/**
+ * A person's public resume page. Against the production service it is openmedia.site/@handle/resume;
+ * any other service (the local stack, a self-hosted one) has no openmedia.site pages, so the link
+ * goes to that service's own resume page, /v1/profiles/{handle}/resume.
+ */
+export function resumeUrl(handleValue: string, apiURL?: string): string {
+  const handle = handleValue.replace(/^@/, '').toLowerCase();
+  const api = apiURL?.replace(/\/$/, '');
+  if (!api || api === 'https://api.openmedia.site') return `${publicProfileUrl(handle)}/resume`;
+  return `${api}/v1/profiles/${encodeURIComponent(handle)}/resume`;
+}
+
 /** The handle in a profile address such as /@asha (or /@asha/), or undefined. */
 export function profileHandleFromPath(pathname: string): string | undefined {
   return pathname.match(/^\/@([a-z0-9_]{3,24})\/?$/i)?.[1]?.toLowerCase();

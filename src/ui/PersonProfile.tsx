@@ -3,20 +3,20 @@ import { useEffect, useMemo, useState } from 'react';
 import { Image, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Loader } from './Loader';
 
-import { FollowStatus, followPerson, loadPublicPerson, loadTimeline, PublicPerson, sourcesFor, TimelineSource, unfollowPerson } from '../data/peopleService';
+import { FollowStatus, followPerson, loadPublicPerson, loadTimeline, PublicPerson, resumeUrl, sourcesFor, TimelineSource, unfollowPerson } from '../data/peopleService';
 import { networks } from '../domain/networkPosts';
-import { cardFor, ContactCard, confirmLink, contactLabel, contactName, IdentityRef, isMine, linkedIdentities, phoneNetworks, refKey, selfCard, selfLabel, shownName } from '../domain/people';
+import { cardFor, ContactCard, contactName, IdentityRef, isMine, linkedIdentities, refKey, selfCard, selfLabel, shownName } from '../domain/people';
 import { SocialPost } from '../domain/posts';
+import { initialsFor } from '../domain/publicPosts';
 import { fieldDefinition, fieldDisplay, fieldHref, publicProfileUrl } from '../domain/profileFields';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { PostCard } from './OpenMediaFeed';
 import { newId, PersonTarget, usePeople } from './people';
-import { TextInput } from './Text';
-import { ContactEditor, kindLabel } from './ContactEditor';
+import { ContactCardView } from './ContactCardView';
 import { ProfessionalLines } from './ProfessionalLines';
 import { Text } from './Text';
-import { VerifiedTick } from './VerifiedTick';
+import { VerifiedSeal, personVerification } from './VerifiedSeal';
 import { WebFeedProfile } from './WebFeedProfile';
 
 /**
@@ -25,14 +25,14 @@ import { WebFeedProfile } from './WebFeedProfile';
  * name, numbers, notes, and how identities were linked). Below is one timeline of the person's
  * posts across Open Media and their open-network accounts.
  */
-type PersonProfileProps = { target: PersonTarget; viewerId?: string; onBack?: () => void; onMessage?: (handle: string) => void };
+type PersonProfileProps = { target: PersonTarget; viewerId?: string; onBack?: () => void; /** Leaves the profile (a discarded new contact). */ onClose?: () => void; onMessage?: (handle: string) => void };
 
 /** A person's profile, or a web feed's when the target is a feed (ADR 0024). */
 export function PersonProfile(props: PersonProfileProps) {
   return props.target.webFeed ? <WebFeedProfile feed={props.target.webFeed} viewerId={props.viewerId} onBack={props.onBack} /> : <PersonView {...props} />;
 }
 
-function PersonView({ target, viewerId, onBack, onMessage }: PersonProfileProps) {
+function PersonView({ target, viewerId, onBack, onClose, onMessage }: PersonProfileProps) {
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const people = usePeople();
@@ -41,18 +41,17 @@ function PersonView({ target, viewerId, onBack, onMessage }: PersonProfileProps)
   const [posts, setPosts] = useState<SocialPost[]>();
   const [failed, setFailed] = useState<TimelineSource[]>([]);
   const [filter, setFilter] = useState('all');
-  const [busy, setBusy] = useState('');
   const [follow, setFollow] = useState<FollowStatus>(null);
   const [followError, setFollowError] = useState('');
-  const [editing, setEditing] = useState(false);
-  const [pickingContact, setPickingContact] = useState(false);
-  const [contactQuery, setContactQuery] = useState('');
+  const [editing, setEditing] = useState(Boolean(target.editing));
 
   const handle = target.ref.kind === 'open_media' || target.ref.kind === 'network' ? target.ref.handle.replace(/^@/, '') : undefined;
   // Your own profile, or one of your own addresses or accounts: it shows your own card (ADR 0023).
   const me = people?.me;
   const mine = Boolean(contacts && isMine(contacts.cards, target.ref)) || Boolean(me && target.ref.kind === 'open_media' && target.ref.handle.replace(/^@/, '').toLowerCase() === me.handle.toLowerCase());
-  const card = contacts ? (mine ? selfCard(contacts.cards) : cardFor(contacts.cards, target.ref)) : undefined;
+  const opened = target.cardId ? contacts?.cards.find((item) => item.id === target.cardId) ?? (target.draft?.id === target.cardId ? target.draft : undefined) : undefined;
+  const isDraft = Boolean(target.draft && opened === target.draft);
+  const card = contacts ? (mine ? selfCard(contacts.cards) : opened ?? cardFor(contacts.cards, target.ref)) : undefined;
   const refs = contacts ? linkedIdentities(contacts.cards, target.ref) : [target.ref];
   const omHandle = (refs.find((ref) => ref.kind === 'open_media') as Extract<IdentityRef, { kind: 'open_media' }> | undefined)?.handle;
 
@@ -78,7 +77,7 @@ function PersonView({ target, viewerId, onBack, onMessage }: PersonProfileProps)
   const names = shownName({ declaredName: person?.displayName ?? (target.ref.kind === 'network' ? target.name : undefined), handle: person?.handle ?? handle }, card);
   const publicName = target.ref.kind === 'email' || target.ref.kind === 'phone' || target.ref.kind === 'bridge' ? (target.name ?? names.name) : names.name;
   // The name the viewer saved comes first, wherever they saved one (ADR 0023); the public name follows it.
-  const name = mine && me ? (target.ref.kind === 'open_media' ? person?.displayName || me.name : selfLabel(me.name)) : contactName(card) || publicName;
+  const name = mine && me ? (target.ref.kind === 'open_media' ? person?.displayName || me.name : selfLabel(me.name)) : contactName(card) || (isDraft ? 'New contact' : publicName);
   const alsoKnownAs = !mine && card && publicName && publicName.replace(/^@/, '').toLowerCase() !== name.toLowerCase() && !publicName.startsWith('@') ? publicName : undefined;
   const avatar = person?.avatarUrl ?? target.avatarUrl;
   const where = target.ref.kind === 'network' ? networks[target.ref.network].displayName : target.ref.kind === 'open_media' ? 'Open Media' : undefined;
@@ -105,17 +104,13 @@ function PersonView({ target, viewerId, onBack, onMessage }: PersonProfileProps)
     }
   };
 
-  const act = async (label: string, action: () => Promise<unknown>) => {
-    setBusy(label);
-    try { await action(); } finally { setBusy(''); }
-  };
 
   return <ScrollView style={styles.screen} contentContainerStyle={styles.content}>
     {onBack ? <View style={styles.bar}><Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} style={styles.back}><Ionicons name="chevron-back" size={22} color={colors.text} /></Pressable></View> : <View style={styles.barSpace} />}
 
     <View style={styles.header}>
-      {avatar ? <Image accessibilityIgnoresInvertColors source={{ uri: avatar }} style={styles.avatar} /> : <View style={[styles.avatar, styles.avatarEmpty]}><Text style={styles.initials}>{(name.replace(/^@/, '')[0] ?? '?').toUpperCase()}</Text></View>}
-      <View style={styles.nameLine}><Text accessibilityRole="header" style={styles.name}>{name}</Text>{person?.verified ? <VerifiedTick size={20} /> : null}</View>
+      <VerifiedSeal verification={person?.verified ? personVerification(name) : undefined} size={88}>{avatar ? <Image accessibilityIgnoresInvertColors source={{ uri: avatar }} style={styles.avatar} /> : <View style={[styles.avatar, styles.avatarEmpty]}><Text style={styles.initials}>{initialsFor(name.replace(/^@/, '')) || '?'}</Text></View>}</VerifiedSeal>
+      <View style={styles.nameLine}><Text accessibilityRole="header" style={styles.name}>{name}</Text></View>
       <Text style={styles.meta}>{[alsoKnownAs, handle ? `@${handle}` : undefined, where].filter(Boolean).join(' · ')}</Text>
       {person?.bio ? <Text style={styles.bio}>{person.bio}</Text> : null}
       <ProfessionalLines profile={person?.professional} />
@@ -124,7 +119,7 @@ function PersonView({ target, viewerId, onBack, onMessage }: PersonProfileProps)
         const label = fieldDefinition(item.field)?.label ?? item.field;
         return <Text key={item.field} style={styles.small}>{label}: {href ? <Text accessibilityRole="link" onPress={() => { Linking.openURL(href).catch(() => undefined); }} style={styles.fieldLink}>{fieldDisplay(item.field, item.value)}</Text> : fieldDisplay(item.field, item.value)}</Text>;
       })}</View> : null}
-      {handle && target.ref.kind === 'open_media' ? <Text style={styles.small}><Text accessibilityRole="link" onPress={() => { Linking.openURL(publicProfileUrl(handle)).catch(() => undefined); }} style={styles.fieldLink}>{publicProfileUrl(handle).replace('https://', '')}</Text>{person?.professional ? <> · <Text accessibilityRole="link" onPress={() => { Linking.openURL(`${publicProfileUrl(handle)}/resume`).catch(() => undefined); }} style={styles.fieldLink}>Resume</Text></> : null}</Text> : null}
+      {handle && target.ref.kind === 'open_media' ? <Text style={styles.small}><Text accessibilityRole="link" onPress={() => { Linking.openURL(publicProfileUrl(handle)).catch(() => undefined); }} style={styles.fieldLink}>{publicProfileUrl(handle).replace('https://', '')}</Text>{person?.professional ? <> · <Text accessibilityRole="link" onPress={() => { Linking.openURL(resumeUrl(handle)).catch(() => undefined); }} style={styles.fieldLink}>Resume</Text></> : null}</Text> : null}
       {person?.joinedAt ? <Text style={styles.small}>{`Joined ${new Date(person.joinedAt).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })} · ${person.postCount ?? 0} ${person.postCount === 1 ? 'post' : 'posts'}`}</Text> : null}
       <View style={styles.actions}>
         {person && viewerId && !self ? <Pressable accessibilityRole="button" accessibilityState={{ selected: Boolean(follow) }} onPress={toggleFollow} style={[styles.button, !follow && styles.primary]}>
@@ -137,68 +132,21 @@ function PersonView({ target, viewerId, onBack, onMessage }: PersonProfileProps)
       {person?.linkedAccounts.length ? <Text style={styles.small}>Also on {person.linkedAccounts.map((account) => `${networks[account.network]?.displayName ?? account.network} @${account.handle}`).join(' · ')} <Text style={styles.faint}>(listed by {person.handle})</Text></Text> : null}
     </View>
 
-    {contacts ? <View style={styles.private}>
-      <View style={styles.privateTitleRow}>
-        <Ionicons name="lock-closed-outline" size={14} color={colors.textSecondary} /><Text style={[styles.privateTitle, styles.grow]}>Only you see this</Text>
-        {card && !editing ? <Pressable accessibilityRole="button" accessibilityLabel={card.self ? 'Edit my card' : `Edit ${contactLabel(card)}`} onPress={() => setEditing(true)} hitSlop={8} style={styles.edit}><Ionicons name="create-outline" size={14} color={colors.text} /><Text style={styles.editText}>Edit</Text></Pressable> : null}
-      </View>
-      {self && !card ? <>
-        <Text style={styles.selfIntro}>Add your other email addresses, phone numbers and accounts. Mail and chats from any of them are recognised as you, never as someone else, and you appear as {selfLabel(me?.name ?? '')} in your contacts.</Text>
-        <Pressable accessibilityRole="button" disabled={Boolean(busy) || !me} onPress={() => me && act('me', async () => { await contacts.save(newSelfCard(me)); setEditing(true); })} style={styles.addContact}><Ionicons name="person-circle-outline" size={16} color={colors.text} /><Text style={styles.buttonText}>Add my other addresses</Text></Pressable>
-      </> : null}
-      {card && editing ? <ContactEditor
-        key={card.id}
-        selfName={card.self ? me?.name ?? card.name : undefined}
-        card={card}
-        cards={contacts.cards}
-        onCancel={() => setEditing(false)}
-        onSave={async (next) => { await contacts.save(next); setEditing(false); }}
-        onDelete={async () => { await contacts.remove(card.id); setEditing(false); }}
-      /> : card ? <>
-        {!contactName(card) && !card.self ? <Pressable accessibilityRole="button" onPress={() => setEditing(true)} style={styles.nameNudge}>
-          <Ionicons name="person-outline" size={15} color={colors.text} />
-          <Text style={styles.nameNudgeText}><Text style={styles.nameNudgeStrong}>Add their name</Text> and it shows instead of the address, in Messages and everywhere else.</Text>
-        </Pressable> : null}
-        {card.nicknames.length ? <Row label="Nicknames" value={card.nicknames.join(', ')} styles={styles} /> : null}
-        {card.phones.map((phone) => <Row key={phone} label="Phone" value={phone} styles={styles} />)}
-        {card.emails.map((email) => <Row key={email} label="Email" value={email} styles={styles} />)}
-        {(card.handles ?? []).map((item) => <Row key={`${item.network}:${item.handle}`} label={kindLabel(item.network)} value={phoneNetworks.has(item.network) || item.network === 'telegram' && /^\d+$/.test(item.handle) ? item.handle : `@${item.handle.replace(/^@/, '')}`} styles={styles} />)}
-        {card.notes ? <Row label="Notes" value={card.notes} styles={styles} /> : null}
-        {!card.phones.length && !card.emails.length && !(card.handles ?? []).length && !card.notes ? <Text style={styles.linkWhy}>{card.self ? 'Add your other emails, numbers and accounts, so mail and chats from them are recognised as you.' : 'Add their emails, numbers and handles, and everything they send from any of them lands in one conversation.'}</Text> : null}
-        {card.links.length ? <Text style={styles.linkedTitle}>Linked to this contact</Text> : null}
-        {card.links.map((link) => <View key={refKey(link.ref)} style={styles.linkRow}>
-          <View style={styles.linkCopy}><Text style={styles.linkName}>{describe(link.ref)}</Text><Text style={styles.linkWhy}>{link.method === 'auto' ? `Linked automatically: ${link.evidence}` : 'You linked this'}</Text></View>
-          <Pressable accessibilityRole="button" accessibilityLabel={`Unlink ${describe(link.ref)}`} disabled={Boolean(busy)} onPress={() => act('undo', () => contacts.undo(card.id, link.ref))} style={styles.chip}><Text style={styles.chipText}>{link.method === 'auto' ? 'Undo' : 'Unlink'}</Text></Pressable>
-        </View>)}
-      </> : null}
-      {self ? null : suggestions.map((suggestion) => {
-        const suggested = contacts.cards.find((item) => item.id === suggestion.cardId);
-        return suggested ? <View key={suggestion.cardId} style={styles.linkRow}>
-          <View style={styles.linkCopy}><Text style={styles.linkName}>Is this {contactLabel(suggested)} from your contacts?</Text><Text style={styles.linkWhy}>{suggestion.reason}</Text></View>
-          <Pressable accessibilityRole="button" disabled={Boolean(busy)} onPress={() => act('yes', () => contacts.confirm(suggestion.cardId, target.ref))} style={[styles.chip, styles.chipStrong]}><Text style={styles.chipStrongText}>Yes</Text></Pressable>
-          <Pressable accessibilityRole="button" disabled={Boolean(busy)} onPress={() => act('no', () => contacts.reject(suggestion.cardId, target.ref))} style={styles.chip}><Text style={styles.chipText}>No</Text></Pressable>
-        </View> : null;
-      })}
-      {!card && !self ? <>
-        <View style={styles.addRow}>
-          <Pressable accessibilityRole="button" disabled={Boolean(busy)} onPress={() => act('add', async () => { await contacts.save(newCard(publicName, target.ref)); setEditing(true); })} style={styles.addContact}><Ionicons name="person-add-outline" size={15} color={colors.text} /><Text style={styles.buttonText}>Add to my contacts</Text></Pressable>
-          {contacts.cards.length && !pickingContact ? <Pressable accessibilityRole="button" onPress={() => setPickingContact(true)} style={styles.addContact}><Ionicons name="git-merge-outline" size={15} color={colors.textSecondary} /><Text style={styles.quietText}>Add to a contact I have</Text></Pressable> : null}
-        </View>
-        {pickingContact ? <View style={styles.picker}>
-          <TextInput autoFocus accessibilityLabel="Find a contact" value={contactQuery} onChangeText={setContactQuery} placeholder="Find a contact" placeholderTextColor={colors.textTertiary} style={styles.pickerInput} />
-          {contacts.cards
-            .filter((item) => !item.self && (!contactQuery.trim() || [item.name, ...item.emails, ...item.phones].join(' ').toLowerCase().includes(contactQuery.trim().toLowerCase())))
-            .sort((a, b) => contactLabel(a).localeCompare(contactLabel(b))).slice(0, 6)
-            .map((item) => <Pressable key={item.id} accessibilityRole="button" accessibilityLabel={`Add to ${contactLabel(item)}`} disabled={Boolean(busy)} onPress={() => act('merge', async () => { await contacts.save(confirmLink(item, target.ref)); setPickingContact(false); setContactQuery(''); })} style={({ pressed }) => [styles.pickerRow, pressed && styles.pressed]}>
-              <View style={styles.pickerFace}><Text style={styles.pickerInitials}>{(contactLabel(item)[0] ?? '?').toUpperCase()}</Text></View>
-              <View style={styles.linkCopy}><Text numberOfLines={1} style={styles.linkName}>{contactLabel(item)}</Text>{item.emails[0] || item.phones[0] ? <Text numberOfLines={1} style={styles.linkWhy}>{item.emails[0] ?? item.phones[0]}</Text> : null}</View>
-              <Ionicons name="add-circle-outline" size={18} color={colors.textTertiary} />
-            </Pressable>)}
-          <Pressable accessibilityRole="button" onPress={() => { setPickingContact(false); setContactQuery(''); }} style={styles.pickerCancel}><Text style={styles.quietText}>Cancel</Text></Pressable>
-        </View> : null}
-      </> : null}
-      {busy ? <Loader color={colors.text} /> : null}
-    </View> : null}
+    {contacts ? <ContactCardView
+      contacts={contacts}
+      card={card}
+      self={self}
+      meName={me?.name}
+      target={target}
+      publicName={publicName}
+      suggestions={suggestions}
+      editing={editing}
+      onEditing={setEditing}
+      draft={isDraft}
+      onDiscard={() => (onClose ?? onBack)?.()}
+      onAddSelf={async () => { if (!me) return; await contacts.save(newSelfCard(me)); setEditing(true); }}
+      onAddNew={async () => { await contacts.save(newCard(publicName, target.ref)); setEditing(true); }}
+    /> : null}
 
     {locked ? <View style={styles.lockedBox}>
       <Ionicons name="lock-closed-outline" size={22} color={colors.text} />
@@ -216,19 +164,7 @@ function PersonView({ target, viewerId, onBack, onMessage }: PersonProfileProps)
   </ScrollView>;
 }
 
-function Row({ label, value, styles }: { label: string; value: string; styles: ReturnType<typeof createStyles> }) {
-  return <View style={styles.row}><Text style={styles.rowLabel}>{label}</Text><Text selectable style={styles.rowValue}>{value}</Text></View>;
-}
 
-function describe(ref: IdentityRef): string {
-  switch (ref.kind) {
-    case 'open_media': return `@${ref.handle} on Open Media`;
-    case 'email': return ref.address;
-    case 'phone': return ref.number;
-    case 'network': return `@${ref.handle} on ${networks[ref.network].displayName}`;
-    case 'bridge': return `${ref.network === 'gmessages' ? 'Google Messages' : ref.network[0].toUpperCase() + ref.network.slice(1)} chat`;
-  }
-}
 
 /** Your own card: it starts with your Open Media handle, and its name always follows your profile. */
 function newSelfCard(me: { handle: string; name: string }): ContactCard {
@@ -245,7 +181,7 @@ function newCard(shown: string, ref: IdentityRef): ContactCard {
   const handles = ref.kind === 'open_media' ? [{ network: 'open_media' as const, handle: ref.handle }]
     : ref.kind === 'network' ? [{ network: ref.network, handle: ref.handle }]
     : ref.kind === 'bridge' ? [{ network: ref.network, handle: ref.id }] : [];
-  return { id: newId(), source: 'manual', name, nicknames: [], phones: ref.kind === 'phone' ? [ref.number] : [], emails: ref.kind === 'email' ? [ref.address] : [], handles, notes: '', links: [{ ref, method: 'confirmed', evidence: 'You added this', linkedAt: now }], rejected: [], updatedAt: now };
+  return { id: newId(), source: 'manual', name, nicknames: [], phones: ref.kind === 'phone' ? [ref.number] : ref.kind === 'bridge' && ref.phone ? [ref.phone] : [], emails: ref.kind === 'email' ? [ref.address] : [], handles, notes: '', links: [{ ref, method: 'confirmed', evidence: 'You added this', linkedAt: now }], rejected: [], updatedAt: now };
 }
 
 function createStyles(colors: ThemeColors) {

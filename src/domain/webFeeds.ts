@@ -1,6 +1,7 @@
 import { officialPublisher } from './webFeedDirectory';
 import type { PostMedia, SocialPost } from './posts';
 import { initialsFor } from './publicPosts';
+import { decodeHtml } from './htmlText';
 
 /**
  * Web feeds (ADR 0024): RSS 2.0, RSS 1.0, Atom (RFC 4287) and JSON Feed 1.1 read into one shape,
@@ -191,17 +192,7 @@ function innerXml(element: XmlElement): string {
 
 // ---------- HTML to text ----------
 
-const htmlEntities: Record<string, string> = { nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", hellip: '…', mdash: '—', ndash: '–', lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”', laquo: '«', raquo: '»', middot: '·', bull: '•', copy: '©', reg: '®', trade: '™', eacute: 'é', egrave: 'è', aacute: 'á', agrave: 'à', ouml: 'ö', uuml: 'ü', auml: 'ä', ccedil: 'ç', ntilde: 'ñ', iacute: 'í', oacute: 'ó', uacute: 'ú', szlig: 'ß', deg: '°', times: '×', euro: '€', pound: '£', yen: '¥', shy: '' };
-
-export function decodeHtml(text: string): string {
-  return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+\d*);/gi, (match, name: string) => {
-    if (name[0] === '#') {
-      const code = name[1] === 'x' || name[1] === 'X' ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10);
-      return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : '';
-    }
-    return htmlEntities[name.toLowerCase()] ?? match;
-  });
-}
+export { decodeHtml };
 
 /** Readable text from feed HTML: scripts, styles, embeds and captions removed, whitespace tidied. */
 export function htmlToText(html: string): string {

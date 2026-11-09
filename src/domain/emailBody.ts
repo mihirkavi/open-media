@@ -5,6 +5,8 @@
  * characters and layout spacing are cleaned up.
  */
 
+import { htmlToMessageText, linkMark, looksLikeHtml } from './htmlText';
+
 export interface BodySegment {
   text: string;
   /** Present when this segment is a link. */
@@ -28,7 +30,8 @@ const quoteStarts = [
 ];
 
 export function formatEmailBody(raw: string): FormattedEmailBody {
-  let text = raw
+  // Some senders put HTML in the plain-text part; read it as a message, links kept.
+  let text = (looksLikeHtml(raw) ? htmlToMessageText(raw) : raw)
     .replace(/\r\n?/g, '\n')
     .replace(invisible, '')
     .replace(/ /g, ' ')
@@ -100,12 +103,19 @@ function dedupeRepeatedLabel(line: string): string {
 /** Converts "Label ( https://… )", "Label <https://…>", "Label [https://…]", and bare URLs into link segments. */
 function linkSegments(text: string): BodySegment[] {
   const segments: BodySegment[] = [];
-  const linkPattern = /([^\n()[\]<>]*?)\s*[([<]\s*(https?:\/\/[^\s)\]>]+)\s*[)\]>]|(https?:\/\/[^\s)\]>]+)/g;
+  const linkPattern = new RegExp(`${linkMark.start}([^${linkMark.start}${linkMark.split}${linkMark.end}]*)${linkMark.split}(https?:\\/\\/[^\\s${linkMark.end}]+)${linkMark.end}|${/([^\n()[\]<>]*?)\s*[([<]\s*(https?:\/\/[^\s)\]>]+)\s*[)\]>]|(https?:\/\/[^\s)\]>]+)/.source}`, 'g');
   let last = 0;
   for (const match of text.matchAll(linkPattern)) {
     const index = match.index ?? 0;
-    const [whole, label, wrappedURL, bareURL] = match;
-    if (index > last) segments.push({ text: text.slice(last, index) });
+    const [whole, markedLabel, markedURL, label, wrappedURL, bareURL] = match;
+    if (index > last) segments.push({ text: withoutMarks(text.slice(last, index)) });
+    if (markedURL) {
+      // A link converted from HTML: its exact words, not the whole line before it.
+      const words = markedLabel.replace(/\s+/g, ' ').trim();
+      segments.push(words ? { text: words, url: markedURL } : { text: linkLabel(markedURL), url: markedURL });
+      last = index + whole.length;
+      continue;
+    }
     const rawURL = wrappedURL ?? bareURL;
     const url = rawURL.replace(/[.,;:!?]+$/, '');
     const trimmedLabel = dedupeRepeatedLabel((label ?? '').trim());
@@ -120,8 +130,13 @@ function linkSegments(text: string): BodySegment[] {
     // Trailing sentence punctuation after a bare URL stays in the text.
     last = index + whole.length - (bareURL ? rawURL.length - url.length : 0);
   }
-  if (last < text.length) segments.push({ text: text.slice(last) });
+  if (last < text.length) segments.push({ text: withoutMarks(text.slice(last)) });
   return mergeText(segments);
+}
+
+/** Link marks left unpaired (say, by cutting quoted history mid-link) are never shown. */
+function withoutMarks(text: string): string {
+  return text.replace(/[\uE000-\uE002]/g, '');
 }
 
 function linkLabel(url: string): string {

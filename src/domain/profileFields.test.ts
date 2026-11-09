@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { cleanFieldValue, editableFields, fieldDisplay, fieldHref, ProfileFieldError, profileHandleFromPath, publicProfileUrl, readVisibleFields, validateProfileFields } from './profileFields';
+import { cleanFieldValue, editableFields, fieldDisplay, fieldHref, ProfileFieldError, profileHandleFromPath, publicProfileUrl, readVisibleFields, resumeUrl, validateProfileFields } from './profileFields';
 
 test('pasted profile links and @handles are stored as plain handles', () => {
   assert.equal(cleanFieldValue('linkedin', 'https://www.linkedin.com/in/mihirkavishwar/'), 'mihirkavishwar');
@@ -54,4 +54,10 @@ test('profile addresses are /@handle', () => {
   assert.equal(profileHandleFromPath('/@mihirkavishwar/'), 'mihirkavishwar');
   assert.equal(profileHandleFromPath('/@mihirkavishwar/resume'), undefined);
   assert.equal(profileHandleFromPath('/mihirkavishwar'), undefined);
+});
+
+test('resume links point at the service the app talks to', () => {
+  assert.equal(resumeUrl('@Asha_K', 'https://api.openmedia.site'), 'https://openmedia.site/@asha_k/resume');
+  assert.equal(resumeUrl('asha_k'), 'https://openmedia.site/@asha_k/resume');
+  assert.equal(resumeUrl('Asha_K', 'http://127.0.0.1:8787/'), 'http://127.0.0.1:8787/v1/profiles/asha_k/resume');
 });

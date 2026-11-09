@@ -4,15 +4,25 @@
  * service (on Node.js), and the web app. Ctrl+C stops the Worker and web app;
  * `npm run local:stop` also stops the database.
  *
+ * `--app` is the Dock app's mode (scripts/install-mac-app.ts). It answers on :8081 at once with a
+ * "Starting…" page that follows the steps below, and serves a production web build from
+ * .local/web-app instead of the Metro dev server. That build is cached and redone only when the
+ * app's source changes, so screens open without compiling on first use. When the build fails, it
+ * falls back to the Metro dev server.
+ *
+ * Every start skips work that is already done: Docker starts without its window, Supabase is not
+ * restarted when its containers are healthy, and migrations run only when the set of migration
+ * files changes. Nothing uses Supabase's log, vector or Edge Function containers, so they never start.
+ *
  * Generated files stay inside the repository and are gitignored:
  * .local/, .env.development.local, services/mail-sync/.dev.vars.
  */
-import { ChildProcess, execFileSync, spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import { createServer } from 'node:http';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { ChildProcess, spawn } from 'node:child_process';
+import { createHash, randomBytes } from 'node:crypto';
+import { createServer, IncomingMessage, ServerResponse } from 'node:http';
+import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir, platform } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -24,18 +34,34 @@ const inboxURL = 'http://127.0.0.1:54324';
 // A made-up person's portfolio site (services/mail-sync/fixtures/portfolio), for trying profile import.
 const samplePortfolioURL = 'http://127.0.0.1:8095';
 const bridgesEnv = join(root, '.local', 'bridges', 'worker.env');
+const appMode = process.argv.includes('--app');
+const webBuild = join(localDir, 'web-app');
+/** Containers no part of Open Media uses locally (Studio's logs, and Edge Functions; supabase/functions doesn't exist). */
+const unusedContainers = ['logflare', 'vector', 'edge-runtime'];
+/** The app doesn't need the database browser; `npm run local` keeps it for development. */
+const devOnlyContainers = ['studio', 'postgres-meta'];
 
 const nodeBin = findNode22();
 const childEnv = { ...process.env, PATH: `${dirname(nodeBin)}:${process.env.PATH ?? ''}`, FORCE_COLOR: '1' };
 const children: ChildProcess[] = [];
 
+let appShell: AppShell | undefined;
+
 main().catch((error) => {
-  console.error(`\n✗ ${error instanceof Error ? error.message : error}`);
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`\n✗ ${message}`);
   stopChildren();
-  process.exit(1);
+  if (!appShell) process.exit(1);
+  // Keep the error on screen in the app window for a while, then exit so the next launch retries.
+  appShell.fail(message);
+  setTimeout(() => process.exit(1), 120_000).unref();
 });
 
 async function main() {
+  mkdirSync(join(localDir, 'logs'), { recursive: true });
+  if (appMode) appShell = await startAppShell();
+  else await stopBackgroundApp();
+
   step('Checking Docker');
   await ensureDocker();
 
@@ -44,16 +70,15 @@ async function main() {
     writeFileSync(smtpEnv, '# Sign-in email delivery for local Supabase. Configure with `npm run local:email`.\nOPEN_MEDIA_SMTP_ENABLED=false\nOPEN_MEDIA_SMTP_HOST=localhost\nOPEN_MEDIA_SMTP_PORT=587\nOPEN_MEDIA_SMTP_USER=\nOPEN_MEDIA_SMTP_PASS=\nOPEN_MEDIA_SMTP_FROM=no-reply@localhost\n', { mode: 0o600 });
   }
 
-  step('Starting local Supabase (database, auth, test inbox)');
-  await startSupabase();
-  run('npx', ['supabase', 'migration', 'up', '--local'], { quiet: true });
-  const status = JSON.parse(run('npx', ['supabase', 'status', '-o', 'json'], { quiet: true })) as Record<string, string>;
+  step('Starting the database');
+  const started = await startSupabase();
+  await applyNewMigrations();
+  const status = await supabaseStatus(started);
   const supabaseURL = status.API_URL;
   const publishableKey = status.PUBLISHABLE_KEY;
   if (!supabaseURL || !publishableKey) throw new Error('Could not read the local Supabase URL and key from `supabase status`.');
 
   step('Writing local configuration');
-  mkdirSync(localDir, { recursive: true });
   writeFileSync(join(localDir, 'README.md'), '# .local\n\nMachine-local state for `npm run local` (gitignored). `mail-credentials-key` encrypts saved mailbox passwords in the local database; deleting it makes saved mailboxes unreadable, so reconnect them afterwards.\n');
   const keyFile = join(localDir, 'mail-credentials-key');
   if (!existsSync(keyFile)) writeFileSync(keyFile, randomBytes(32).toString('base64'), { mode: 0o600 });
@@ -72,8 +97,10 @@ async function main() {
     // The local stack's own service key, for server-only steps such as payment checks (USDC on
     // Base Sepolia). Card payments stay off locally until Stripe test keys are added here.
     status.SECRET_KEY ? `SUPABASE_SECRET_KEY=${status.SECRET_KEY}` : '',
-    // Optional: translation and AI search through your own Workers AI (bills your Cloudflare account).
-    process.env.OPEN_MEDIA_LOCAL_AI === 'true' ? 'OPEN_MEDIA_LOCAL_AI=true' : '',
+    // AI features (chat, translation, AI search, dictation) through your own Workers AI, which bills
+    // your Cloudflare account. On by default in the Dock app; `npm run local` needs
+    // OPEN_MEDIA_LOCAL_AI=true. OPEN_MEDIA_LOCAL_AI=false turns it off in both.
+    (process.env.OPEN_MEDIA_LOCAL_AI ? process.env.OPEN_MEDIA_LOCAL_AI === 'true' : appMode) ? 'OPEN_MEDIA_LOCAL_AI=true' : '',
     // Local-only: lets the app read sign-in codes from the local test inbox.
     `LOCAL_INBOX_URL=${readSmtpEnv().enabled ? '' : inboxURL}`,
     // Bridged messaging (WhatsApp and others), when `npm run bridges` has been run.
@@ -98,13 +125,30 @@ async function main() {
   step('Starting the mail and public API service');
   // Node.js locally: the IMAP library stalls on some servers (e.g. Gmail) inside the Workers runtime.
   start('api', 'npm', ['run', 'dev'], mailService);
-  await waitFor(`${apiURL}/health`, 'mail service');
+  // The app build doesn't need the API, so in app mode it runs while the API starts.
+  const api = waitFor(`${apiURL}/health`, 'mail service');
+  api.catch(() => undefined);
 
   serveSamplePortfolio();
 
-  step('Starting the web app');
-  start('web', 'npx', ['expo', 'start', '--web', '--port', '8081'], root);
-  await waitFor(appURL, 'web app', 180);
+  if (appShell) {
+    const built = await ensureWebBuild();
+    await api;
+    if (built) {
+      appShell.ready(webBuild);
+    } else {
+      console.log('  The app build failed (see above), so the Metro dev server is used instead.');
+      appShell.step('Starting the app (development mode)');
+      await appShell.close();
+      start('web', 'npx', ['expo', 'start', '--web', '--port', '8081'], root);
+      await waitFor(appURL, 'web app', 180);
+    }
+  } else {
+    await api;
+    step('Starting the web app');
+    start('web', 'npx', ['expo', 'start', '--web', '--port', '8081'], root);
+    await waitFor(appURL, 'web app', 180);
+  }
 
   const smtp = readSmtpEnv();
   console.log(`
@@ -146,50 +190,300 @@ function findNode22(): string {
   throw new Error(`Node.js 22.13 or newer is required (found ${process.versions.node}). Run \`nvm install 22 && nvm use 22\`, then try again.`);
 }
 
+/** Starts Docker Desktop's engine without opening its Dashboard window. */
 async function ensureDocker() {
-  if (dockerReady()) return;
+  if (await dockerReady()) return;
   if (platform() !== 'darwin') throw new Error('Docker is not running. Start Docker, then run `npm run local` again.');
-  console.log('  Opening Docker Desktop…');
-  spawn('open', ['-a', 'Docker'], { stdio: 'ignore' });
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    await sleep(3000);
-    if (dockerReady()) return;
+  if (!existsSync('/Applications/Docker.app')) throw new Error('Docker Desktop is not installed. Install it from https://www.docker.com/products/docker-desktop/, then try again.');
+  step('Starting Docker in the background');
+  // `docker desktop start` starts only the engine; older Docker Desktop versions lack it, so open the app hidden instead.
+  await run('docker', ['desktop', 'start', '--detach']).catch(() => spawn('open', ['-g', '-j', '-a', 'Docker'], { stdio: 'ignore' }));
+  for (let elapsed = 0; elapsed < 180; elapsed += 1) {
+    await sleep(1000);
+    if (await dockerReady()) return;
   }
   throw new Error('Docker did not start within 3 minutes. Open Docker Desktop, wait until it is running, then try again.');
 }
 
 /**
- * `supabase start`, retried while its containers are still booting. Right after Docker Desktop
- * opens, the CLI often reports "container is not ready: starting" and gives up; the containers
- * become healthy a little later, so waiting and retrying is enough.
+ * Starts local Supabase unless it is already up. Returns false when it was already running.
+ *
+ * Its containers restart with Docker, so after a reboot they are usually already starting: wait
+ * for them to become healthy rather than calling `supabase start`, which fails while they boot.
+ * `supabase start` is retried for the same reason ("container is not ready: starting").
  */
-async function startSupabase() {
+async function startSupabase(): Promise<boolean> {
+  for (let elapsed = 0; elapsed < 90; elapsed += 1) {
+    const state = await supabaseState();
+    if (state === 'healthy') { stopUnusedContainers(); return false; }
+    if (state === 'stopped') break;
+    await sleep(1000);
+  }
+  const exclude = [...unusedContainers, ...(appMode ? devOnlyContainers : [])].join(',');
   const transient = /not ready|starting|already running|unhealthy|timed out|connection refused/i;
   for (let attempt = 1; ; attempt += 1) {
     try {
-      run('npx', ['supabase', 'start'], { quiet: true });
-      return;
+      await run('npx', ['supabase', 'start', '-x', exclude]);
+      return true;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (attempt >= 12 || !transient.test(message)) throw error;
+      if (await supabaseState() === 'healthy') return true;
       console.log(`  Supabase is still starting (attempt ${attempt}); waiting…`);
-      await sleep(10000);
+      await sleep(5000);
     }
   }
 }
 
-function dockerReady(): boolean {
-  try { execFileSync('docker', ['info'], { stdio: 'ignore' }); return true; } catch { return false; }
+/**
+ * Docker restarts Supabase's containers on its own, including ones an older `supabase start`
+ * left running that nothing uses. Stopping them once keeps them stopped (their restart policy is
+ * unless-stopped). Runs in the background; the start doesn't wait for it.
+ */
+function stopUnusedContainers() {
+  const projectId = readFileSync(join(root, 'supabase', 'config.toml'), 'utf8').match(/^project_id\s*=\s*"([^"]+)"/m)?.[1] ?? 'OpenMedia';
+  const names = ['analytics', 'vector', 'edge_runtime'].map((name) => `supabase_${name}_${projectId}`);
+  run('docker', ['ps', '--format', '{{.Names}}']).then((output) => {
+    const running = names.filter((name) => output.split('\n').includes(name));
+    if (running.length) return run('docker', ['stop', ...running]);
+  }).catch(() => undefined);
 }
 
-function run(command: string, args: string[], options: { quiet?: boolean } = {}): string {
+/** The containers Open Media needs: database, auth, REST API and the gateway in front of them. */
+async function supabaseState(): Promise<'healthy' | 'starting' | 'stopped'> {
+  const projectId = readFileSync(join(root, 'supabase', 'config.toml'), 'utf8').match(/^project_id\s*=\s*"([^"]+)"/m)?.[1] ?? 'OpenMedia';
+  const output = await run('docker', ['ps', '--filter', `name=_${projectId}$`, '--format', '{{.Names}}\t{{.Status}}']).catch(() => '');
+  const containers = new Map(output.split('\n').filter(Boolean).map((line) => line.split('\t') as [string, string]));
+  const required = ['db', 'auth', 'rest', 'kong'].map((name) => `supabase_${name}_${projectId}`);
+  if (!required.some((name) => containers.has(name))) return 'stopped';
+  const healthy = required.every((name) => containers.get(name)?.startsWith('Up') && !/starting|unhealthy/.test(containers.get(name) ?? ''));
+  return healthy ? 'healthy' : 'starting';
+}
+
+/** `supabase migration up`, only when the set of migration files has changed since the last run. */
+async function applyNewMigrations() {
+  const stampFile = join(localDir, 'migrations.stamp');
+  const stamp = hash(readdirSync(join(root, 'supabase', 'migrations')).filter((name) => name.endsWith('.sql')).sort().join('\n'));
+  if (existsSync(stampFile) && readFileSync(stampFile, 'utf8') === stamp) return;
+  step('Applying new database migrations');
+  await run('npx', ['supabase', 'migration', 'up', '--local']);
+  writeFileSync(stampFile, stamp);
+}
+
+/** The local Supabase URL and keys. They only change when Supabase is started, so they are cached in .local. */
+async function supabaseStatus(started: boolean): Promise<Record<string, string>> {
+  const cacheFile = join(localDir, 'supabase-status.json');
+  if (!started && existsSync(cacheFile)) {
+    try {
+      const cached = JSON.parse(readFileSync(cacheFile, 'utf8')) as Record<string, string>;
+      if (cached.API_URL && cached.PUBLISHABLE_KEY) return cached;
+    } catch { /* read it again below */ }
+  }
+  const status = JSON.parse(await run('npx', ['supabase', 'status', '-o', 'json'])) as Record<string, string>;
+  const keep = { API_URL: status.API_URL, PUBLISHABLE_KEY: status.PUBLISHABLE_KEY, SECRET_KEY: status.SECRET_KEY };
+  writeFileSync(cacheFile, JSON.stringify(keep), { mode: 0o600 });
+  return keep;
+}
+
+async function dockerReady(): Promise<boolean> {
+  return run('docker', ['info', '--format', '{{.ServerVersion}}']).then(() => true, () => false);
+}
+
+/** Runs a command without blocking, so the app window's "Starting…" page keeps answering. Resolves with its output. */
+function run(command: string, args: string[], extraEnv: Record<string, string> = {}): Promise<string> {
+  return new Promise((done, failed) => {
+    const child = spawn(command, args, { cwd: root, env: { ...childEnv, ...extraEnv }, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk; });
+    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk; });
+    child.on('error', (error) => failed(new Error(`\`${command} ${args.join(' ')}\` could not run: ${error.message}`)));
+    child.on('close', (code) => code === 0 ? done(stdout) : failed(new Error(`\`${command} ${args.join(' ')}\` failed.\n${stderr || stdout}`)));
+  });
+}
+
+function hash(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+/** What the web app build is made from. A change to any of these files means it is rebuilt. */
+function webFingerprint(): string {
+  const parts: string[] = [readFileSync(join(root, '.env.development.local'), 'utf8')];
+  const visit = (path: string) => {
+    if (!existsSync(path)) return;
+    const stats = statSync(path);
+    if (stats.isDirectory()) {
+      for (const name of readdirSync(path).sort()) if (!name.startsWith('.') && name !== 'node_modules') visit(join(path, name));
+    } else {
+      parts.push(`${path.slice(root.length)}:${stats.size}:${stats.mtimeMs}`);
+    }
+  };
+  for (const name of ['src', 'assets', 'modules', 'App.tsx', 'index.ts', 'app.json', 'package.json', 'package-lock.json', 'tsconfig.json']) visit(join(root, name));
+  return hash(parts.join('\n'));
+}
+
+/**
+ * Makes sure .local/web-app holds a production build of the current source, pointed at the local
+ * stack. Returns false when the build fails. The new build goes to a separate folder first, so a
+ * failed build never replaces a working one.
+ */
+async function ensureWebBuild(): Promise<boolean> {
+  const fingerprint = webFingerprint();
+  const stampFile = join(webBuild, '.fingerprint');
+  if (existsSync(join(webBuild, 'index.html')) && existsSync(stampFile) && readFileSync(stampFile, 'utf8') === fingerprint) return true;
+  step(existsSync(webBuild) ? 'Updating the app to your latest code' : 'Building the app (first time only)');
+  const next = `${webBuild}-next`;
+  rmSync(next, { recursive: true, force: true });
+  // The settings in .env.development.local are passed in the environment, which wins over
+  // .env.local (the production backend), so the build only ever talks to the local stack.
+  const env = Object.fromEntries(readFileSync(join(root, '.env.development.local'), 'utf8').split('\n')
+    .filter((line) => /^EXPO_PUBLIC_[A-Z0-9_]+=/.test(line)).map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
   try {
-    return execFileSync(command, args, { cwd: root, env: childEnv, encoding: 'utf8', stdio: options.quiet ? ['ignore', 'pipe', 'pipe'] : 'inherit' }) ?? '';
+    const started = Date.now();
+    await run('npx', ['expo', 'export', '--platform', 'web', '--output-dir', next], { ...env, NODE_ENV: 'production', CI: '1' });
+    console.log(`  Built the app in ${Math.round((Date.now() - started) / 1000)} s`);
   } catch (error) {
-    const output = error as { stderr?: string; stdout?: string };
-    throw new Error(`\`${command} ${args.join(' ')}\` failed.\n${output.stderr || output.stdout || ''}`);
+    console.error(error instanceof Error ? error.message : error);
+    return false;
+  }
+  writeFileSync(join(next, '.fingerprint'), fingerprint);
+  rmSync(webBuild, { recursive: true, force: true });
+  renameSync(next, webBuild);
+  return true;
+}
+
+interface AppShell {
+  step(message: string): void;
+  ready(folder: string): void;
+  fail(message: string): void;
+  close(): Promise<void>;
+}
+
+/**
+ * The Dock app's web server on :8081. Until the stack is ready, pages get a "Starting…" screen
+ * that shows the current step and reloads into the app when it is ready; afterwards it serves the
+ * build in `folder`, falling back to index.html for the app's own paths.
+ */
+async function startAppShell(): Promise<AppShell> {
+  const status: { state: 'starting' | 'ready' | 'failed'; step: string; error?: string } = { state: 'starting', step: 'Starting' };
+  let folder: string | undefined;
+  const handler = (request: IncomingMessage, response: ServerResponse) => {
+    const url = new URL(request.url ?? '/', appURL);
+    if (url.pathname === '/__open-media/status') {
+      response.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(JSON.stringify(status));
+      return;
+    }
+    if (folder) { serveFile(folder, url.pathname, request, response); return; }
+    if (/text\/html/.test(request.headers.accept ?? '')) {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }).end(startingPage);
+    } else {
+      response.writeHead(503, { 'retry-after': '1' }).end();
+    }
+  };
+  const servers = ['127.0.0.1', '::1'].map(() => createServer(handler));
+  await new Promise<void>((done, failed) => {
+    servers[0].once('error', (error: NodeJS.ErrnoException) => failed(error.code === 'EADDRINUSE'
+      ? new Error('Port 8081 is already in use. If `npm run local` is running in a terminal, stop it (Ctrl+C), then open Open Media again.')
+      : error));
+    servers[0].listen(8081, '127.0.0.1', done);
+  });
+  // localhost can mean either address; IPv6 may be unavailable, which is fine.
+  servers[1].on('error', () => undefined).listen(8081, '::1');
+  return {
+    step: (message) => { status.step = message; },
+    ready: (path) => { folder = path; status.state = 'ready'; status.step = 'Ready'; },
+    fail: (message) => { status.state = 'failed'; status.error = message; },
+    close: () => Promise.all(servers.map((server) => new Promise<void>((done) => { server.closeAllConnections(); server.close(() => done()); }))).then(() => undefined),
+  };
+}
+
+const contentTypes: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json', '.map': 'application/json', '.txt': 'text/plain; charset=utf-8', '.wasm': 'application/wasm',
+  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
+  '.ttf': 'font/ttf', '.otf': 'font/otf', '.woff': 'font/woff', '.woff2': 'font/woff2',
+  '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.wav': 'audio/wav',
+};
+/** Same rule as the Worker (services/mail-sync/src/webApp.ts): files named by a hash of their contents never change. */
+const contentHashedFile = /^\/(?:_expo\/static\/.+-[0-9a-f]{32}\.(?:js|css|map)|assets\/.+\.[0-9a-f]{32}\.[a-z0-9]+)$/i;
+
+/** A file from the build, or the app's page for any other path, with byte ranges for video. */
+function serveFile(folder: string, pathname: string, request: IncomingMessage, response: ServerResponse) {
+  let path: string;
+  try { path = normalize(join(folder, decodeURIComponent(pathname))); } catch { response.writeHead(400).end(); return; }
+  let stats = path.startsWith(`${folder}/`) && existsSync(path) ? statSync(path) : undefined;
+  if (!stats?.isFile()) {
+    if (extname(pathname) && !/text\/html/.test(request.headers.accept ?? '')) { response.writeHead(404).end(); return; }
+    path = join(folder, 'index.html');
+    stats = statSync(path);
+  }
+  const headers: Record<string, string | number> = {
+    'content-type': contentTypes[extname(path).toLowerCase()] ?? 'application/octet-stream',
+    'cache-control': contentHashedFile.test(pathname) ? 'public, max-age=31536000, immutable' : 'no-cache',
+    'accept-ranges': 'bytes',
+  };
+  const range = request.headers.range?.match(/^bytes=(\d*)-(\d*)$/);
+  let start = 0;
+  let end = stats.size - 1;
+  if (range && (range[1] || range[2])) {
+    start = range[1] ? Number(range[1]) : Math.max(0, stats.size - Number(range[2]));
+    end = range[1] && range[2] ? Math.min(Number(range[2]), end) : end;
+    if (start > end || start >= stats.size) { response.writeHead(416, { 'content-range': `bytes */${stats.size}` }).end(); return; }
+    headers['content-range'] = `bytes ${start}-${end}/${stats.size}`;
+  }
+  headers['content-length'] = end - start + 1;
+  response.writeHead(headers['content-range'] ? 206 : 200, headers);
+  if (request.method === 'HEAD') { response.end(); return; }
+  createReadStream(path, { start, end }).pipe(response);
+}
+
+/** `npm run local` needs :8081 for Metro, so it stops the Dock app's background stack first. */
+async function stopBackgroundApp() {
+  try {
+    const response = await fetch(`${appURL}/__open-media/status`, { signal: AbortSignal.timeout(1000) });
+    if (!response.ok || !(response.headers.get('content-type') ?? '').includes('json')) return;
+  } catch { return; }
+  console.log('  Stopping the Open Media Dock app, which is using port 8081…');
+  await run('launchctl', ['kill', 'SIGTERM', `gui/${process.getuid?.() ?? ''}/local.openmedia.stack`]).catch(() => undefined);
+  for (let elapsed = 0; elapsed < 10; elapsed += 1) {
+    await sleep(500);
+    try { await fetch(appURL, { signal: AbortSignal.timeout(500) }); } catch { return; }
   }
 }
+
+const startingPage = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Open Media</title>
+<style>
+:root{color-scheme:light dark;--bg:#FFFFFF;--text:#111111;--muted:#7E7E78;--track:#E6E6E1;--danger:#B42318}
+@media (prefers-color-scheme:dark){:root{--bg:#0A0A0A;--text:#F6F6F2;--muted:#8A8A83;--track:#272725;--danger:#FF8A7A}}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font:15px/1.45 -apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif}
+main{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:0 24px;text-align:center}
+h1{margin:0;font:400 34px/1.1 "Instrument Serif",Georgia,serif;letter-spacing:-.01em}
+.bar{width:140px;height:2px;background:var(--track);border-radius:2px;overflow:hidden}
+.bar i{display:block;width:40%;height:100%;background:var(--text);border-radius:2px;animation:slide 1.1s ease-in-out infinite}
+@keyframes slide{0%{transform:translateX(-100%)}100%{transform:translateX(250%)}}
+#step{margin:0;color:var(--muted);min-height:1.45em}
+.failed .bar{display:none}.failed #step{color:var(--danger);max-width:520px;white-space:pre-wrap}
+small{color:var(--muted);display:none}.failed small{display:block}
+@media (prefers-reduced-motion:reduce){.bar i{animation:none;width:100%;opacity:.35}}
+</style></head>
+<body><main><h1>Open Media</h1><div class="bar"><i></i></div><p id="step" role="status" aria-live="polite">Starting…</p>
+<small>Full log: .local/logs/local.log in the project folder. Open Media again to retry.</small></main>
+<script>
+const step = document.getElementById('step');
+async function poll() {
+  try {
+    const response = await fetch('/__open-media/status', { cache: 'no-store' });
+    const status = await response.json().catch(() => ({ state: 'ready' }));
+    if (status.state === 'ready') { location.reload(); return; }
+    if (status.state === 'failed') { document.body.className = 'failed'; step.textContent = status.error; return; }
+    step.textContent = status.step + '…';
+  } catch { /* the server is switching over; keep waiting */ }
+  setTimeout(poll, 400);
+}
+poll();
+</script></body></html>`;
 
 function start(label: string, command: string, args: string[], cwd: string, extraEnv: Record<string, string> = {}) {
   const child = spawn(command, args, { cwd, env: { ...childEnv, ...extraEnv }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -230,7 +524,7 @@ function readSmtpEnv(): { enabled: boolean; host: string } {
   return { enabled: values.OPEN_MEDIA_SMTP_ENABLED === 'true', host: values.OPEN_MEDIA_SMTP_HOST ?? '' };
 }
 
-function step(message: string) { console.log(`→ ${message}`); }
+function step(message: string) { console.log(`→ ${message}`); appShell?.step(message); }
 function sleep(ms: number) { return new Promise((done) => setTimeout(done, ms)); }
 
 /** Network ids from .local/bridges/worker.env, e.g. BRIDGES_WHATSAPP_URL → whatsapp. */

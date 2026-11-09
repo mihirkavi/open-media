@@ -76,12 +76,17 @@ const env: MailEnv & PaymentsEnv & VerificationEnv & { PROFILE_IMPORT_ALLOW_LOCA
 };
 
 // Optional: translation and AI search through the owner's Workers AI, borrowed from Wrangler
-// (OPEN_MEDIA_LOCAL_AI=true npm run local). It bills that Cloudflare account; off by default.
+// (OPEN_MEDIA_LOCAL_AI=true npm run local; on by default in the Dock app). It bills that Cloudflare account.
+// If Wrangler can't connect (for example, not logged in), the server still starts, without AI.
 if (process.env.OPEN_MEDIA_LOCAL_AI === 'true') {
-  const { getPlatformProxy } = await import('wrangler');
-  const proxy = await getPlatformProxy<{ AI: AiBinding }>({ configPath: fileURLToPath(new URL('../wrangler.local-ai.jsonc', import.meta.url)) });
-  env.AI = proxy.env.AI;
-  console.log('Workers AI: on (translation and AI search use your Cloudflare account)');
+  try {
+    const { getPlatformProxy } = await import('wrangler');
+    const proxy = await getPlatformProxy<{ AI: AiBinding }>({ configPath: fileURLToPath(new URL('../wrangler.local-ai.jsonc', import.meta.url)) });
+    env.AI = proxy.env.AI;
+    console.log('Workers AI: on (translation and AI search use your Cloudflare account)');
+  } catch (error) {
+    console.error(`Workers AI: off. It could not connect to your Cloudflare account (run \`npx wrangler login\` in services/mail-sync): ${error instanceof Error ? error.message : error}`);
+  }
 }
 
 const inboxURL = process.env.LOCAL_INBOX_URL;

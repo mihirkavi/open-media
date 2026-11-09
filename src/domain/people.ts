@@ -19,7 +19,12 @@ export type IdentityRef =
   | { kind: 'email'; address: string }
   | { kind: 'phone'; number: string }
   | { kind: 'network'; network: NetworkId; handle: string }
-  | { kind: 'bridge'; network: BridgedNetwork; id: string };
+  /**
+   * A bridged chat. `phone` is the person's number when the chat reveals it but its id is not a
+   * number (Signal and Google Messages name a one-to-one chat with the number; their ids are not).
+   * It never changes the identity's key, so links and "not this person" choices stay put.
+   */
+  | { kind: 'bridge'; network: BridgedNetwork; id: string; phone?: string };
 
 export interface ContactLink {
   ref: IdentityRef;
@@ -56,6 +61,8 @@ export interface ContactCard {
    * name always comes from their profile; it never stands for anyone else.
    */
   self?: boolean;
+  /** A company, service or helpline rather than a person (ADR 0035): shown and exported as one. */
+  company?: boolean;
   notes: string;
   links: ContactLink[];
   /** Identities the viewer said are not this person; never suggested or linked again. */
@@ -105,7 +112,12 @@ function canonicalEmail(value: string): string {
   return `${gmail ? name.replace(/\./g, '') : name}@${gmail ? 'gmail.com' : domain}`;
 }
 
-/** Two numbers are the same when equal, or when one lacks a country code and the last 10 digits agree. */
+/**
+ * Two numbers are the same when equal, or when one lacks a country code and the rest agree: the
+ * last 10 digits, or a number written with its national trunk 0 (Israel's 052…, India's 098…, the
+ * UK's 07…) that matches the end of the international form. Two numbers that both have a country
+ * code must match exactly, so +1… and +91… with the same last digits stay different.
+ */
 export function samePhone(left: string, right: string): boolean {
   const a = normalizePhone(left);
   const b = normalizePhone(right);
@@ -114,7 +126,13 @@ export function samePhone(left: string, right: string): boolean {
   const digitsA = a.replace(/\D/g, '');
   const digitsB = b.replace(/\D/g, '');
   if (a.startsWith('+') && b.startsWith('+')) return digitsA === digitsB;
-  return digitsA.length >= 10 && digitsB.length >= 10 && digitsA.slice(-10) === digitsB.slice(-10);
+  if (digitsA.length >= 10 && digitsB.length >= 10 && digitsA.slice(-10) === digitsB.slice(-10)) return true;
+  // A national number with its trunk 0 against an international one: 052 823 7744 is +972 52 823 7744.
+  const [intl, local] = a.startsWith('+') ? [digitsA, digitsB] : b.startsWith('+') ? [digitsB, digitsA] : ['', ''];
+  if (!intl || !/^0[1-9]/.test(local)) return false;
+  const national = local.slice(1);
+  const country = intl.slice(0, intl.length - national.length);
+  return national.length >= 8 && intl.endsWith(national) && country.length >= 1 && country.length <= 3 && country[0] !== '0';
 }
 
 function emailsOf(encounter: Encounter): string[] {
@@ -135,11 +153,12 @@ function normalizedName(value: string | undefined): string {
  * Returns new cards (inputs are never mutated) and the open suggestions.
  */
 export function reconcile(cards: ContactCard[], encounters: Encounter[], now = new Date().toISOString()): { cards: ContactCard[]; suggestions: LinkSuggestion[] } {
-  const next = cards.map((card) => ({ ...card, links: [...card.links] }));
+  // Links that point at one chat under two ids (ADR 0035) become one; the card counts as changed.
+  const next = cards.map((card) => ({ ...card, links: oneLinkPerChat(card.links) }));
   const suggestions: LinkSuggestion[] = [];
   for (const encounter of encounters) {
     const key = refKey(encounter.ref);
-    if (next.some((card) => card.links.some((link) => refKey(link.ref) === key) || (!card.rejected.includes(key) && holdsHandle(card, encounter.ref, { phones: false })))) continue;
+    if (next.some((card) => card.links.some((link) => refKey(link.ref) === key || sameChat(link.ref, encounter.ref)) || (!card.rejected.includes(key) && holdsHandle(card, encounter.ref, { phones: false })))) continue;
     if (isMine(next, encounter.ref)) continue;
     const eligible = next.filter((card) => !card.self && !card.rejected.includes(key));
     const emails = emailsOf(encounter);
@@ -166,6 +185,42 @@ export function reconcile(cards: ContactCard[], encounters: Encounter[], now = n
     }
   }
   return { cards: next, suggestions };
+}
+
+/** The number a bridged chat identity stands for: its own `phone`, or its id when the id is a number. */
+function chatNumber(ref: IdentityRef): string | undefined {
+  if (ref.kind !== 'bridge' || !phoneNetworks.has(ref.network)) return undefined;
+  return ref.phone ?? (/^\+?\d{7,15}$/.test(ref.id) ? ref.id : undefined);
+}
+
+/**
+ * Two identities are one chat: the same bridged network and the same id, or the same number (a
+ * Signal chat first seen by its number, then by the person's own Signal id once they joined).
+ */
+export function sameChat(left: IdentityRef, right: IdentityRef): boolean {
+  if (left.kind !== 'bridge' || right.kind !== 'bridge' || left.network !== right.network) return false;
+  if (normalizeHandle(left.network, left.id) === normalizeHandle(right.network, right.id)) return true;
+  const a = chatNumber(left);
+  const b = chatNumber(right);
+  return Boolean(a && b && samePhone(a, b));
+}
+
+/**
+ * One link per chat. A link the viewer confirmed beats an automatic one; between equals, the
+ * person's own chat id beats a number standing in for it. The number is kept on the link.
+ */
+function oneLinkPerChat(links: ContactLink[]): ContactLink[] {
+  const out: ContactLink[] = [];
+  for (const link of links) {
+    const index = out.findIndex((kept) => sameChat(kept.ref, link.ref));
+    if (index < 0) { out.push(link); continue; }
+    const kept = out[index];
+    const rank = (item: ContactLink) => (item.method === 'confirmed' ? 2 : 0) + (item.ref.kind === 'bridge' && !/^\+?\d{7,15}$/.test(item.ref.id) ? 1 : 0);
+    const winner = rank(link) > rank(kept) ? link : kept;
+    const number = chatNumber(kept.ref) ?? chatNumber(link.ref);
+    out[index] = winner.ref.kind === 'bridge' && number && !winner.ref.phone && !/^\+?\d{7,15}$/.test(winner.ref.id) ? { ...winner, ref: { ...winner.ref, phone: number } } : winner;
+  }
+  return out;
 }
 
 export function confirmLink(card: ContactCard, ref: IdentityRef, now = new Date().toISOString()): ContactCard {
@@ -207,7 +262,12 @@ export function holdsHandle(card: ContactCard, ref: IdentityRef, { phones = true
   const value = normalizeHandle(network, ref.kind === 'bridge' ? ref.id : ref.handle);
   if (!value) return false;
   if ((card.handles ?? []).some((item) => item.network === network && (normalizeHandle(network, item.handle) === value || (phoneNetworks.has(network) && samePhone(item.handle, value))))) return true;
-  return phones && ref.kind === 'bridge' && phoneNetworks.has(network) && /^\+?\d{7,15}$/.test(value) && card.phones.some((phone) => samePhone(phone, value));
+  if (ref.kind !== 'bridge' || !phoneNetworks.has(network)) return false;
+  // The chat's own number (a Signal chat named with it), saved as a handle on that network or, with `phones`, as a phone.
+  const number = ref.phone && /^\+?\d{7,15}$/.test(normalizePhone(ref.phone)) ? ref.phone : undefined;
+  if (number && (card.handles ?? []).some((item) => item.network === network && samePhone(item.handle, number))) return true;
+  if (!phones) return false;
+  return (/^\+?\d{7,15}$/.test(value) && card.phones.some((phone) => samePhone(phone, value))) || Boolean(number && card.phones.some((phone) => samePhone(phone, number)));
 }
 
 /** True when the card holds this identity directly: as an email, phone or handle saved on it. */
@@ -226,7 +286,7 @@ export function cardFor(cards: ContactCard[], ref: IdentityRef): ContactCard | u
   if (isMine(cards, ref)) return undefined;
   const others = cards.filter((card) => !card.self);
   const key = refKey(ref);
-  const linked = others.find((card) => card.links.some((link) => refKey(link.ref) === key));
+  const linked = others.find((card) => card.links.some((link) => refKey(link.ref) === key)) ?? others.find((card) => card.links.some((link) => sameChat(link.ref, ref)));
   if (linked) return linked;
   const holding = others.filter((card) => holdsRef(card, ref));
   return holding.length === 1 ? holding[0] : undefined;
@@ -353,8 +413,15 @@ export function refForParticipant(conversation: Conversation, person: Conversati
   const handle = person.identities.find((identity) => identity.source === 'open_media')?.value;
   if (handle) return { kind: 'open_media', handle: handle.replace(/^@/, '') };
   const bridged = conversation.sourceSummary.find((source): source is BridgedNetwork => (bridgedNetworks as string[]).includes(source));
-  if (bridged) return { kind: 'bridge', network: bridged, id: person.id.replace(/^@/, '').split(':')[0].replace(new RegExp(`^${bridged}_`), '') };
+  if (bridged) return bridgeRef(bridged, person);
   return undefined;
+}
+
+/** A bridged chat person as an identity: their chat id, and their number when the chat gives one. */
+function bridgeRef(network: BridgedNetwork, person: Conversation['participants'][number]): Extract<IdentityRef, { kind: 'bridge' }> {
+  const id = person.id.replace(/^@/, '').split(':')[0].replace(new RegExp(`^${network}_`), '');
+  const phone = phoneNetworks.has(network) ? person.identities.find((identity) => identity.kind === 'phone')?.value : undefined;
+  return phone && normalizePhone(phone) !== normalizePhone(id) ? { kind: 'bridge', network, id, phone } : { kind: 'bridge', network, id };
 }
 
 /**
@@ -369,8 +436,9 @@ export function encounterForConversation(conversation: Conversation): Encounter 
   if (handle) return { ref: { kind: 'open_media', handle: handle.replace(/^@/, '') }, name: person.name };
   const bridged = conversation.sourceSummary.find((source): source is BridgedNetwork => (bridgedNetworks as string[]).includes(source));
   if (bridged) {
-    const id = person.id.replace(/^@/, '').split(':')[0].replace(new RegExp(`^${bridged}_`), '');
-    return { ref: { kind: 'bridge', network: bridged, id }, name: person.name, phones: phoneNetworks.has(bridged) && /^\+?\d{7,15}$/.test(id) ? [id] : [] };
+    const ref = bridgeRef(bridged, person);
+    const phones = [...(phoneNetworks.has(bridged) && /^\+?\d{7,15}$/.test(ref.id) ? [ref.id] : []), ...(ref.phone ? [ref.phone] : [])];
+    return { ref, name: person.name, phones };
   }
   return undefined;
 }

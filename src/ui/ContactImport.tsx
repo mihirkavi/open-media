@@ -10,6 +10,7 @@ import { initialsFor } from '../domain/publicPosts';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { ContactsState, newId } from './people';
+import { contactsRadius, contactsSpace, contactsType, touch } from './contactsDesign';
 import { Text } from './Text';
 
 /**
@@ -21,7 +22,7 @@ import { Text } from './Text';
 
 interface Review { source: string; contacts: ImportedContact[]; plan: ImportPlan }
 
-export function ContactImport({ contacts }: { contacts: ContactsState }) {
+export function ContactImport({ contacts, onDone }: { contacts: ContactsState; /** Called after an import is saved. */ onDone?: () => void }) {
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [review, setReview] = useState<Review>();
@@ -74,6 +75,7 @@ export function ContactImport({ contacts }: { contacts: ContactsState }) {
     const parts = [added ? `added ${added} ${added === 1 ? 'contact' : 'contacts'}` : '', updated ? `updated ${updated}` : ''].filter(Boolean).join(' and ');
     setMessage(parts ? `${parts[0].toUpperCase()}${parts.slice(1)}.` : 'Everyone was already in your contacts.');
     setReview(undefined);
+    onDone?.();
   });
 
   if (review) {
@@ -95,18 +97,17 @@ export function ContactImport({ contacts }: { contacts: ContactsState }) {
         <Count value={plan.updated} label="add details" styles={styles} />
         <Count value={plan.unchanged} label="already saved" styles={styles} />
       </View>
-      <Text style={styles.reviewNote}>People who share an email address or phone number with a contact you have are added to that contact, never duplicated. Your saved names stay as they are.</Text>
+      <Text style={styles.reviewNote}>Someone who shares an email address, phone number or LinkedIn profile with a contact you have is added to that contact, never duplicated, and your saved names stay as they are. Names are cleaned, and nothing is guessed.</Text>
       {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
-      <View style={styles.reviewActions}>
-        <Pressable accessibilityRole="button" disabled={Boolean(busy)} onPress={() => setReview(undefined)} style={styles.secondary}><Text style={styles.secondaryText}>Cancel</Text></Pressable>
-        <Pressable accessibilityRole="button" disabled={Boolean(busy) || !plan.changed.length} onPress={confirm} style={[styles.primary, !plan.changed.length && styles.disabled]}>
-          {busy === 'save' ? <Loader color={colors.surface} /> : <Text style={styles.primaryText}>{plan.changed.length ? `Import ${plan.added + plan.updated}` : 'Nothing to add'}</Text>}
-        </Pressable>
-      </View>
+      <Pressable accessibilityRole="button" disabled={Boolean(busy) || !plan.changed.length} onPress={confirm} style={({ pressed }) => [styles.primary, !plan.changed.length && styles.disabled, pressed && styles.pressed]}>
+        {busy === 'save' ? <Loader color={colors.surface} /> : <Text style={styles.primaryText}>{plan.changed.length ? `Import ${(plan.added + plan.updated).toLocaleString()} ${plan.added + plan.updated === 1 ? 'contact' : 'contacts'}` : 'Nothing to add'}</Text>}
+      </Pressable>
+      <Pressable accessibilityRole="button" disabled={Boolean(busy)} onPress={() => setReview(undefined)} style={styles.secondary}><Text style={styles.secondaryText}>Cancel</Text></Pressable>
     </View>;
   }
 
   return <View ref={drop} style={[styles.box, dragging && styles.boxDragging]}>
+    <Text style={styles.heading}>Import contacts</Text>
     <View style={styles.sources}>
       {native ? <Source icon="phone-portrait-outline" title={Platform.OS === 'ios' ? 'From this iPhone' : 'From this phone'} detail="Your contacts app" busy={busy === 'device'} onPress={() => run('device', async () => { const count = await contacts.importFromDevice(); setMessage(`Imported ${count} ${count === 1 ? 'contact' : 'contacts'} from this phone.`); })} styles={styles} colors={colors} /> : null}
       {picker ? <Source icon="people-outline" title="Pick from this phone" detail="Choose who to add" busy={busy === 'picker'} onPress={() => run('picker', async () => prepare('your selection', await pickContacts()))} styles={styles} colors={colors} /> : null}
@@ -128,6 +129,7 @@ function Source({ icon, title, detail, busy, onPress, styles, colors }: { icon: 
       <Text style={styles.sourceTitle}>{title}</Text>
       <Text style={styles.sourceDetail}>{detail}</Text>
     </View>
+    <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
   </Pressable>;
 }
 
@@ -137,39 +139,41 @@ function Count({ value, label, styles }: { value: number; label: string; styles:
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    box: { padding: 12, gap: 10, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
-    boxDragging: { backgroundColor: colors.surfaceAlt },
-    sources: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-    source: { flexGrow: 1, flexBasis: 220, flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 64, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 14, backgroundColor: colors.surfaceAlt, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
-    sourceHover: { borderColor: colors.textTertiary },
-    sourceIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
-    sourceTitle: { color: colors.text, fontSize: 14, fontWeight: '600' },
-    sourceDetail: { marginTop: 1, color: colors.textTertiary, fontSize: 12, lineHeight: 16 },
+    box: { gap: contactsSpace.m },
+    boxDragging: { opacity: 0.9 },
+    heading: { color: colors.textTertiary, ...contactsType.section, textTransform: 'uppercase' },
+    sources: { gap: StyleSheet.hairlineWidth, borderRadius: contactsRadius.group, overflow: 'hidden', backgroundColor: colors.border },
+    source: { flexDirection: 'row', alignItems: 'center', gap: contactsSpace.m, minHeight: 64, paddingHorizontal: contactsSpace.l, paddingVertical: 10, backgroundColor: colors.surface },
+    sourceHover: { backgroundColor: colors.chrome },
+    sourceIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.chrome },
+    sourceTitle: { color: colors.text, fontSize: 16, fontWeight: '600' },
+    sourceDetail: { marginTop: 1, color: colors.textTertiary, ...contactsType.footnote },
     grow: { flex: 1, minWidth: 0 },
-    dropZone: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 12, borderRadius: 14, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.border },
-    dropZoneActive: { borderColor: colors.text },
-    dropText: { flex: 1, color: colors.textTertiary, fontSize: 12, lineHeight: 17 },
-    review: { padding: 16, gap: 14, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border, backgroundColor: colors.surfaceAlt },
-    reviewHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+    dropZone: { flexDirection: 'row', alignItems: 'center', gap: contactsSpace.m, paddingHorizontal: contactsSpace.l, paddingVertical: contactsSpace.m, borderRadius: contactsRadius.group, borderWidth: 1, borderStyle: 'dashed', borderColor: colors.border },
+    dropZoneActive: { borderColor: colors.text, backgroundColor: colors.surface },
+    dropText: { flex: 1, color: colors.textTertiary, ...contactsType.footnote },
+    review: { gap: contactsSpace.l },
+    reviewHead: { flexDirection: 'row', alignItems: 'center', gap: contactsSpace.m },
     stack: { flexDirection: 'row' },
-    face: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.chrome, borderWidth: 2, borderColor: colors.surfaceAlt },
+    face: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.chrome, borderWidth: 2, borderColor: colors.surfaceAlt },
     faceOverlap: { marginLeft: -10 },
-    faceText: { color: colors.text, fontSize: 11, fontWeight: '700' },
-    reviewTitle: { color: colors.text, fontSize: 15, fontWeight: '700' },
-    reviewNames: { marginTop: 2, color: colors.textTertiary, fontSize: 13 },
-    counts: { flexDirection: 'row', borderRadius: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, backgroundColor: colors.surface },
-    count: { flex: 1, alignItems: 'center', paddingVertical: 12 },
-    countValue: { color: colors.text, fontSize: 22, fontWeight: '700', fontVariant: ['tabular-nums'] },
+    faceText: { color: colors.text, fontSize: 12, fontWeight: '600' },
+    reviewTitle: { color: colors.text, fontSize: 17, fontWeight: '600' },
+    reviewNames: { marginTop: 2, color: colors.textTertiary, ...contactsType.footnote },
+    counts: { flexDirection: 'row', borderRadius: contactsRadius.group, backgroundColor: colors.surface },
+    count: { flex: 1, alignItems: 'center', paddingVertical: contactsSpace.l },
+    countValue: { color: colors.text, fontSize: 28, lineHeight: 34, fontWeight: '700', letterSpacing: -0.5, fontVariant: ['tabular-nums'] },
     countZero: { color: colors.textTertiary },
-    countLabel: { marginTop: 2, color: colors.textTertiary, fontSize: 12 },
-    reviewNote: { color: colors.textSecondary, fontSize: 12, lineHeight: 18 },
-    reviewActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8 },
-    secondary: { minHeight: 38, justifyContent: 'center', paddingHorizontal: 16, borderRadius: 19, borderWidth: 1, borderColor: colors.border },
-    secondaryText: { color: colors.text, fontSize: 14, fontWeight: '600' },
-    primary: { minWidth: 96, minHeight: 38, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18, borderRadius: 19, backgroundColor: colors.text },
-    primaryText: { color: colors.surface, fontSize: 14, fontWeight: '600' },
-    disabled: { opacity: 0.4 },
-    error: { color: colors.danger, fontSize: 12, lineHeight: 18 },
-    done: { color: colors.text, fontSize: 12, lineHeight: 18 },
+    countLabel: { marginTop: 2, color: colors.textTertiary, ...contactsType.footnote },
+    reviewNote: { color: colors.textSecondary, ...contactsType.footnote },
+    reviewActions: { gap: contactsSpace.s },
+    secondary: { minHeight: touch, alignItems: 'center', justifyContent: 'center', borderRadius: contactsRadius.pill },
+    secondaryText: { color: colors.text, fontSize: 16, fontWeight: '500' },
+    primary: { minHeight: 50, alignItems: 'center', justifyContent: 'center', paddingHorizontal: contactsSpace.xl, borderRadius: contactsRadius.pill, backgroundColor: colors.text },
+    primaryText: { color: colors.surface, fontSize: 16, fontWeight: '600' },
+    pressed: { transform: [{ scale: 0.98 }] },
+    disabled: { opacity: 0.42 },
+    error: { color: colors.danger, ...contactsType.footnote },
+    done: { color: colors.text, ...contactsType.footnote },
   });
 }

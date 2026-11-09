@@ -34,6 +34,17 @@ export interface BridgesEnv {
  * lists the ids a bridge may put in its rooms' m.bridge event when they differ
  * from Open Media's (Meta's Messenger build says "facebook").
  */
+/** Networks whose accounts are phone numbers (matches the app's `phoneNetworks`). */
+const phoneNetworks = new Set(['whatsapp', 'signal', 'gmessages', 'gvoice']);
+
+/** "+1 (669) 325-7689" → "+16693257689"; anything that isn't only a phone number → undefined. */
+function phoneLabel(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !/^\+?[\d\s().\u2010-\u2015-]{7,24}$/.test(value.trim())) return undefined;
+  const digits = value.replace(/\D/g, '');
+  if (digits.length < 7 || digits.length > 15) return undefined;
+  return `${value.trim().startsWith('+') ? '+' : ''}${digits}`;
+}
+
 type NetworkConfig = { name: string; url: keyof BridgesEnv; ghost: string; bot: string; legacy?: boolean; protocols?: string[] };
 
 /** Networks Open Media can bridge. Only those with a configured bridge URL are offered. */
@@ -67,7 +78,8 @@ export interface BridgeRoomSnapshot {
   id: string;
   network: string;
   name: string;
-  members: { id: string; displayName: string }[];
+  /** `phone`: the person's number in a one-to-one chat on a phone-number network, when the chat shows it. */
+  members: { id: string; displayName: string; phone?: string }[];
   /** Your own messages carry when every other member's app received them and read them (ADR 0026). */
   events: { id: string; sender: string; body: string; timestamp: number; deliveredAt?: number; readAt?: number }[];
   /** Messages from others after where you last read. */
@@ -286,7 +298,37 @@ export class Bridges {
     // A chat the person marked unread counts as one unread until they open it.
     const marked = (room.account_data?.events ?? []).some((event) => markedUnreadTypes.includes(event.type ?? '') && event.content?.unread === true);
     const unread = marked ? Math.max(1, beforeMark) : beforeMark;
-    return { id: roomId, network, name, members: others.map(([id, displayName]) => ({ id, displayName })), events, unread };
+    const people = others.length ? others.map(([id, displayName]) => ({ id, displayName })) : this.numberMember(network, channel, roomName);
+    return { id: roomId, network, name, members: this.withNumber(network, people, [roomName, channel?.displayname]), events, unread };
+  }
+
+  /**
+   * Signal and Google Messages name a one-to-one chat with the person's number while their id is a
+   * UUID or an internal number. On networks whose accounts are phone numbers, that number goes on
+   * the one member as `phone`, so the app finds the saved contact with it (Elad, saved by number,
+   * chatting from a Signal account under his profile name).
+   */
+  private withNumber(network: string, members: { id: string; displayName: string }[], labels: unknown[]): { id: string; displayName: string; phone?: string }[] {
+    if (!phoneNetworks.has(network) || members.length !== 1) return members;
+    const phone = [...labels, members[0].displayName].map(phoneLabel).find(Boolean);
+    return phone ? [{ ...members[0], phone }] : members;
+  }
+
+  /**
+   * A one-to-one chat whose other side has not joined (Signal contacts known only by number, or
+   * someone only invited so far) is named with their phone number. The member is the person's own
+   * account from the chat's m.bridge channel when it is one, else `@<ghost>+<digits>`; `withNumber`
+   * then adds the number, so the chat joins the saved contact with it.
+   */
+  private numberMember(network: string, channel: { id?: unknown; displayname?: unknown } | undefined, roomName: unknown): { id: string; displayName: string }[] {
+    if (!phoneNetworks.has(network)) return [];
+    const label = [roomName, channel?.displayname].find((value): value is string => Boolean(phoneLabel(value)));
+    if (!label) return [];
+    const server = this.mxid.split(':').slice(1).join(':');
+    // The bridge names the chat after the person's own account (Signal's UUID): use it, so the
+    // person is the same identity before and after they join (ADR 0035). Otherwise, the number.
+    const account = typeof channel?.id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(channel.id) ? channel.id.toLowerCase() : phoneLabel(label);
+    return [{ id: `@${bridgeNetworks[network].ghost}${account}:${server}`, displayName: label.trim() }];
   }
 
   private networkOfUser(userId: string): string | undefined {

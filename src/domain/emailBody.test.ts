@@ -56,3 +56,18 @@ test('sentences with braces are not mistaken for CSS', () => {
 test('rows of asterisks and equals signs become paragraph breaks', () => {
   assert.equal(formatEmailBody('Top\n*********************\nBuild skills\n=====\nEnd').plain, 'Top\n\nBuild skills\n\nEnd');
 });
+
+test('HTML pasted into the plain-text part reads as a message, links kept', () => {
+  const raw = 'Please read this email for more information\n\nHello Sam,</p><p style="margin:0;margin-bottom:0">&nbsp;</p><p style="margin:0;margin-bottom:0">Your order has been shipped!</p><p style="margin:0;margin-bottom:0">\nClick this <a href="https://shop.example.com/track?id=1" target="_blank" style="text-decoration: underline; color: #000000;" rel="noopener">link</a>&nbsp;to track your order. Tracking can take up to 24 hours.</p><p style="margin:0;margin-bottom:0">&nbsp;</p><p style="margin:0">Thanks &amp; see you soon</p>';
+  const { plain, segments } = formatEmailBody(raw);
+  assert.doesNotMatch(plain, /<|style=|&nbsp;|&amp;/);
+  assert.ok(plain.split('\n').includes('Your order has been shipped!'));
+  assert.match(plain, /Click this link to track your order\./);
+  assert.match(plain, /Thanks & see you soon/);
+  assert.deepEqual(segments.find((segment) => segment.url), { text: 'link', url: 'https://shop.example.com/track?id=1' });
+});
+
+test('plain text that mentions angle brackets is not treated as HTML', () => {
+  const raw = 'If a < b and c > d, use <p> tags.\nThanks';
+  assert.equal(formatEmailBody(raw).plain, raw);
+});

@@ -56,6 +56,7 @@
     "bridges:stop": "node --import tsx scripts/bridges.ts stop",
     "app:install": "node --import tsx scripts/install-mac-app.ts",
     "app:uninstall": "node --import tsx scripts/install-mac-app.ts --uninstall",
+    "app:stop": "node --import tsx scripts/install-mac-app.ts --stop",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",

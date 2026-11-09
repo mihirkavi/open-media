@@ -9,12 +9,13 @@ import { ContactCard, contactName, HandleNetwork, phoneNetworks, selfLabel } fro
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { sourceLabel } from './SourceMarker';
+import { contactsRadius, contactsSpace, contactsType, touch } from './contactsDesign';
 import { Text, TextInput } from './Text';
 
 /**
- * Editing a contact (ADR 0023), inside the person's profile. A name, then every way to reach them:
- * email addresses, phone numbers and handles on other networks. Anything that comes in from one of
- * these joins this person's one conversation in Messages.
+ * Editing a contact (ADR 0023; Apple-style since ADR 0036), inside the person's profile: Cancel and
+ * Done at the top, the name, then every way to reach them, each with a red remove control and green
+ * "add" rows below, notes, and Delete Contact last (undoable, so it asks nothing).
  */
 
 type Kind = 'email' | 'phone' | HandleNetwork;
@@ -39,8 +40,8 @@ function placeholder(kind: Kind): string {
 function entriesOf(draft: ContactDraft): Entry[] {
   let id = 0;
   return [
-    ...draft.emails.map((value) => ({ id: id++, kind: 'email' as Kind, value })),
     ...draft.phones.map((value) => ({ id: id++, kind: 'phone' as Kind, value })),
+    ...draft.emails.map((value) => ({ id: id++, kind: 'email' as Kind, value })),
     ...draft.handles.map((item) => ({ id: id++, kind: item.network as Kind, value: item.handle })),
   ];
 }
@@ -65,7 +66,6 @@ export function ContactEditor({ card, cards, selfName, onSave, onCancel, onDelet
   const [showMore, setShowMore] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [focusId, setFocusId] = useState<number>();
   const nextId = useRef(entries.length);
 
@@ -89,21 +89,36 @@ export function ContactEditor({ card, cards, selfName, onSave, onCancel, onDelet
     try { await onDelete(); } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not delete the contact.'); setBusy(false); }
   };
 
+  const groups: Kind[] = ['phone', 'email'];
+  const accountKinds = [...common, ...more].filter((kind) => kind !== 'email' && kind !== 'phone');
+
   return <View style={styles.editor}>
-    {selfName !== undefined ? <View>
-      <Text style={styles.selfName}>{selfLabel(selfName)}</Text>
-      <Text style={styles.hint}>Your name comes from your profile. Everything here stays private to you.</Text>
-    </View> : <TextInput
-      accessibilityLabel="Name"
-      autoFocus={!contactName(card)}
-      value={name}
-      onChangeText={setName}
-      placeholder="Name"
-      placeholderTextColor={colors.textTertiary}
-      style={styles.name}
-    />}
-    <View style={styles.entries}>
-      {entries.map((entry) => <View key={entry.id} style={styles.entry}>
+    <View style={styles.bar}>
+      <Pressable accessibilityRole="button" disabled={busy} onPress={onCancel} hitSlop={8} style={styles.barButton}><Text style={styles.cancelText}>Cancel</Text></Pressable>
+      <Text accessibilityRole="header" style={styles.barTitle}>{selfName !== undefined ? 'My card' : contactName(card) ? 'Edit contact' : 'New contact'}</Text>
+      <Pressable accessibilityRole="button" disabled={busy} onPress={save} hitSlop={8} style={styles.barButton}>{busy ? <Loader color={colors.text} /> : <Text style={styles.doneText}>Done</Text>}</Pressable>
+    </View>
+
+    <View style={styles.group}>
+      {selfName !== undefined ? <View style={styles.selfRow}>
+        <Text style={styles.selfName}>{selfLabel(selfName)}</Text>
+        <Text style={styles.hint}>Your name comes from your profile. Everything here stays private to you.</Text>
+      </View> : <TextInput
+        accessibilityLabel="Name"
+        autoFocus={!contactName(card)}
+        value={name}
+        onChangeText={setName}
+        placeholder="Name"
+        placeholderTextColor={colors.textTertiary}
+        style={styles.name}
+      />}
+    </View>
+
+    <View style={styles.group}>
+      {entries.map((entry, index) => <View key={entry.id} style={[styles.entry, index > 0 && styles.divider]}>
+        <Pressable accessibilityRole="button" accessibilityLabel={`Remove ${kindLabel(entry.kind)} ${entry.value}`.trim()} onPress={() => setEntries((current) => current.filter((item) => item.id !== entry.id))} hitSlop={10} style={styles.remove}>
+          <Ionicons name="remove-circle" size={22} color={colors.danger} />
+        </Pressable>
         <Text numberOfLines={1} style={styles.entryKind}>{kindLabel(entry.kind)}</Text>
         <TextInput
           accessibilityLabel={kindLabel(entry.kind)}
@@ -117,77 +132,72 @@ export function ContactEditor({ card, cards, selfName, onSave, onCancel, onDelet
           placeholderTextColor={colors.textTertiary}
           style={styles.entryInput}
         />
-        <Pressable accessibilityRole="button" accessibilityLabel={`Remove ${kindLabel(entry.kind)} ${entry.value}`.trim()} onPress={() => setEntries((current) => current.filter((item) => item.id !== entry.id))} hitSlop={8} style={styles.entryRemove}>
-          <Ionicons name="close" size={16} color={colors.textTertiary} />
-        </Pressable>
       </View>)}
-    </View>
-
-    <View style={styles.addBlock}>
-      <Text style={styles.addTitle}>Add</Text>
-      <View style={styles.addChips}>
-        {[...common, ...(showMore ? more : [])].map((kind) => <Pressable key={kind} accessibilityRole="button" accessibilityLabel={`Add ${kindLabel(kind)}`} onPress={() => add(kind)} style={styles.addChip}>
-          <Ionicons name="add" size={13} color={colors.textSecondary} />
-          <Text style={styles.addChipText}>{kindLabel(kind)}</Text>
+      {groups.map((kind, index) => <Pressable key={kind} accessibilityRole="button" onPress={() => add(kind)} style={({ pressed }) => [styles.addRow, (entries.length > 0 || index > 0) && styles.divider, pressed && styles.pressed]}>
+        <Ionicons name="add-circle" size={22} color={colors.success} />
+        <Text style={styles.addText}>add {kindLabel(kind).toLowerCase()}</Text>
+      </Pressable>)}
+      <Pressable accessibilityRole="button" accessibilityState={{ expanded: showMore }} onPress={() => setShowMore(!showMore)} style={({ pressed }) => [styles.addRow, styles.divider, pressed && styles.pressed]}>
+        <Ionicons name="add-circle" size={22} color={colors.success} />
+        <Text style={[styles.addText, styles.grow]}>add account</Text>
+        <Ionicons name={showMore ? 'chevron-up' : 'chevron-down'} size={16} color={colors.textTertiary} />
+      </Pressable>
+      {showMore ? <View style={styles.accounts}>
+        {accountKinds.map((kind) => <Pressable key={kind} accessibilityRole="button" accessibilityLabel={`Add ${kindLabel(kind)}`} onPress={() => { add(kind); setShowMore(false); }} style={({ pressed }) => [styles.account, pressed && styles.pressed]}>
+          <Text style={styles.accountText}>{kindLabel(kind)}</Text>
         </Pressable>)}
-        {showMore ? null : <Pressable accessibilityRole="button" onPress={() => setShowMore(true)} style={[styles.addChip, styles.addChipQuiet]}><Text style={styles.addChipText}>More</Text></Pressable>}
-      </View>
+      </View> : null}
     </View>
 
-    <TextInput
-      accessibilityLabel="Notes"
-      multiline
-      value={notes}
-      onChangeText={setNotes}
-      placeholder="Notes"
-      placeholderTextColor={colors.textTertiary}
-      style={styles.notes}
-    />
+    <View style={styles.group}>
+      <TextInput
+        accessibilityLabel="Notes"
+        multiline
+        value={notes}
+        onChangeText={setNotes}
+        placeholder="Notes"
+        placeholderTextColor={colors.textTertiary}
+        style={styles.notes}
+      />
+    </View>
 
     {shared.length ? <Text style={styles.hint}>{shared.map((item) => `${item.contact} also has ${item.value}.`).join(' ')} Messages from it stay in their own conversation until only one contact has it.</Text> : null}
     {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
 
-    <View style={styles.actions}>
-      {onDelete ? confirmDelete
-        ? <Pressable accessibilityRole="button" disabled={busy} onPress={remove} style={styles.deleteConfirm}><Text style={styles.deleteConfirmText}>Delete contact</Text></Pressable>
-        : <Pressable accessibilityRole="button" disabled={busy} onPress={() => setConfirmDelete(true)} style={styles.delete}><Text style={styles.deleteText}>Delete</Text></Pressable>
-        : null}
-      <View style={styles.spacer} />
-      {busy ? <Loader color={colors.text} /> : null}
-      <Pressable accessibilityRole="button" disabled={busy} onPress={onCancel} style={styles.cancel}><Text style={styles.cancelText}>Cancel</Text></Pressable>
-      <Pressable accessibilityRole="button" disabled={busy} onPress={save} style={styles.save}><Text style={styles.saveText}>Save</Text></Pressable>
-    </View>
+    {onDelete ? <Pressable accessibilityRole="button" accessibilityHint="You can undo this for a few seconds" disabled={busy} onPress={remove} style={({ pressed }) => [styles.group, styles.deleteRow, pressed && styles.pressed]}>
+      <Text style={styles.deleteText}>Delete Contact</Text>
+    </Pressable> : null}
   </View>;
 }
 
 function createStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    editor: { gap: 14 },
-    name: { minHeight: 44, paddingVertical: 6, color: colors.text, fontSize: 20, fontWeight: '600', borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border, outlineStyle: 'none' } as object,
-    selfName: { color: colors.text, fontSize: 20, fontWeight: '600', marginBottom: 4 },
-    entries: { gap: 2 },
-    entry: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 44, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
-    entryKind: { width: 92, color: colors.textTertiary, fontSize: 13 },
-    entryInput: { flex: 1, minWidth: 0, minHeight: 40, color: colors.text, fontSize: 15, outlineStyle: 'none' } as object,
-    entryRemove: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center', borderRadius: 14 },
-    addBlock: { gap: 8 },
-    addTitle: { color: colors.textTertiary, fontSize: 12, fontWeight: '600' },
-    addChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-    addChip: { flexDirection: 'row', alignItems: 'center', gap: 3, minHeight: 30, paddingLeft: 9, paddingRight: 12, borderRadius: 15, backgroundColor: colors.accentSoft },
-    addChipQuiet: { paddingLeft: 12, backgroundColor: 'transparent', borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
-    addChipText: { color: colors.textSecondary, fontSize: 13, fontWeight: '600' },
-    notes: { minHeight: 64, padding: 12, borderRadius: 12, color: colors.text, fontSize: 14, lineHeight: 20, textAlignVertical: 'top', backgroundColor: colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border, outlineStyle: 'none' } as object,
-    hint: { color: colors.textTertiary, fontSize: 12, lineHeight: 17 },
-    error: { color: colors.danger, fontSize: 13 },
-    actions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-    spacer: { flex: 1 },
-    delete: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 4 },
-    deleteText: { color: colors.textTertiary, fontSize: 13, fontWeight: '600' },
-    deleteConfirm: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 14, borderRadius: 18, borderWidth: 1, borderColor: colors.danger },
-    deleteConfirmText: { color: colors.danger, fontSize: 13, fontWeight: '600' },
-    cancel: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 14, borderRadius: 18, borderWidth: 1, borderColor: colors.border },
-    cancelText: { color: colors.text, fontSize: 14, fontWeight: '600' },
-    save: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 18, borderRadius: 18, backgroundColor: colors.text },
-    saveText: { color: colors.surface, fontSize: 14, fontWeight: '600' },
+    editor: { gap: contactsSpace.l },
+    bar: { flexDirection: 'row', alignItems: 'center', minHeight: touch },
+    barButton: { minWidth: 64, minHeight: touch, justifyContent: 'center' },
+    barTitle: { flex: 1, textAlign: 'center', color: colors.text, fontSize: 17, fontWeight: '600' },
+    cancelText: { color: colors.text, ...contactsType.body },
+    doneText: { color: colors.text, fontSize: 17, fontWeight: '700', textAlign: 'right' },
+    group: { borderRadius: contactsRadius.group, backgroundColor: colors.surfaceAlt, overflow: 'hidden' },
+    grow: { flex: 1 },
+    divider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: colors.border },
+    pressed: { backgroundColor: colors.chrome },
+    name: { minHeight: 56, paddingHorizontal: contactsSpace.l, color: colors.text, fontSize: 22, fontWeight: '600', letterSpacing: -0.3, outlineStyle: 'none' } as object,
+    selfRow: { padding: contactsSpace.l, gap: 4 },
+    selfName: { color: colors.text, fontSize: 22, fontWeight: '600' },
+    entry: { flexDirection: 'row', alignItems: 'center', gap: contactsSpace.s, minHeight: 52, paddingLeft: contactsSpace.m, paddingRight: contactsSpace.l },
+    remove: { width: 32, height: touch, alignItems: 'center', justifyContent: 'center' },
+    entryKind: { width: 84, color: colors.textSecondary, ...contactsType.label },
+    entryInput: { flex: 1, minWidth: 0, minHeight: touch, color: colors.text, ...contactsType.body, outlineStyle: 'none' } as object,
+    addRow: { flexDirection: 'row', alignItems: 'center', gap: contactsSpace.m, minHeight: 52, paddingHorizontal: contactsSpace.l + 2 },
+    addText: { color: colors.text, ...contactsType.body },
+    accounts: { flexDirection: 'row', flexWrap: 'wrap', gap: contactsSpace.s, paddingHorizontal: contactsSpace.l, paddingBottom: contactsSpace.l },
+    account: { minHeight: 36, justifyContent: 'center', paddingHorizontal: 14, borderRadius: contactsRadius.pill, backgroundColor: colors.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border },
+    accountText: { color: colors.text, fontSize: 14, fontWeight: '500' },
+    notes: { minHeight: 96, padding: contactsSpace.l, color: colors.text, ...contactsType.body, textAlignVertical: 'top', outlineStyle: 'none' } as object,
+    hint: { paddingHorizontal: 4, color: colors.textTertiary, ...contactsType.footnote },
+    error: { paddingHorizontal: 4, color: colors.danger, ...contactsType.footnote },
+    deleteRow: { minHeight: 52, alignItems: 'center', justifyContent: 'center' },
+    deleteText: { color: colors.danger, fontSize: 17, fontWeight: '500' },
   });
 }

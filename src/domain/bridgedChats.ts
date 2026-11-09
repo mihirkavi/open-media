@@ -8,7 +8,11 @@ export interface BridgeRoomSnapshot {
   id: string;
   network: string;
   name: string;
-  members: { id: string; displayName: string }[];
+  /**
+   * `phone` is the person's number when a one-to-one chat on a phone-number network reveals it
+   * (Signal names the chat with it while the person's id is a UUID), so a saved number finds them.
+   */
+  members: { id: string; displayName: string; phone?: string }[];
   /** On your own messages: when every other member received and read them, as the bridge reports. */
   events: { id: string; sender: string; body: string; timestamp: number; deliveredAt?: number; readAt?: number }[];
   /** Messages from others after where you last read. */
@@ -72,7 +76,7 @@ export function mapBridgeSnapshot(snapshot: BridgeSnapshot): Conversation[] {
   }).sort((left, right) => new Date(right.lastMessageAt).getTime() - new Date(left.lastMessageAt).getTime());
 }
 
-function person(member: { id: string; displayName: string }, source: MessageSource, label: string): Person {
+function person(member: { id: string; displayName: string; phone?: string }, source: MessageSource, label: string): Person {
   const name = member.displayName || label;
   const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || '?';
   return {
@@ -80,6 +84,9 @@ function person(member: { id: string; displayName: string }, source: MessageSour
     name,
     initials,
     avatarColor: '#525252',
-    identities: [{ id: `${source}-${member.id}`, personId: member.id, kind: 'handle', value: name, source, label, verifiedByUser: false }],
+    identities: [
+      { id: `${source}-${member.id}`, personId: member.id, kind: 'handle', value: name, source, label, verifiedByUser: false },
+      ...(member.phone ? [{ id: `${source}-${member.id}-phone`, personId: member.id, kind: 'phone' as const, value: member.phone, source, label, verifiedByUser: false }] : []),
+    ],
   };
 }

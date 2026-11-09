@@ -6,7 +6,7 @@ import { mapBridgeSnapshot } from './bridgedChats';
 import { applyDraft, canReply, channelOf, contactForConversation, defaultChannel, draftOf, draftProblems, fullerName, mergeByContact, recipientSuggestions, sharedWith } from './contactMerge';
 import { normalizeStoredEmail } from './emailNormalization';
 import { Conversation } from './models';
-import { cardFor, cardRefs, ContactCard, isMine, reconcile, refKey, unlink } from './people';
+import { cardFor, cardRefs, ContactCard, encounterForConversation, isMine, reconcile, refKey, samePhone, unlink } from './people';
 
 const now = '2026-11-02T12:00:00.000Z';
 const card = (overrides: Partial<ContactCard> = {}): ContactCard => ({
@@ -282,4 +282,49 @@ test('a single chat with yourself keeps its own id', () => {
   const [shown] = mergeByContact([note], [myCard()], 'Sam Rivera');
   assert.equal(shown.id, note.id);
   assert.equal(shown.channels, undefined);
+});
+
+test('a Signal chat with someone known only by number takes the saved contact with that number', () => {
+  // The bridge can't add Signal contacts known only by phone number; the server stands their number in as the member.
+  const chats = mapBridgeSnapshot({
+    userId: '@me:x',
+    rooms: [{ id: '!sig:x', network: 'signal', name: '+1 (555) 010-0001', members: [{ id: '@signal_+15550100001:x', displayName: '+1 (555) 010-0001' }], events: [{ id: '$1', sender: '@me:x', body: 'hi', timestamp: 1 }] }],
+  });
+  const saved = card({ phones: ['(555) 010-0001'] });
+  assert.equal(contactForConversation([saved], chats[0])?.id, saved.id);
+  assert.equal(mergeByContact(chats, [saved])[0]?.participants[0]?.name, 'Priya Shah');
+});
+
+test('a Signal chat from a UUID account, named with the number, takes the saved contact with that number (and only on its network)', () => {
+  const chats = mapBridgeSnapshot({
+    userId: '@me:x',
+    rooms: [{ id: '!sig:x', network: 'signal', name: '+1 (555) 010-0002', members: [{ id: '@signal_0b9a5a52-1c33-4f0e-9d7e-2f4c8a1b6e10:x', displayName: 'Sam Example', phone: '+15550100002' }], events: [{ id: '$1', sender: '@signal_0b9a5a52-1c33-4f0e-9d7e-2f4c8a1b6e10:x', body: 'hey', timestamp: 1 }] }],
+  });
+  const saved = card({ name: 'Sam', phones: ['+1 555 010 0002'] });
+  assert.equal(contactForConversation([saved], chats[0])?.id, saved.id);
+  assert.equal(mergeByContact(chats, [saved])[0]?.participants[0]?.name, 'Sam');
+  // The identity is still the Signal account, so links and "not this person" keep working.
+  const encounter = encounterForConversation(chats[0])!;
+  assert.equal(refKey(encounter.ref), 'bridge:signal:0b9a5a52-1c33-4f0e-9d7e-2f4c8a1b6e10');
+  assert.equal(cardFor([{ ...saved, rejected: [refKey(encounter.ref)] }], encounter.ref), undefined);
+});
+
+test('a number saved with its national trunk 0 matches the international form; two country codes never do', () => {
+  assert.ok(samePhone('052-823-0000', '+972528230000'));
+  assert.ok(samePhone('+919820100000', '09820100000'));
+  assert.ok(!samePhone('+15550100002', '+915550100002'));
+  assert.ok(!samePhone('0123', '+44123'));
+});
+
+test('one chat linked twice (first by its number, then by the Signal account) collapses to one link, keeping the account', () => {
+  const byNumber = { ref: { kind: 'bridge' as const, network: 'signal' as const, id: '+15550100002' }, method: 'auto' as const, evidence: 'Same phone number', linkedAt: now };
+  const byAccount = { ref: { kind: 'bridge' as const, network: 'signal' as const, id: '0b9a5a52-1c33-4f0e-9d7e-2f4c8a1b6e10', phone: '+15550100002' }, method: 'auto' as const, evidence: 'Same phone number', linkedAt: now };
+  const saved = card({ name: 'Sam', phones: ['+15550100002'], links: [byNumber, byAccount] });
+  const result = reconcile([saved], []);
+  assert.deepEqual(result.cards[0].links.map((link) => refKey(link.ref)), ['bridge:signal:0b9a5a52-1c33-4f0e-9d7e-2f4c8a1b6e10']);
+  // A new sighting of the same chat by its number does not add a second link.
+  const again = reconcile(result.cards, [{ ref: byNumber.ref, phones: ['+15550100002'] }]);
+  assert.equal(again.cards[0].links.length, 1);
+  // A different person's Signal chat still links separately.
+  assert.equal(reconcile([card({ phones: ['+15550100009'], links: [byAccount] })], [{ ref: { kind: 'bridge', network: 'signal', id: '+15550100009' }, phones: ['+15550100009'] }]).cards[0].links.length, 2);
 });

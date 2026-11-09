@@ -1,12 +1,19 @@
 import { getSupabaseClient } from '../auth/supabase';
-import { request } from '../connectors/mailApiConnector';
+import { getAPIURL, request } from '../connectors/mailApiConnector';
 import { fetchAuthorPosts } from '../connectors/networkAuthors';
 import { NetworkId } from '../domain/networkPosts';
 import { ContactCard, IdentityRef, isContactCard } from '../domain/people';
 import { SocialPost } from '../domain/posts';
 import { isEmptyProfessional, parseProfessional, ProfessionalProfile } from '../domain/professionalProfile';
-import { readVisibleFields } from '../domain/profileFields';
+import { readVisibleFields, resumeUrl as resumeUrlFor } from '../domain/profileFields';
 import { loadPublicPosts } from './postService';
+
+/** A person's public resume page on the service this build talks to (see resumeUrl in domain/profileFields). */
+export function resumeUrl(handle: string): string {
+  let api: string | undefined;
+  try { api = getAPIURL(); } catch { api = undefined; }
+  return resumeUrlFor(handle, api);
+}
 
 /** What anyone may see about an Open Media account (open_media_public_profile). */
 export interface PublicPerson {

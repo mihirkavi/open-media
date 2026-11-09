@@ -58,6 +58,7 @@ const OpenMediaProfile = lazyComponent(() => import("./OpenMediaUtilities").then
 const OpenMediaSettings = lazyComponent(() => import("./OpenMediaUtilities").then((module) => module.OpenMediaSettings));
 import { PeopleProvider, PersonTarget, useContactsStore } from "./people";
 import { PersonProfile } from "./PersonProfile";
+import { ContactsPage } from "./ContactsPage";
 import { encounterForConversation, ownEmails } from "../domain/people";
 import { mergeByContact, recipientSuggestions } from "../domain/contactMerge";
 import { AiAction, AiRecord, aiConversation, aiConversationId, isAiConversation } from "../domain/aiChat";
@@ -71,6 +72,7 @@ export type Destination =
   | PrimaryDestination
   | "search"
   | "profile"
+  | "contacts"
   | "settings";
 
 const primary: Array<{
@@ -85,7 +87,7 @@ const primary: Array<{
 
 export type MessageMode = "open_media" | "matrix";
 
-const destinations: Destination[] = ["feed", "clips", "messages", "search", "profile", "settings"];
+const destinations: Destination[] = ["feed", "clips", "messages", "search", "profile", "contacts", "settings"];
 const shortcutLabel = Platform.OS === "web" && typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘K" : "Ctrl K";
 
 /** On the web, the section lives in the address bar (#messages) so refresh and back keep your place. */
@@ -555,6 +557,7 @@ export function OpenMediaApp({
     const entry = settingForSection(id);
     const focus = entry ? { id: entry.id, at: Date.now() } : undefined;
     if (entry?.page === "profile" || entry?.page === "edit-profile") { navigate("profile"); setProfileFocus(focus); }
+    else if (entry?.page === "contacts") navigate("contacts");
     else if (entry?.page === "search") { setSearchQuery("read receipts"); navigate("search"); }
     else { navigate("settings"); setSettingsFocus(focus); }
   };
@@ -592,7 +595,7 @@ export function OpenMediaApp({
             avatarUrl={profile.avatarUrl}
             back={Boolean(person)}
             onNavigate={navigate}
-            onBack={person ? closePerson : () => navigate(lastPrimary)}
+            onBack={person ? closePerson : destination === "contacts" ? () => navigate("profile") : () => navigate(lastPrimary)}
           />
         ) : null}
         {person ? (
@@ -600,6 +603,7 @@ export function OpenMediaApp({
             target={person}
             viewerId={currentUserId}
             onBack={compact ? undefined : closePerson}
+            onClose={closePerson}
             onMessage={messageMode === "open_media" ? (handle) => { messagePerson(handle).catch(() => undefined); } : undefined}
           />
         ) : null}
@@ -675,6 +679,9 @@ export function OpenMediaApp({
             onProfileChange={onProfileChange}
             focus={profileFocus}
           />
+        ) : null}
+        {!person && destination === "contacts" ? (
+          <ContactsPage handle={profile.handle} onBack={compact ? undefined : () => navigate("profile")} />
         ) : null}
         {!person && destination === "settings" ? (
           <OpenMediaSettings

@@ -11,7 +11,7 @@ import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { Portal } from './Portal';
 import { Text } from './Text';
-import { VerifiedTick } from './VerifiedTick';
+import { VerifiedSeal, personVerification } from './VerifiedSeal';
 
 /**
  * Opening a person from anywhere (ADR 0013): every name and avatar in Feed, Clips, Messages and
@@ -22,6 +22,12 @@ export interface PersonTarget {
   ref: IdentityRef;
   name?: string;
   avatarUrl?: string;
+  /** Opened from Contacts: this card, even when it holds no email, number or handle yet (ADR 0036). */
+  cardId?: string;
+  /** Open with the card's editor showing (a new contact). */
+  editing?: boolean;
+  /** A new contact not saved yet: Done saves it, Cancel discards it (ADR 0036). */
+  draft?: ContactCard;
   /** A web feed opened as a profile (ADR 0024): its items, read live and saved nowhere. `ref` is unused then. */
   webFeed?: WebFeedPostInfo;
 }
@@ -89,13 +95,13 @@ export function useContactsStore(enabled: boolean, encounters: Encounter[]): Con
   const apply = useCallback(async (next: ContactCard[], changed: ContactCard[]) => {
     cardsRef.current = next;
     setCards(next);
-    if (changed.length) await saveContactCards(changed).catch((reason) => setError(reason instanceof Error ? reason.message : 'Could not save your contacts.'));
+    if (changed.length) await saveContactCards(changed).then(() => setError('')).catch((reason) => setError(reason instanceof Error ? reason.message : 'Could not save your contacts.'));
   }, []);
 
   useEffect(() => {
     if (!enabled) return;
     let active = true;
-    loadContactCards().then((loaded) => { if (active) { cardsRef.current = loaded; setCards(loaded); setReady(true); } }).catch((reason) => { if (active) { setError(reason instanceof Error ? reason.message : 'Could not load your contacts.'); setReady(true); } });
+    loadContactCards().then((loaded) => { if (active) { cardsRef.current = loaded; setCards(loaded); setError(''); setReady(true); } }).catch((reason) => { if (active) { setError(reason instanceof Error ? reason.message : 'Could not load your contacts.'); setReady(true); } });
     return () => { active = false; };
   }, [enabled]);
 
@@ -208,9 +214,9 @@ function ProfilePreview({ target, onOpen }: { target: PersonTarget; onOpen: () =
   const name = person?.displayName ?? target.name ?? handle;
   return <View style={styles.card}>
     <View style={styles.cardTop}>
-      {avatar ? <Image source={{ uri: avatar }} style={styles.avatar} /> : <View style={[styles.avatar, styles.avatarEmpty]}><Text style={styles.initials}>{(name.replace(/^@/, '')[0] ?? '?').toUpperCase()}</Text></View>}
+      <VerifiedSeal verification={person?.verified ? personVerification(name) : undefined} size={44}>{avatar ? <Image source={{ uri: avatar }} style={styles.avatar} /> : <View style={[styles.avatar, styles.avatarEmpty]}><Text style={styles.initials}>{(name.replace(/^@/, '')[0] ?? '?').toUpperCase()}</Text></View>}</VerifiedSeal>
       <View style={styles.cardCopy}>
-        <View style={styles.nameLine}><Text numberOfLines={1} style={[styles.name, styles.shrink]}>{name}</Text>{person?.verified ? <VerifiedTick size={15} /> : null}</View>
+        <View style={styles.nameLine}><Text numberOfLines={1} style={[styles.name, styles.shrink]}>{name}</Text></View>
         <Text numberOfLines={1} style={styles.meta}>{[handle, where].filter(Boolean).join(' · ')}</Text>
       </View>
     </View>

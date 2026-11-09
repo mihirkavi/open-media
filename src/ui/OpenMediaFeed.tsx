@@ -33,7 +33,7 @@ import { canRecordVideo, pickVideo } from './pickVideo';
 import { useCrossPosting } from './useCrossPosting';
 import { TranslationNote, useTranslation } from './useTranslation';
 import type { FeedSourceStatus } from './useMixedFeed';
-import { VerifiedTick } from './VerifiedTick';
+import { VerifiedSeal, personVerification } from './VerifiedSeal';
 import { WebFeedCard } from './WebFeedCard';
 
 export interface FeedViewer { id: string; initials: string }
@@ -370,7 +370,7 @@ function NetworkPostCard({ post, mode, lensContext, viewer, onDelete, onReport }
   const people = usePeople();
   const translation = useTranslation(post.id, [post.title ?? '', post.body]); const [title, body] = translation.texts;
   return <View style={styles.post}>
-    <View style={styles.postHeader}><PersonLink target={targetForPost(post)} label={`Open ${authorName}’s profile`} style={styles.authorLink}><View style={styles.authorLinkInner}><Avatar initials={post.author.initials} imageUrl={post.author.avatarUrl} /><View style={styles.author}><View style={styles.nameLine}><Text numberOfLines={1} style={[styles.authorName, styles.nameShrink]}>{authorName}</Text>{post.author.verified ? <VerifiedTick size={14} /> : null}</View><Text numberOfLines={1} style={styles.meta}>{post.event ? `Upcoming event · from ${post.author.handle}` : `${post.author.handle} · ${formatRelativeTime(post.createdAt)} · ${sourceName(post.provenance.connectorId)}`}</Text></View></View></PersonLink>{canAct ? <Pressable accessibilityRole="button" accessibilityLabel="Post options" accessibilityState={{ expanded: menuOpen }} onPress={() => setMenuOpen((value) => !value)} style={styles.menuButton}><Ionicons name={menuOpen ? 'close' : 'ellipsis-horizontal'} size={18} color={colors.textSecondary} /></Pressable> : null}</View>
+    <View style={styles.postHeader}><PersonLink target={targetForPost(post)} label={`Open ${authorName}’s profile`} style={styles.authorLink}><View style={styles.authorLinkInner}><VerifiedSeal verification={post.author.verified ? personVerification(authorName) : undefined} size={40}><Avatar initials={post.author.initials} imageUrl={post.author.avatarUrl} /></VerifiedSeal><View style={styles.author}><View style={styles.nameLine}><Text numberOfLines={1} style={[styles.authorName, styles.nameShrink]}>{authorName}</Text></View><Text numberOfLines={1} style={styles.meta}>{post.event ? `Upcoming event · from ${post.author.handle}` : `${post.author.handle} · ${formatRelativeTime(post.createdAt)} · ${sourceName(post.provenance.connectorId)}`}</Text></View></View></PersonLink>{canAct ? <Pressable accessibilityRole="button" accessibilityLabel="Post options" accessibilityState={{ expanded: menuOpen }} onPress={() => setMenuOpen((value) => !value)} style={styles.menuButton}><Ionicons name={menuOpen ? 'close' : 'ellipsis-horizontal'} size={18} color={colors.textSecondary} /></Pressable> : null}</View>
     {menuOpen ? <PostMenu own={own} listing={Boolean(post.listing)} onDelete={() => onDelete!(post.id)} onReport={(reason) => onReport!(post.id, reason)} onTip={native && !own && viewer && post.author.tipsEnabled ? () => { setMenuOpen(false); setPayTarget({ kind: 'tip', postId: post.id }); } : undefined} tipTo={post.author.handle} /> : null}
     {post.event && image?.kind === 'image' && image.url ? <PostImage url={image.url} altText={image.altText} /> : null}
     {post.title ? <RichText text={title} source={post.provenance.connectorId} style={styles.postTitle} /> : null}

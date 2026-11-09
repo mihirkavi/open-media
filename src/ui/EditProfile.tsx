@@ -3,7 +3,7 @@ import { Children, Fragment, isValidElement, useEffect, useMemo, useRef, useStat
 import { Image, Linking, Platform, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import { loadMyProfileFields, loadProfessionalProfile, OpenMediaProfile, saveMyProfileFields, saveProfessionalProfile, saveProfileBasics } from '../data/openMediaService';
-import { loadPublicPerson, saveLinkedAccounts } from '../data/peopleService';
+import { loadPublicPerson, resumeUrl, saveLinkedAccounts } from '../data/peopleService';
 import { AvatarChoice, findGravatar, pickAvatar, uploadAvatar } from '../data/avatarUpload';
 import { importFromLinkedInFiles, importFromWebsite, ImportResult } from '../data/profileImportService';
 import { applyProposals, ProfileProposal } from '../domain/profileImport';
@@ -190,7 +190,7 @@ export function EditProfile({ profile, onClose, onSaved }: { profile: OpenMediaP
         </Pressable>
         <Text style={styles.identityName} numberOfLines={1}>{shownName}</Text>
         <Text style={styles.identityLine} numberOfLines={1}>{professional.headline?.trim() || `@${profile.handle}`}</Text>
-        <Text style={styles.identityLinks}><Text accessibilityRole="link" onPress={() => open(address)} style={styles.link}>{address.replace('https://', '')}</Text>{'   ·   '}<Text accessibilityRole="link" onPress={() => open(`${address}/resume`)} style={styles.link}>Resume</Text></Text>
+        <Text style={styles.identityLinks}><Text accessibilityRole="link" onPress={() => open(address)} style={styles.link}>{address.replace('https://', '')}</Text>{'   ·   '}<Text accessibilityRole="link" onPress={() => open(resumeUrl(profile.handle))} style={styles.link}>Resume</Text></Text>
         {newAvatar ? <Text style={styles.avatarNote}>{newAvatar.from === 'gravatar' ? 'Your Gravatar, used when you save. Tap it to choose a photo instead.' : 'New picture, used when you save.'}</Text> : null}
       </View>
 

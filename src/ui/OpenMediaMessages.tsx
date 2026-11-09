@@ -1,5 +1,5 @@
 import Ionicons from "./Icon";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { PropsWithChildren, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, Animated, Easing, Image, Keyboard, LayoutChangeEvent, Linking, Modal, PanResponder, Platform, Pressable, ScrollView, StyleProp, StyleSheet, TextStyle, View, ViewStyle, useWindowDimensions } from "react-native";
 import { Loader } from "./Loader";
 import { PullToRefresh } from "./PullToRefresh";
@@ -24,7 +24,7 @@ import { useOpenMediaTheme } from "../themeContext";
 import { SourceMarker, sourceLabel } from "./SourceMarker";
 import type { MessageMode } from "./OpenMediaApp";
 import { TranslationNote, useTranslation } from "./useTranslation";
-import { VerifiedTick } from "./VerifiedTick";
+import { Verification, VerifiedSeal, personVerification, senderVerification } from "./VerifiedSeal";
 import { aiPersonId, isAiConversation, maskKeys } from "../domain/aiChat";
 import { parseMarkdown } from "../domain/markdown";
 import { MarkdownBody } from "./MarkdownBody";
@@ -544,6 +544,7 @@ function MessageThread({
   };
   const byId = useMemo(() => new Map(conversation.messages.map((message) => [message.id, message])), [conversation.messages]);
   const isGroup = conversation.participants.length > 1;
+  const groupEmail = isGroup && Boolean(conversation.email);
   const senderOf = (message: Message) => conversation.participants.find((person) => person.id === message.senderPersonId) ?? otherPerson;
   const senderLabel = (message: Message) => message.direction === "outbound" ? "You" : (senderOf(message)?.name ?? "Them");
   const lastOutboundId = [...conversation.messages].reverse().find((message) => message.direction === "outbound")?.id;
@@ -733,7 +734,7 @@ function MessageThread({
             <Ionicons name="chevron-back" size={22} color={colors.text} />
           </Pressable>
         ) : null}
-        <PersonLink target={threadTarget(conversation, otherPerson)} label={`Open ${conversationTitle(conversation)}’s profile`} style={styles.threadHeadingLink}>
+        <GroupAwareHeading group={groupEmail} target={threadTarget(conversation, otherPerson)} label={`Open ${conversationTitle(conversation)}’s profile`} style={styles.threadHeadingLink}>
         <View style={styles.threadHeading}>
           <VerifiedAvatar people={conversation.participants} size={44} />
           <View style={[styles.rowTitleLine, styles.threadNameLine]}>
@@ -758,8 +759,9 @@ function MessageThread({
                   ? "Open Media · private to conversation members"
                   : "Imported conversation · reply unavailable"}
           </Text>
+          {groupEmail && conversation.email ? <GroupEmailPeople people={conversation.participants} ownAddress={conversation.email.accountEmail} /> : null}
         </View>
-        </PersonLink>
+        </GroupAwareHeading>
         {channelPerson &&
         !conversation.groupTitle &&
         via.sourceSummary.includes("open_media") ? (
@@ -1484,68 +1486,65 @@ function Avatar({ initials, imageUrls = [], size = 40 }: { initials: string; ima
   );
 }
 
-/** What a blue tick stands for, from the facts Open Media actually holds about this person. */
-function verificationOf(person?: Person): { title: string; subject: string; proof: string; spoken: string } | null {
-  if (!person || person.id === aiPersonId) return null;
-  // ADR 0013: set only by the server after an ID document and live selfie check.
-  if (person.verified) {
-    return { title: "Verified person", subject: person.name, proof: "Photo ID · live selfie", spoken: "Identity checked with a photo ID and a live selfie." };
-  }
-  // Set only when the mail passed DMARC and the domain publishes a BIMI mark certificate.
-  if (person.verifiedDomain) {
-    return {
-      title: "Verified sender",
-      subject: person.verifiedDomain,
-      proof: "DMARC passed · BIMI certificate",
-      spoken: `Mail passed DMARC, so it really comes from ${person.verifiedDomain}, and its logo is backed by a BIMI mark certificate.`,
-    };
-  }
-  return null;
+/** The thread heading: one profile link for a person, plain for a group email (its people have their own chips). */
+function GroupAwareHeading({ group, target, label, style, children }: PropsWithChildren<{ group: boolean; target: PersonTarget; label: string; style: StyleProp<ViewStyle> }>) {
+  if (group) return <View style={style}>{children}</View>;
+  return <PersonLink target={target} label={label} style={style}>{children}</PersonLink>;
 }
 
 /**
- * The profile picture with the blue tick on its corner, where it is easy to spot. Hovering the
- * tick (or tapping it on a phone) shows what was verified, in a card beside the picture. The card
- * stays inside the row, since swipeable rows clip anything that spills out of them.
+ * Everyone on a group email (To and Cc), each a chip with their picture and name that previews
+ * their profile on hover and opens it (or their contact card) on tap; you come last. The row
+ * scrolls sideways when there are many people.
  */
-function VerifiedAvatar({ people, size }: { people: Person[]; size: number }) {
+function GroupEmailPeople({ people, ownAddress }: { people: Person[]; ownAddress: string }) {
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const [open, setOpen] = useState(false);
-  const verification = people.length === 1 ? verificationOf(people[0]) : null;
-  if (!verification) return <ConversationAvatar people={people} size={size} />;
-  const ring = Math.round(size * 0.42);
-  const label = `${verification.title}: ${verification.subject}. ${verification.spoken}`;
   return (
-    <View style={[{ width: size, height: size }, open && styles.verifiedAvatarOpen]}>
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      accessibilityLabel={`${people.length + 1} people on this email`}
+      style={styles.groupPeople}
+      contentContainerStyle={styles.groupPeopleContent}
+    >
+      {people.map((person) => {
+        const address = person.identities.find((identity) => identity.kind === "email")?.value ?? person.name;
+        return (
+          <PersonLink
+            key={person.id}
+            target={{ ref: { kind: "email", address }, name: person.name, avatarUrl: person.avatarUrls?.[0] }}
+            label={`Open ${person.name}’s profile (${address})`}
+            style={styles.groupPerson}
+          >
+            <View style={styles.groupPersonInner}>
+              <Avatar initials={person.initials} imageUrls={person.avatarUrls} size={22} />
+              <Text numberOfLines={1} style={styles.groupPersonName}>{person.name}</Text>
+            </View>
+          </PersonLink>
+        );
+      })}
+      <View accessibilityLabel={`You (${ownAddress})`} style={[styles.groupPerson, styles.groupPersonInner, styles.groupPersonYou]}>
+        <Text numberOfLines={1} style={[styles.groupPersonName, styles.groupPersonYouText]}>You</Text>
+      </View>
+    </ScrollView>
+  );
+}
+
+/** What this person's blue tick stands for, if they have one. */
+function verificationOf(person?: Person): Verification | undefined {
+  if (!person || person.id === aiPersonId) return undefined;
+  if (person.verified) return personVerification(person.name);
+  if (person.verifiedDomain) return senderVerification(person.verifiedDomain);
+  return undefined;
+}
+
+/** The profile picture with the blue tick on its corner (one person only; groups and the AI have none). */
+function VerifiedAvatar({ people, size }: { people: Person[]; size: number }) {
+  return (
+    <VerifiedSeal verification={people.length === 1 ? verificationOf(people[0]) : undefined} size={size}>
       <ConversationAvatar people={people} size={size} />
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={label}
-        hitSlop={6}
-        onHoverIn={() => setOpen(true)}
-        onHoverOut={() => setOpen(false)}
-        onPress={(event) => {
-          // The row and the header open something themselves; the tick only shows its card.
-          event.stopPropagation?.();
-          event.preventDefault?.();
-          setOpen((value) => !value);
-        }}
-        style={[styles.verifiedSeal, { width: ring, height: ring, borderRadius: ring / 2, right: -Math.round(ring * 0.18), bottom: -Math.round(ring * 0.18) }]}
-      >
-        <VerifiedTick size={ring - 4} label={label} />
-      </Pressable>
-      {open ? (
-        <View style={[styles.verifiedCard, { left: size + 10, top: Math.round(size / 2) - 32 }]}>
-          <View style={styles.verifiedCardTitleLine}>
-            <VerifiedTick size={13} label="" />
-            <Text numberOfLines={1} style={styles.verifiedCardTitle}>{verification.title}</Text>
-          </View>
-          <Text numberOfLines={1} style={styles.verifiedCardSubject}>{verification.subject}</Text>
-          <Text numberOfLines={1} style={styles.verifiedCardLine}>{verification.proof}</Text>
-        </View>
-      ) : null}
-    </View>
+    </VerifiedSeal>
   );
 }
 
@@ -1786,7 +1785,10 @@ function ReplyContext({ outbound, name, text, reacted, onPress }: { outbound: bo
         onPress={onPress}
         style={({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) => [styles.ghost, hovered && styles.ghostHover, pressed && styles.ghostPressed]}
       >
-        <Text numberOfLines={1} style={styles.ghostName}>{name}</Text>
+        <View style={styles.ghostNameLine}>
+          <Ionicons name="arrow-undo-outline" size={11} color={colors.textTertiary} />
+          <Text numberOfLines={1} style={styles.ghostName}>{name}</Text>
+        </View>
         <Text numberOfLines={2} style={styles.ghostText}>{text}</Text>
       </Pressable>
     </View>
@@ -2298,32 +2300,14 @@ function createStyles(colors: ThemeColors) {
     rowCopy: { flex: 1, minWidth: 0 },
     rowTitleLine: { flexDirection: "row", alignItems: "center", gap: 7 },
     rowTitle: { flexShrink: 1, color: colors.text, fontSize: 15, fontWeight: "600" },
-    // The blue tick on a profile picture's corner, ringed in the page colour, and its credentials card.
-    verifiedAvatarOpen: { zIndex: 30, elevation: 30 },
-    verifiedSeal: {
-      position: "absolute",
-      alignItems: "center",
-      justifyContent: "center",
-      backgroundColor: colors.surface,
-    },
-    verifiedCard: {
-      position: "absolute",
-      pointerEvents: "none",
-      width: 236,
-      paddingHorizontal: 11,
-      paddingVertical: 8,
-      gap: 2,
-      borderRadius: 12,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.surface,
-      boxShadow: "0 6px 20px rgba(0, 0, 0, 0.14)",
-      elevation: 8,
-    },
-    verifiedCardTitleLine: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 1 },
-    verifiedCardTitle: { flexShrink: 1, color: colors.text, fontSize: 13, fontWeight: "700" },
-    verifiedCardSubject: { color: colors.text, fontSize: 12, lineHeight: 16, fontWeight: "600" },
-    verifiedCardLine: { color: colors.textSecondary, fontSize: 12, lineHeight: 16 },
+    // A group email's people: a row of chips under the title.
+    groupPeople: { alignSelf: "stretch", marginTop: 8, flexGrow: 0 },
+    groupPeopleContent: { flexGrow: 1, justifyContent: "center", gap: 6, paddingHorizontal: 12 },
+    groupPerson: { borderRadius: 16 },
+    groupPersonInner: { flexDirection: "row", alignItems: "center", gap: 6, maxWidth: 180, paddingLeft: 3, paddingRight: 10, paddingVertical: 3, borderRadius: 16, backgroundColor: colors.chrome },
+    groupPersonName: { flexShrink: 1, color: colors.text, fontSize: 12.5, fontWeight: "600" },
+    groupPersonYou: { paddingLeft: 10, backgroundColor: "transparent", borderWidth: 1, borderColor: colors.border },
+    groupPersonYouText: { color: colors.textSecondary },
     // Unread rows: a soft blue wash, a bolder name and preview, a blue time and a count pill.
     rowUnread: { backgroundColor: colors.unreadSoft },
     rowTitleUnread: { fontWeight: "700" },
@@ -2447,30 +2431,31 @@ function createStyles(colors: ThemeColors) {
     messageWrapReacted: { marginTop: 18 },
     // What a reply answers: a faint ghost of the original, set in from the outer edge, and a thin
     // line that leaves its side and curves down into the reply bubble.
-    replyContext: { alignSelf: "flex-start", paddingLeft: replyGutter, marginBottom: 5 },
+    replyContext: { alignSelf: "flex-start", maxWidth: "91%", paddingLeft: replyGutter, marginTop: 10, marginBottom: 3 },
     replyContextOutbound: { alignSelf: "flex-end", paddingLeft: 0, paddingRight: replyGutter },
-    replyConnector: { position: "absolute", top: "50%", bottom: -12, width: replyGutter - 9, borderColor: colors.textTertiary, opacity: 0.34, borderTopWidth: 1.5 },
-    replyConnectorInbound: { left: 9, borderLeftWidth: 1.5, borderTopLeftRadius: 12 },
-    replyConnectorOutbound: { right: 9, borderRightWidth: 1.5, borderTopRightRadius: 12 },
+    replyConnector: { position: "absolute", top: "50%", bottom: -9, width: replyGutter - 10, borderColor: colors.textTertiary, opacity: 0.28, borderTopWidth: 1.25 },
+    replyConnectorInbound: { left: 10, borderLeftWidth: 1.25, borderTopLeftRadius: 10 },
+    replyConnectorOutbound: { right: 10, borderRightWidth: 1.25, borderTopRightRadius: 10 },
     // Room for a reaction badge on the reply's top corner.
-    replyContextReacted: { marginBottom: 19 },
-    replyConnectorReacted: { bottom: -26 },
+    replyContextReacted: { marginBottom: 17 },
+    replyConnectorReacted: { bottom: -23 },
     ghost: {
       minWidth: 64,
-      paddingHorizontal: 12,
-      paddingTop: 6,
-      paddingBottom: 7,
-      borderRadius: 16,
+      paddingHorizontal: 13,
+      paddingTop: 7,
+      paddingBottom: 8,
+      borderRadius: 18,
       borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.surface,
+      borderColor: "transparent",
+      backgroundColor: withAlpha(colors.bubble, 0.6),
       transitionProperty: "background-color, transform, border-color",
       transitionDuration: "140ms",
     } as object,
-    ghostHover: { backgroundColor: colors.chrome, borderColor: colors.textTertiary },
+    ghostHover: { backgroundColor: colors.bubble, borderColor: colors.border },
     ghostPressed: { transform: [{ scale: 0.98 }] },
-    ghostName: { marginBottom: 1, color: colors.textTertiary, fontSize: 11, lineHeight: 14, fontWeight: "600", letterSpacing: 0.15 },
-    ghostText: { color: colors.textSecondary, fontSize: 13.5, lineHeight: 18 },
+    ghostNameLine: { flexDirection: "row", alignItems: "center", gap: 4, marginBottom: 2 },
+    ghostName: { flexShrink: 1, color: colors.textTertiary, fontSize: 11, lineHeight: 14, fontWeight: "600", letterSpacing: 0.2 },
+    ghostText: { color: colors.textSecondary, fontSize: 13, lineHeight: 18 },
     // "2 Replies" under a message others answered; it opens the thread.
     replyCount: { alignSelf: "flex-start", marginTop: 3, marginLeft: 8, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 9 },
     replyCountOutbound: { alignSelf: "flex-end", marginLeft: 0, marginRight: 8 },

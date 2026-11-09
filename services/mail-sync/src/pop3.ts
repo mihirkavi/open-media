@@ -4,6 +4,7 @@ import tls from 'node:tls';
 import { simpleParser } from 'mailparser';
 import { UserFacingError } from './errors.js';
 import { describeMailError } from './imap.js';
+import { bodyTextOf } from './mailBody.js';
 import { collectAttachments, collectRemoteImages } from './mailMedia.js';
 import { verifySender } from './senderVerification.js';
 import { PopCursor } from './mailCursor.js';
@@ -68,7 +69,7 @@ export async function syncPop3(input: MailAccountInput, limit = 50, { cursor, on
         sourceMessageId: parsed.messageId ?? `pop-${index}`,
         mailbox: 'POP Inbox', subject: parsed.subject ?? '',
         from: parsed.from?.text ?? '', to: [parsed.to, parsed.cc].flatMap((list) => (list ? (Array.isArray(list) ? list.map((address) => address.text) : [list.text]) : [])),
-        sentAt: messageDate(parsed).toISOString(), text: parsed.text?.slice(0, 50_000) ?? '',
+        sentAt: messageDate(parsed).toISOString(), text: bodyTextOf(parsed),
         senderVerified: brand.verified, senderLogoUrl: brand.logoUrl,
         remoteImages: collectRemoteImages(parsed.html), attachments: collectAttachments(parsed.attachments),
         inReplyTo: parsed.inReplyTo,

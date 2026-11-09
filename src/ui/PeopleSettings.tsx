@@ -1,15 +1,14 @@
 import Ionicons from './Icon';
 import { useEffect, useMemo, useState } from 'react';
-import { Platform, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { Loader } from './Loader';
 
 import { loadPublicPerson, PublicPerson, saveLinkedAccounts } from '../data/peopleService';
 import { NetworkId, networks } from '../domain/networkPosts';
-import { ContactCard, contactName, handleRef, IdentityRef, selfCard, selfLabel } from '../domain/people';
+import { contactName } from '../domain/people';
 import { initialsFor } from '../domain/publicPosts';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
-import { ContactImport } from './ContactImport';
 import { usePeople } from './people';
 import { Text, TextInput } from './Text';
 
@@ -20,7 +19,7 @@ const handlePattern = /^[A-Za-z0-9._-]{1,64}$/;
  * The people parts of your own profile (ADR 0013): your accounts on open networks, which you
  * choose to show publicly so others see one timeline, and your private, encrypted address book.
  */
-export function PeopleSettings({ handle }: { handle: string }) {
+export function PeopleSettings({ handle, onOpenContacts }: { handle: string; onOpenContacts?: () => void }) {
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const people = usePeople();
@@ -30,8 +29,7 @@ export function PeopleSettings({ handle }: { handle: string }) {
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState('');
   const [message, setMessage] = useState('');
-  const [showContacts, setShowContacts] = useState(false);
-  const sortedContacts = useMemo(() => [...(contacts?.cards ?? [])].filter((card) => !card.self).sort((a, b) => (contactName(a) || a.emails[0] || '').localeCompare(contactName(b) || b.emails[0] || '')), [contacts?.cards]);
+  const others = useMemo(() => (contacts?.cards ?? []).filter((card) => !card.self), [contacts?.cards]);
 
   useEffect(() => {
     loadPublicPerson(handle).then((person) => setAccounts(person?.linkedAccounts ?? [])).catch(() => setAccounts([]));
@@ -85,57 +83,24 @@ export function PeopleSettings({ handle }: { handle: string }) {
     </View>
 
     {contacts ? <>
-      <Text style={styles.title}>Your contacts</Text>
-      <Text style={styles.copy}>Only you can see your contacts. They are encrypted on the server and used to recognise people you already know: a saved name shows everywhere, and chats and email from any of a contact’s addresses, numbers or handles share one conversation. Open someone to edit them.</Text>
-      <View style={styles.card}>
-        <Pressable accessibilityRole="button" accessibilityState={{ expanded: showContacts }} disabled={!sortedContacts.length} onPress={() => setShowContacts((value) => !value)} style={styles.row}>
-          <Ionicons name="lock-closed-outline" size={18} color={colors.text} />
-          <Text style={[styles.rowText, styles.grow]}>{contacts.ready ? `${sortedContacts.length} saved ${sortedContacts.length === 1 ? 'contact' : 'contacts'}` : 'Loading…'}{contacts.suggestions.length ? <Text style={styles.rowMeta}> · {contacts.suggestions.length} to review</Text> : null}</Text>
-          {sortedContacts.length ? <Ionicons name={showContacts ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textTertiary} /> : null}
-        </Pressable>
-        <MeRow name={people?.me?.name ?? ''} card={selfCard(contacts.cards)} onOpen={() => people?.open({ ref: { kind: 'open_media', handle } })} styles={styles} colors={colors} />
-        {showContacts ? sortedContacts.map((card) => <ContactRow key={card.id} card={card} onOpen={(target) => people?.open(target)} styles={styles} colors={colors} />) : null}
-        <ContactImport contacts={contacts} />
-      </View>
+      <Text style={styles.title}>Contacts</Text>
+      <Text style={styles.copy}>Only you can see your contacts. A saved name shows everywhere, and every chat and email from one person becomes one conversation.</Text>
+      <Pressable accessibilityRole="link" accessibilityLabel={`Contacts, ${others.length} saved`} onPress={onOpenContacts} style={({ pressed }) => [styles.contactsLink, pressed && styles.pressed]}>
+        <View style={styles.faces}>
+          {(others.length ? others.slice(0, 3) : [undefined]).map((card, index) => <View key={card?.id ?? 'none'} style={[styles.face, index > 0 && styles.faceOverlap]}>
+            {card ? <Text style={styles.faceText}>{initialsFor(contactName(card) || card.emails[0] || '?')}</Text> : <Ionicons name="people-outline" size={16} color={colors.text} />}
+          </View>)}
+        </View>
+        <View style={styles.grow}>
+          <Text style={styles.contactsTitle}>{contacts.ready ? (others.length ? `${others.length.toLocaleString()} ${others.length === 1 ? 'contact' : 'contacts'}` : 'Add your contacts') : 'Loading…'}</Text>
+          <Text numberOfLines={1} style={styles.rowMeta}>{contacts.suggestions.length ? `${contacts.suggestions.length} to review · ` : ''}Add, import and export</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={colors.textTertiary} />
+      </Pressable>
       {contacts.error ? <Text accessibilityRole="alert" style={styles.error}>{contacts.error}</Text> : null}
     </> : null}
     {message ? <Text accessibilityLiveRegion="polite" style={styles.note}>{message}</Text> : null}
   </>;
-}
-
-/** Where tapping a contact goes: their Open Media profile when linked, else their email or phone. */
-function contactTarget(card: ContactCard): { ref: IdentityRef; name?: string } | undefined {
-  const linked = card.links.find((link) => link.ref.kind === 'open_media') ?? card.links[0];
-  const handle = card.handles?.find((item) => item.handle.trim());
-  const ref: IdentityRef | undefined = linked?.ref ?? (card.emails[0] ? { kind: 'email', address: card.emails[0] } : card.phones[0] ? { kind: 'phone', number: card.phones[0] } : handle ? handleRef(handle) : undefined);
-  return ref ? { ref, name: contactName(card) || undefined } : undefined;
-}
-
-/** Your own card, pinned first, as "Name (Me)" (ADR 0023). It opens your profile, where you edit it. */
-function MeRow({ name, card, onOpen, styles, colors }: { name: string; card?: ContactCard; onOpen: () => void; styles: ReturnType<typeof createStyles>; colors: ThemeColors }) {
-  const extra = card ? card.emails.length + card.phones.length + (card.handles ?? []).filter((item) => item.network !== 'open_media').length : 0;
-  return <Pressable accessibilityRole="link" accessibilityLabel={`${selfLabel(name)}, your card`} onPress={onOpen} style={({ pressed }) => [styles.row, styles.contactRow, pressed && styles.pressed]}>
-    <View style={[styles.initials, styles.meInitials]}><Text style={[styles.initialsText, styles.meInitialsText]}>{initialsFor(name || 'Me')}</Text></View>
-    <View style={styles.grow}>
-      <Text numberOfLines={1} style={styles.contactName}>{name || 'Me'}<Text style={styles.rowMeta}> (Me)</Text></Text>
-      <Text numberOfLines={1} style={styles.rowMeta}>{extra ? `${extra} other ${extra === 1 ? 'address or account' : 'addresses and accounts'}` : 'Add your other emails, numbers and accounts'}</Text>
-    </View>
-    <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} />
-  </Pressable>;
-}
-
-function ContactRow({ card, onOpen, styles, colors }: { card: ContactCard; onOpen: (target: { ref: IdentityRef; name?: string }) => void; styles: ReturnType<typeof createStyles>; colors: ThemeColors }) {
-  const target = contactTarget(card);
-  const onOpenMedia = card.links.some((link) => link.ref.kind === 'open_media');
-  const detail = [card.emails[0], card.phones[0]].filter(Boolean).join(' · ');
-  return <Pressable accessibilityRole={target ? 'link' : undefined} disabled={!target} onPress={() => target && onOpen(target)} style={({ pressed }) => [styles.row, styles.contactRow, pressed && styles.pressed]}>
-    <View style={styles.initials}><Text style={styles.initialsText}>{initialsFor(contactName(card) || detail || '?')}</Text></View>
-    <View style={styles.grow}>
-      <Text numberOfLines={1} style={styles.contactName}>{contactName(card) || detail}</Text>
-      {detail || onOpenMedia ? <Text numberOfLines={1} style={styles.rowMeta}>{[onOpenMedia ? 'On Open Media' : '', contactName(card) ? detail : ''].filter(Boolean).join(' · ')}</Text> : null}
-    </View>
-    {target ? <Ionicons name="chevron-forward" size={16} color={colors.textTertiary} /> : null}
-  </Pressable>;
 }
 
 function createStyles(colors: ThemeColors) {
@@ -174,5 +139,11 @@ function createStyles(colors: ThemeColors) {
     disabled: { opacity: 0.4 },
     note: { marginTop: 8, color: colors.textTertiary, fontSize: 12, lineHeight: 18 },
     error: { marginTop: 8, color: colors.danger, fontSize: 12, lineHeight: 18 },
+    contactsLink: { minHeight: 72, flexDirection: 'row', alignItems: 'center', gap: 14, paddingHorizontal: 16, borderRadius: 20, backgroundColor: colors.surfaceAlt },
+    faces: { flexDirection: 'row' },
+    face: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.chrome, borderWidth: 2, borderColor: colors.surfaceAlt },
+    faceOverlap: { marginLeft: -12 },
+    faceText: { color: colors.text, fontSize: 12, fontWeight: '600' },
+    contactsTitle: { color: colors.text, fontSize: 17, fontWeight: '600' },
   });
 }

@@ -30,14 +30,14 @@ const appleVCard = [
   'END:VCARD',
 ].join('\r\n');
 
-test('reads an Apple Contacts vCard: names, emails, numbers, handles and notes', () => {
+test('reads an Apple Contacts vCard: names, emails, numbers and handles; note text is not imported (ADR 0035)', () => {
   const [priya, dev] = parseContactsFile('Contacts.vcf', appleVCard);
   assert.equal(priya.name, 'Priya Shah');
   assert.deepEqual(priya.nicknames, ['Pri']);
   assert.deepEqual(priya.emails, ['priya@example.com']);
   assert.deepEqual(priya.phones, ['+1 (555) 000-1234']);
   assert.deepEqual(priya.handles, [{ network: 'telegram', handle: 'priya_s' }, { network: 'twitter', handle: 'priyashah' }]);
-  assert.equal(priya.notes, 'Met at the climbing gym, Tuesdays');
+  assert.equal(priya.notes, '');
   assert.equal(dev.name, 'Dev Mehta', 'a card without FN takes its name from N');
 });
 
@@ -54,7 +54,7 @@ test('reads a Google Contacts CSV, including several values in one cell', () => 
   assert.equal(priya.name, 'Priya Shah');
   assert.deepEqual(priya.emails, ['priya@example.com', 'priya@work.example.com']);
   assert.deepEqual(priya.phones, ['+15550001234']);
-  assert.equal(priya.notes, 'Likes "good" coffee');
+  assert.equal(priya.notes, '');
   assert.deepEqual([unnamed.name, unnamed.phones], ['', ['+15550005555']], 'labels are not mistaken for values');
 });
 
