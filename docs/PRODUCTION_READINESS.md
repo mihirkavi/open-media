@@ -195,3 +195,4 @@ Clips remain labeled fictional data. Media upload, provider OAuth, outbound emai
 - [ ] Add `CALCOM_API_KEY` (owner action) and verify `calcom_list_calendars` and busy times against the live iCloud connection.
 - [ ] Subscribe to the plan calendar in Apple Calendar (owner action).
 - [ ] Connect ChatGPT (Developer mode connector) and confirm whether connector tools are available in voice conversations.
+- [x] Passkeys in the iPhone app (owner chose the browser sheet, 2026-11-08): `4e1d207` adds `openmedia.site/passkey`, deployed as Worker version `f940b35e`. Checked live: `/passkey` serves the app (200), the page shows "Use your passkey" with **Use passkey** and **Back to the app** at 390 px and "Nothing to confirm" without a fragment, with no console errors; `/` and `/v1/posts` answer 200. Phones can use passkeys once WebAuthn is switched on in the Supabase dashboard (the unchecked item above). Dictation in the iPhone app (`8ef7e66`) needs no server change.
