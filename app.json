@@ -65,11 +65,19 @@
         {
           "photosPermission": "Allow Open Media to pick a video you choose to post publicly.",
           "cameraPermission": "Allow Open Media to record a short video you choose to post publicly.",
-          "microphonePermission": "Allow Open Media to record sound with the short videos you post."
+          "microphonePermission": "Allow Open Media to hear you when you press the mic to dictate, and to record sound with the short videos you post."
         }
       ],
       "./plugins/with-ios-scene-lifecycle",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow Open Media to hear you when you press the mic to dictate, and to record sound with the short videos you post.",
+          "enableBackgroundRecording": false,
+          "enableBackgroundPlayback": false
+        }
+      ]
     ],
     "extra": {
       "eas": {

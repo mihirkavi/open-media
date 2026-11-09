@@ -48,3 +48,10 @@ The recorder loads only when a mic is first pressed (`import()`), so the first p
 
 - Workers AI bills Whisper per audio minute on the owner's Cloudflare account. It costs a fraction of a cent a minute.
 - Phones: a later change could record with a native audio module and send to the same route, once a phone build can be tested.
+
+## Addendum: the iPhone app (2026-11-08)
+
+- The iPhone app now shows the same mic. `src/data/dictationService.native.ts` records 16 kHz mono 16-bit WAV with `expo-audio` (a new native module; needs a new store build), `tidyWav` strips the padding chunk iOS writes (`FLLR`), and the take goes to the same `/v1/dictate` route. Fields on a phone have no readable value or caret, so `Text.tsx` tracks both and inserts through `onChangeText`.
+- Android keeps its keyboard's own dictation: its recorder can't write WAV.
+- If the system never finishes preparing the recorder (a Simulator without the Mac's microphone does this), the mic gives up after 6 seconds with "The microphone couldn't start" and doesn't touch the recorder again, because releasing it then would block the app.
+- Verified on the iPhone 17 Simulator (iOS 27): the mic shows in fields, the permission prompt uses the new wording, the "not available" message when the server has no model, and the 6-second give-up. An Apple-written WAV with an `FLLR` chunk, tidied by `tidyWav`, passed production's format check. Not verified: a full spoken take on a real iPhone. On 2026-11-08 production refused every take with Workers AI error 4006 (the free daily allocation of 10,000 neurons was used up), which affects the web too; the Workers Paid plan removes that limit.

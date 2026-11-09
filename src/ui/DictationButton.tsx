@@ -17,7 +17,34 @@ import { Loader } from './Loader';
  */
 
 type Phase = 'idle' | 'starting' | 'listening' | 'writing';
-type FieldNode = HTMLInputElement | HTMLTextAreaElement;
+
+/** The text field the mic writes into, on the web (a DOM field) or on a phone (a TextInput). */
+export interface DictationField {
+  value: string;
+  selectionStart: number;
+  selectionEnd: number;
+  /** Puts the new text in the field and the caret at `cursor`. */
+  replace(text: string, cursor: number): void;
+  focus(): void;
+}
+
+/** A browser text field as a DictationField. */
+export function domDictationField(node: HTMLInputElement | HTMLTextAreaElement | null): DictationField | null {
+  if (!node || typeof node.value !== 'string') return null;
+  return {
+    value: node.value,
+    selectionStart: node.selectionStart ?? node.value.length,
+    selectionEnd: node.selectionEnd ?? node.value.length,
+    focus: () => node.focus(),
+    replace(text, cursor) {
+      const prototype = node instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(prototype, 'value')?.set?.call(node, text);
+      node.dispatchEvent(new Event('input', { bubbles: true }));
+      node.focus();
+      try { node.setSelectionRange(cursor, cursor); } catch { /* some input types have no selection */ }
+    },
+  };
+}
 
 export const dictationButtonSize = 30;
 /** Room the field keeps free on its right for the button. */
@@ -26,7 +53,9 @@ const holdMs = 450;
 const barCount = 4;
 
 let supported: boolean | undefined;
-function browserCanDictate(): boolean {
+/** Whether this platform shows the mic: browsers that can record, and the iPhone app (WAV recording). */
+export function canDictateHere(): boolean {
+  if (Platform.OS === 'ios') return true;
   if (Platform.OS !== 'web') return false;
   if (supported === undefined) {
     const scope = globalThis as unknown as { navigator?: Navigator; SpeechRecognition?: unknown; webkitSpeechRecognition?: unknown };
@@ -35,7 +64,7 @@ function browserCanDictate(): boolean {
   return supported;
 }
 
-export function DictationButton({ target, multiline, maxLength, fieldHeight }: { target: () => FieldNode | null; multiline?: boolean; maxLength?: number; fieldHeight?: number }) {
+export function DictationButton({ target, multiline, maxLength, fieldHeight }: { target: () => DictationField | null; multiline?: boolean; maxLength?: number; fieldHeight?: number }) {
   const theme = useOptionalOpenMediaTheme();
   const colors = theme?.colors ?? lightColors;
   const reduced = useReducedMotion();
@@ -80,7 +109,7 @@ export function DictationButton({ target, multiline, maxLength, fieldHeight }: {
   const start = useCallback(async () => {
     if (phaseRef.current !== 'idle') return;
     const node = target();
-    if (node) selection.current = { value: node.value, start: node.selectionStart ?? node.value.length, end: node.selectionEnd ?? node.value.length };
+    if (node) selection.current = { value: node.value, start: node.selectionStart, end: node.selectionEnd };
     setNotice(undefined);
     setPhase('starting');
     try {
@@ -114,13 +143,13 @@ export function DictationButton({ target, multiline, maxLength, fieldHeight }: {
 
   // Escape throws the take away, wherever focus is.
   useEffect(() => {
-    if (phase !== 'listening' && phase !== 'starting') return;
+    if ((phase !== 'listening' && phase !== 'starting') || Platform.OS !== 'web' || typeof window === 'undefined') return;
     const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.preventDefault(); cancel(); } };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [phase, cancel]);
 
-  if (!browserCanDictate()) return null;
+  if (!canDictateHere()) return null;
 
   const listening = phase === 'listening';
   // A tall box (a post, a bio) keeps the mic in its bottom corner; one-line fields centre it.
@@ -195,16 +224,12 @@ function Pulse({ color }: { color: string }) {
 }
 
 /** Writes into the field the way typing would, so the field's own onChangeText runs. */
-function insertInto(node: FieldNode, spoken: string, saved: { value: string; start: number; end: number } | undefined, multiline?: boolean, maxLength?: number) {
+function insertInto(node: DictationField, spoken: string, saved: { value: string; start: number; end: number } | undefined, multiline?: boolean, maxLength?: number) {
   const unchanged = saved && saved.value === node.value;
-  const start = unchanged ? saved.start : node.selectionStart ?? node.value.length;
-  const end = unchanged ? saved.end : node.selectionEnd ?? node.value.length;
+  const start = unchanged ? saved.start : node.selectionStart;
+  const end = unchanged ? saved.end : node.selectionEnd;
   const { text, cursor } = insertDictation(node.value, start, end, spoken, { multiline, maxLength });
-  const prototype = node instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-  Object.getOwnPropertyDescriptor(prototype, 'value')?.set?.call(node, text);
-  node.dispatchEvent(new Event('input', { bubbles: true }));
-  node.focus();
-  try { node.setSelectionRange(cursor, cursor); } catch { /* some input types have no selection */ }
+  node.replace(text, cursor);
 }
 
 const cache = new WeakMap<ThemeColors, ReturnType<typeof createStyles>>();
@@ -237,11 +262,13 @@ function createStyles(colors: ThemeColors) {
     buttonPressed: { transform: [{ scale: 0.92 }] },
     bars: { flexDirection: 'row', alignItems: 'center', height: 16 },
     notice: {
-      position: 'absolute', bottom: dictationButtonSize + 6, right: 0, width: 220,
+      // Phones show it inside the field, left of the mic: views below and above would paint over it.
+      position: 'absolute', right: 0, width: 220,
+      ...(Platform.OS === 'web' ? { bottom: dictationButtonSize + 6 } : { right: dictationButtonSize + 6, top: -4, maxWidth: 240 }),
       backgroundColor: colors.accent, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 7,
       ...(Platform.OS === 'web' ? { boxShadow: '0 6px 20px rgba(0,0,0,0.16)' } as object : {}),
     },
     // Text.tsx renders this button, so the notice sets the interface font itself.
-    noticeText: { color: colors.surface, fontSize: 12, lineHeight: 16, fontWeight: '500', fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif' },
+    noticeText: { color: colors.surface, fontSize: 12, lineHeight: 16, fontWeight: '500', ...(Platform.OS === 'web' ? { fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif' } : {}) },
   });
 }

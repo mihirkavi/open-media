@@ -136,3 +136,48 @@ export function speechLevel(samples: Float32Array): number {
   const rms = Math.sqrt(sum / samples.length);
   return Math.min(1, Math.sqrt(rms) * 2.2);
 }
+
+/**
+ * A phone's WAV file rewritten as the plain 44-byte-header WAV `encodeWav` writes. iOS adds
+ * chunks such as `FLLR` (padding) before the samples; this keeps only `fmt ` and `data`.
+ * Returns undefined when the file isn't 16-bit PCM WAV.
+ */
+export function tidyWav(bytes: Uint8Array): Uint8Array | undefined {
+  if (bytes.length < 12) return undefined;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const tag = (offset: number) => String.fromCharCode(...bytes.subarray(offset, offset + 4));
+  if (tag(0) !== 'RIFF' || tag(8) !== 'WAVE') return undefined;
+  let format: { channels: number; rate: number; bits: number; code: number } | undefined;
+  let data: Uint8Array | undefined;
+  for (let at = 12; at + 8 <= bytes.length;) {
+    const id = tag(at);
+    const size = view.getUint32(at + 4, true);
+    const body = at + 8;
+    if (id === 'fmt ' && size >= 16 && body + 16 <= bytes.length) {
+      format = { code: view.getUint16(body, true), channels: view.getUint16(body + 2, true), rate: view.getUint32(body + 4, true), bits: view.getUint16(body + 14, true) };
+    } else if (id === 'data') {
+      // A recorder stopped early can leave the size unset; take what is there.
+      data = bytes.subarray(body, Math.min(bytes.length, body + (size || bytes.length)));
+      break;
+    }
+    at = body + size + (size % 2);
+  }
+  if (!format || !data || format.bits !== 16 || (format.code !== 1 && format.code !== 0xfffe)) return undefined;
+  const out = new Uint8Array(44 + data.length);
+  const outView = new DataView(out.buffer);
+  const ascii = (offset: number, text: string) => { for (let index = 0; index < text.length; index += 1) out[offset + index] = text.charCodeAt(index); };
+  ascii(0, 'RIFF'); outView.setUint32(4, 36 + data.length, true); ascii(8, 'WAVE');
+  ascii(12, 'fmt '); outView.setUint32(16, 16, true); outView.setUint16(20, 1, true);
+  outView.setUint16(22, format.channels, true); outView.setUint32(24, format.rate, true);
+  outView.setUint32(28, format.rate * format.channels * 2, true); outView.setUint16(32, format.channels * 2, true); outView.setUint16(34, 16, true);
+  ascii(36, 'data'); outView.setUint32(40, data.length, true);
+  out.set(data, 44);
+  return out;
+}
+
+/** A recorder's metering reading (decibels, −160 to 0) as the button's 0–1 level. */
+export function meteringLevel(decibels: number | undefined): number {
+  if (decibels === undefined || !Number.isFinite(decibels)) return 0;
+  // Room noise sits near −50 dB and normal speech around −20 dB.
+  return Math.max(0, Math.min(1, (decibels + 50) / 35));
+}

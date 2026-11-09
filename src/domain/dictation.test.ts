@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { cleanTranscript, dictationEligible, downsample, encodeWav, insertDictation, isWav, speechLevel } from './dictation';
+import { cleanTranscript, dictationEligible, downsample, encodeWav, insertDictation, isWav, meteringLevel, speechLevel, tidyWav } from './dictation';
 
 test('fields people write words in get the mic; codes, emails, passwords and handles do not', () => {
   assert.equal(dictationEligible({}), true);
@@ -59,4 +59,30 @@ test('recordings become 16 kHz mono 16-bit WAV files', () => {
 test('the level meter is quiet for silence and full for loud speech', () => {
   assert.equal(speechLevel(new Float32Array(512)), 0);
   assert.equal(speechLevel(new Float32Array(512).fill(0.5)), 1);
+});
+
+test('a phone WAV with padding chunks becomes a plain WAV', () => {
+  const plain = encodeWav(new Float32Array(1_600).fill(0.25));
+  const samples = plain.subarray(44);
+  // RIFF, WAVE, fmt (16), FLLR padding (odd size), then data: the shape iOS writes.
+  const padding = 7;
+  const phone = new Uint8Array(12 + 24 + 8 + padding + 1 + 8 + samples.length);
+  const view = new DataView(phone.buffer);
+  const ascii = (offset: number, text: string) => { for (let index = 0; index < text.length; index += 1) phone[offset + index] = text.charCodeAt(index); };
+  ascii(0, 'RIFF'); view.setUint32(4, phone.length - 8, true); ascii(8, 'WAVE');
+  phone.set(plain.subarray(12, 36), 12);
+  ascii(36, 'FLLR'); view.setUint32(40, padding, true);
+  const dataAt = 44 + padding + 1;
+  ascii(dataAt, 'data'); view.setUint32(dataAt + 4, samples.length, true);
+  phone.set(samples, dataAt + 8);
+  assert.deepEqual(tidyWav(phone), plain);
+  assert.deepEqual(tidyWav(plain), plain);
+  assert.equal(tidyWav(new Uint8Array(100)), undefined);
+});
+
+test('metering decibels become a 0 to 1 level', () => {
+  assert.equal(meteringLevel(undefined), 0);
+  assert.equal(meteringLevel(-160), 0);
+  assert.equal(meteringLevel(0), 1);
+  assert.ok(meteringLevel(-30) > 0.4 && meteringLevel(-30) < 0.7);
 });
