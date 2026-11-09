@@ -12,8 +12,12 @@ test('browsers on openmedia.site get the web app at / and at the sign-in callbac
   served.length = 0;
   assert.equal(await (await ask('https://openmedia.site/'))!.text(), 'app');
   assert.equal(await (await ask('https://openmedia.site/auth?code=abc'))!.text(), 'app');
+  // The phone app's passkey page (ADR 0034) is the app too, never a shortcut to a profile called "passkey".
+  const passkey = await ask('https://openmedia.site/passkey');
+  assert.equal(passkey!.status, 200);
+  assert.equal(await passkey!.text(), 'app');
   await ask('https://openmedia.site/_expo/static/js/web/index.js', {});
-  assert.deepEqual(served, ['/', '/', '/_expo/static/js/web/index.js']);
+  assert.deepEqual(served, ['/', '/', '/', '/_expo/static/js/web/index.js']);
 });
 
 test('content-hashed build files are cached for a year; the page and unhashed files are not', async () => {

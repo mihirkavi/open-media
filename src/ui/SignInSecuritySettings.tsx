@@ -78,7 +78,7 @@ export function SignInSecuritySettings() {
             ? 'Signing in asks for a passkey after your password or email code, so a stolen password alone can’t get in.'
             : 'Add a second step: after your password or email code, confirm with Touch ID, Face ID, Windows Hello, your phone or a security key.'}</Text>
           {switchedOff ? <Text style={styles.hint}>Passkeys aren’t switched on for Open Media yet. Your password and email codes work as usual.</Text>
-            : !supported ? <Text style={styles.hint}>Add passkeys from Open Media on the web. The phone app gets passkeys next.</Text> : null}
+            : !supported ? <Text style={styles.hint}>Add passkeys from Open Media on the web or in the iPhone app.</Text> : null}
         </View>
         {supported ? <Pressable accessibilityRole="button" disabled={Boolean(busy)} onPress={add} style={styles.small}>{busy === 'add' ? <Loader color={colors.text} /> : <Text style={styles.smallText}>Add passkey</Text>}</Pressable> : null}
       </View>

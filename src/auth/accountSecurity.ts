@@ -6,11 +6,16 @@
  *   particular browser.
  * - Passkeys are an optional second step after the password or email code (Supabase WebAuthn MFA).
  *   Once someone adds one, the database refuses their sessions until it is used (aal2).
- *   Adding and using passkeys works in the web app; the phone apps get it next (see ADR 0034).
+ *   The web app uses the browser's WebAuthn. The iPhone app opens openmedia.site/passkey in a
+ *   secure browser sheet for the prompt only and verifies the answer with its own session
+ *   (src/domain/passkeyBridge.ts, ADR 0034 "Phones").
  */
+import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
 import type { Factor } from '@supabase/supabase-js';
 
+import { apiConfigured, getAPIURL } from '../connectors/mailApiConnector';
+import { optionsToJSON, passkeyBridgeReturn, passkeyBridgeSite, passkeyBridgeURL, readBridgeResponse, type PasskeyCeremony } from '../domain/passkeyBridge';
 import { passkeyRelyingParty, passkeysSwitchedOffError, passwordProblem, weakPasswordMessage } from '../domain/passwordRules';
 import { getSupabaseClient } from './supabase';
 
@@ -108,13 +113,61 @@ export async function setPassword(newPassword: string, email?: string): Promise<
 
 export interface Passkey { id: string; name: string; addedAt: string }
 
-/** Whether this app can add or use a passkey here: the web app in a browser with WebAuthn. */
+/** Whether this app can add or use a passkey here: the web app in a browser with WebAuthn, or the iPhone app (through openmedia.site). */
 export function passkeysSupportedHere(): boolean {
+  if (Platform.OS === 'ios') return apiConfigured();
   return Platform.OS === 'web' && typeof window !== 'undefined' && typeof window.PublicKeyCredential === 'function' && window.isSecureContext;
 }
 
 function relyingParty() {
+  if (Platform.OS !== 'web') {
+    const { rpId, rpOrigins } = passkeyBridgeSite(getAPIURL());
+    return { rpId, rpOrigins };
+  }
   return passkeyRelyingParty(window.location);
+}
+
+/** An error carrying a WebAuthn name (NotAllowedError…), so the same messages apply on phones. */
+function webAuthnError(name: string, message = name): Error {
+  return Object.assign(new Error(message), { name });
+}
+
+/**
+ * One passkey ceremony from the phone: the challenge comes from Supabase with this app's session,
+ * the prompt runs on openmedia.site/passkey in a secure sheet, and the signed answer is verified
+ * here with this app's session again. Nothing secret passes through the browser.
+ */
+async function phonePasskeyCeremony(factorId: string, friendlyName?: string): Promise<void> {
+  const supabase = client();
+  const rp = relyingParty();
+  const { data: challenge, error } = await supabase.auth.mfa.challenge({ factorId, webauthn: rp });
+  if (!challenge) throw passkeyError(error as Error, 'Could not start the passkey.');
+  const ceremony = (challenge as unknown as { webauthn: { type: PasskeyCeremony; credential_options: { publicKey: Record<string, unknown> } } }).webauthn;
+  const publicKey = optionsToJSON(ceremony.credential_options.publicKey) as Record<string, unknown>;
+  if (ceremony.type === 'create') {
+    // Passkeys need a user name; Supabase leaves it blank, as its own web helper fills it in.
+    const user = { ...(publicKey.user as { id: string; name?: string; displayName?: string }) };
+    if (!user.name) {
+      const email = (await supabase.auth.getUser()).data.user?.email;
+      user.name = `${user.id}:${friendlyName || email || 'Open Media'}`;
+    }
+    user.displayName ||= user.name;
+    publicKey.user = user;
+  }
+  const site = passkeyBridgeSite(getAPIURL());
+  const result = await WebBrowser.openAuthSessionAsync(passkeyBridgeURL(site.webOrigin, { v: 1, kind: ceremony.type, publicKey }), passkeyBridgeReturn);
+  if (result.type !== 'success') throw webAuthnError('NotAllowedError', 'cancelled');
+  const answer = readBridgeResponse(result.url);
+  if (!answer) throw new Error('The passkey page answered in a way Open Media doesn’t understand. Update the app and try again.');
+  if (!answer.ok) throw webAuthnError(answer.error);
+  const credential = answer.credential;
+  const { error: verifyError } = await supabase.auth.mfa.verify({
+    factorId,
+    challengeId: challenge.id,
+    // Supabase serializes the credential with its toJSON, which is what the page sent back.
+    webauthn: { type: ceremony.type, rpId: rp.rpId, rpOrigins: rp.rpOrigins, credential_response: { toJSON: () => credential } },
+  } as unknown as Parameters<typeof supabase.auth.mfa.verify>[0]);
+  if (verifyError) throw passkeyError(verifyError, 'Could not confirm the passkey.');
 }
 
 function toPasskey(factor: Factor): Passkey {
@@ -137,7 +190,20 @@ export async function addPasskey(name: string): Promise<void> {
   for (const factor of data?.all ?? []) {
     if (factor.factor_type === 'webauthn' && factor.status === 'unverified') await supabase.auth.mfa.unenroll({ factorId: factor.id });
   }
-  const { error } = await supabase.auth.mfa.webauthn.register({ friendlyName: uniqueName(name.trim() || 'Passkey', data?.all ?? []), webauthn: relyingParty() });
+  const friendlyName = uniqueName(name.trim() || 'Passkey', data?.all ?? []);
+  if (Platform.OS !== 'web') {
+    const { data: factor, error: enrollError } = await supabase.auth.mfa.enroll({ factorType: 'webauthn', friendlyName });
+    if (!factor) throw passkeyError(enrollError as Error, 'Could not add the passkey.');
+    try {
+      await phonePasskeyCeremony(factor.id, friendlyName);
+    } catch (reason) {
+      // A passkey that wasn't finished must not stay behind half-made.
+      await supabase.auth.mfa.unenroll({ factorId: factor.id }).catch(() => undefined);
+      throw reason instanceof Error && /NotAllowedError|cancel|abort|InvalidStateError/i.test(`${reason.name} ${reason.message}`) ? passkeyError(reason, 'Could not add the passkey.') : reason;
+    }
+    return;
+  }
+  const { error } = await supabase.auth.mfa.webauthn.register({ friendlyName, webauthn: relyingParty() });
   if (error) throw passkeyError(error, 'Could not add the passkey.');
 }
 
@@ -164,14 +230,16 @@ export async function passkeyStepNeeded(): Promise<boolean> {
 
 /** Confirms this sign-in with one of the person's passkeys (the browser offers the right one). */
 export async function completePasskeyStep(): Promise<void> {
-  if (!passkeysSupportedHere()) throw new Error('This account uses a passkey. Passkeys in the phone app are coming next; for now, sign in at openmedia.site.');
+  if (!passkeysSupportedHere()) throw new Error('This account uses a passkey. Sign in at openmedia.site in a browser to use it.');
   const passkeys = await listPasskeys();
   if (!passkeys.length) throw new Error('No passkey was found for this account.');
   const supabase = client();
   let lastError: unknown;
   // The browser asks for one specific passkey at a time; try the newest first.
   for (const passkey of [...passkeys].sort((a, b) => b.addedAt.localeCompare(a.addedAt))) {
-    const { error } = await supabase.auth.mfa.webauthn.authenticate({ factorId: passkey.id, webauthn: relyingParty() });
+    const { error } = Platform.OS === 'web'
+      ? await supabase.auth.mfa.webauthn.authenticate({ factorId: passkey.id, webauthn: relyingParty() })
+      : await phonePasskeyCeremony(passkey.id).then(() => ({ error: null }), (reason: Error) => ({ error: reason }));
     if (!error) {
       if (pendingNewPassword !== undefined) {
         const password = pendingNewPassword;

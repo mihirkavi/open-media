@@ -16,9 +16,9 @@ export interface WebAppEnv {
   WEB_APP_HOSTS?: string;
 }
 
-const appPages = new Set(['/', '/index.html', '/auth']);
+const appPages = new Set(['/', '/index.html', '/auth', '/passkey']);
 /** Single words that are pages or API roots, never profile shortcuts. */
-const reservedPaths = new Set(['auth', 'v1', 'api', 'open', 'me', 'mcp', 'docs', 'policies', 'feeds', 'ask', 'agent', 'assets', 'brand', 'feed', 'mission', 'developers', 'settings', 'messages', 'clips', 'search', 'profile', 'login', 'signin', 'signup', 'about', 'jobs', 'work', 'health']);
+const reservedPaths = new Set(['auth', 'passkey', 'v1', 'api', 'open', 'me', 'mcp', 'docs', 'policies', 'feeds', 'ask', 'agent', 'assets', 'brand', 'feed', 'mission', 'developers', 'settings', 'messages', 'clips', 'search', 'profile', 'login', 'signin', 'signup', 'about', 'jobs', 'work', 'health']);
 const appFiles = /^\/(?:_expo\/|assets\/|brand\/|favicon\.ico$|metadata\.json$)/;
 /**
  * Build files whose names carry a hash of their contents: the JavaScript under /_expo/static/ (`name-<32 hex>.js`) and
@@ -53,9 +53,9 @@ export async function handleWebAppRequest(request: Request, env: WebAppEnv): Pro
   }
   if (!appPages.has(url.pathname) && !profile) return undefined;
   if (!browser || prefersMarkdown(request) || url.searchParams.has('mode')) return undefined;
-  // The build's index.html is served at "/"; the app reads /auth's query itself.
+  // The build's index.html is served at "/"; the app reads /auth's query and /passkey's fragment itself.
   const app = await env.ASSETS.fetch(new Request(new URL('/', url), request));
-  if (url.pathname === '/auth' || profile || !app.ok || !(app.headers.get('content-type') ?? '').includes('text/html')) return app;
+  if (url.pathname === '/auth' || url.pathname === '/passkey' || profile || !app.ok || !(app.headers.get('content-type') ?? '').includes('text/html')) return app;
   const headers = new Headers(app.headers);
   for (const name of ['content-length', 'etag', 'last-modified']) headers.delete(name);
   headers.set('link', homeLinkHeader(url.origin));

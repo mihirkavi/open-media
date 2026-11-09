@@ -56,9 +56,15 @@ None of this exists in the Worker or production.
 
 ## Phones
 
-The web app is done. The iOS and Android apps share the code: passwords work there, but they can't add or use passkeys yet (the WebAuthn browser API isn't available in React Native). An account with a passkey sees **Confirm it's you** with a note to finish at openmedia.site.
+Passwords work in the phone apps as on the web. **Passkeys in the iPhone app** (built 2026-11-08, the owner chose the browser sheet): the app asks Supabase for the challenge with its own session, opens `openmedia.site/passkey` in a secure browser sheet (ASWebAuthenticationSession), and the page runs only the passkey prompt, from a tap, as Safari requires. The page sends the signed response back to `openmedia://passkey`; the app verifies it with its own session. Both legs travel in the URL fragment, which never reaches a server, and no token or session passes through the browser: the challenge is public and the signed response is useless without the app's session. The relying party stays `openmedia.site`, so a passkey made on the phone works on the web and the other way round.
 
-Planned next (owner's choice): the phone's passkey step opens a secure browser sheet (ASWebAuthenticationSession / Custom Tab) on openmedia.site. The app asks Supabase for the challenge with its own session; the page signs it with the passkey and returns only the signed response; the app verifies it with its own session. No tokens travel through the browser. Full native passkeys (a native module, associated domains, `apple-app-site-association` and `assetlinks.json`, new store builds) remain an option after that.
+- Code: `src/domain/passkeyBridge.ts` (formats, base64url, tests), `src/ui/PasskeyBridge.tsx` (the page), `phonePasskeyCeremony` in `src/auth/accountSecurity.ts`. The Worker serves `/passkey` as the app, and `passkey` is a reserved word, never a profile shortcut.
+- Supabase's client returns challenge options already decoded into bytes; `optionsToJSON` turns them back into the server's JSON before they go to the page.
+- A passkey that isn't finished (sheet closed, prompt cancelled) is unenrolled at once, so nothing half-made stays on the account.
+- Android still shows "finish at openmedia.site": Custom Tabs return differently and haven't been tested.
+- Full native passkeys (a native module, associated domains, `apple-app-site-association`) remain an option later.
+
+Verified 2026-11-08 on the local stack: a throwaway account added a passkey through the page (Chrome with a virtual authenticator standing in for the sheet, origin `http://localhost:8081`), then a fresh password sign-in went from aal1 to aal2 through the page, and "Back to the app" answered `NotAllowedError`; the account was then deleted. On the iPhone 17 Simulator, Profile → Sign-in and security offers **Add passkey**, the system sheet prompt appears, and closing the sheet shows "The passkey prompt was closed or timed out" with no factor left behind. Not verified: Face ID with a real passkey on a real iPhone, and production, where WebAuthn is still switched off in the Supabase dashboard (see Production).
 
 ## Agents
 

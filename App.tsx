@@ -4,17 +4,25 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 
+import { Platform } from 'react-native';
+
+import { passkeyBridgePath } from './src/domain/passkeyBridge';
 import { AppErrorBoundary } from './src/ui/AppErrorBoundary';
+import { lazyComponent } from './src/ui/lazyComponent';
 import { OpenMediaEntry } from './src/ui/OpenMediaEntry';
 import { OpenMediaThemeProvider, useOpenMediaTheme } from './src/themeContext';
 import { registerWebMcpTools } from './src/web/webMcp';
+
+// openmedia.site/passkey is the page the phone app opens to use a passkey (ADR 0034).
+const PasskeyBridge = lazyComponent(() => import('./src/ui/PasskeyBridge').then((module) => module.PasskeyBridge));
+const passkeyBridgePage = Platform.OS === 'web' && typeof window !== 'undefined' && window.location.pathname === passkeyBridgePath;
 
 // Keep the launch screen up until the fonts are ready, so text never flashes in a fallback font.
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 function ThemedApp() {
   const { colors, isDark } = useOpenMediaTheme();
-  return <SafeAreaView style={{ flex: 1, backgroundColor: colors.surface }} edges={['top', 'bottom']}><StatusBar style={isDark ? 'light' : 'dark'} /><OpenMediaEntry /></SafeAreaView>;
+  return <SafeAreaView style={{ flex: 1, backgroundColor: colors.surface }} edges={['top', 'bottom']}><StatusBar style={isDark ? 'light' : 'dark'} />{passkeyBridgePage ? <PasskeyBridge /> : <OpenMediaEntry />}</SafeAreaView>;
 }
 
 export default function App() {
