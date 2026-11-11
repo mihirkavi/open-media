@@ -87,6 +87,8 @@ export type InteractionRoute =
   | { via: 'sign-in' }
   | { via: 'network'; network: NetworkId; target: InteractionTarget; handle: string }
   | { via: 'open'; url: string; name: string }
+  /** Replies can be read here; replying happens on the network (`url`) until the person connects it (ADR 0039). */
+  | { via: 'read'; network: NetworkId; target: InteractionTarget; url: string; name: string }
   | { via: 'none' };
 
 /** `connected` maps each network the person connected for cross-posting on this device to their handle there. */
@@ -103,8 +105,13 @@ export function interactionRoute(post: SocialPost, kind: InteractionKind, viewer
   const target = interactionTarget(post);
   if (network && handle && target && viewer.signedIn && networkInteractions[network].includes(kind)) return { via: 'network', network, target, handle };
   const url = safeHttpsUrl(post.provenance.canonicalURL);
+  // Farcaster replies are public on the protocol, so they can be read without connecting.
+  if (kind === 'comment' && network && readableReplies.has(network) && target && url) return { via: 'read', network, target, url, name: sourceName(source) };
   return url ? { via: 'open', url, name: sourceName(source) } : { via: 'none' };
 }
+
+/** Networks whose replies Open Media reads itself (ADR 0039). */
+export const readableReplies: ReadonlySet<NetworkId> = new Set(['farcaster']);
 
 /** Counts after the viewer likes or reshares (or takes it back), before the server confirms. */
 export function applyInteraction(engagement: PostEngagement, kind: 'like' | 'reshare', on: boolean): PostEngagement {
@@ -162,6 +169,7 @@ export function interactionLabel(kind: InteractionKind, engagement: PostEngageme
   const active = kind === 'like' ? engagement.liked : kind === 'reshare' ? engagement.reshared : false;
   const verb = kind === 'like' ? (active ? 'Liked' : 'Like') : kind === 'reshare' ? (active ? 'Reshared' : 'Reshare') : 'Comments';
   if (route.via === 'open') return `${counts}. Opens the post on ${route.name}`;
+  if (route.via === 'read') return `Replies on ${route.name}`;
   if (route.via === 'network') return `${verb} on ${networks[route.network].displayName} as ${route.handle}, ${counts}`;
   return `${verb}, ${counts}`;
 }

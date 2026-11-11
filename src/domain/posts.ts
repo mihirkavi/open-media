@@ -78,6 +78,17 @@ export interface SocialPost {
   paid?: PostPaid;
   /** An item from a web feed the viewer follows (ADR 0024): RSS, Atom or JSON Feed. */
   webFeed?: WebFeedPostInfo;
+  /** The post this one quotes, such as a Farcaster quote cast (ADR 0039). */
+  quote?: QuotedPost;
+}
+
+/** A quoted post, shown inside the post that quotes it. */
+export interface QuotedPost {
+  author: { displayName: string; handle: string; avatarUrl?: string };
+  body: string;
+  createdAt: string;
+  /** Opens the quoted post on its network. */
+  url?: string;
 }
 
 export interface FeedExplanation {

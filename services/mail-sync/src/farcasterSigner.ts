@@ -47,7 +47,15 @@ export function parseEd25519PublicKey(value: unknown): `0x${string}` {
 export interface SignedKeyRequest { token: string; deeplinkUrl: string; state: string }
 
 /** Signs the EIP-712 request as the app account and registers it with the Farcaster client API. */
-export async function createSignedKeyRequest(publicKey: `0x${string}`, env: FarcasterSignerEnv, fetchImpl: typeof fetch = fetch, now = Date.now()): Promise<SignedKeyRequest> {
+/**
+ * Where the Farcaster app sends a person after they approve (ADR 0039): back into the Open Media
+ * phone app. Only Open Media's own app links are passed on.
+ */
+export function approvalRedirect(value: unknown): string | undefined {
+  return typeof value === 'string' && /^openmedia:\/\/[a-z0-9/_-]{0,64}$/i.test(value) ? value : undefined;
+}
+
+export async function createSignedKeyRequest(publicKey: `0x${string}`, env: FarcasterSignerEnv, fetchImpl: typeof fetch = fetch, now = Date.now(), redirectUrl?: string): Promise<SignedKeyRequest> {
   if (!farcasterPublishingConfigured(env)) throw new UserFacingError('Farcaster posting isn’t set up for this Open Media server yet.');
   const account = mnemonicToAccount(env.FARCASTER_APP_MNEMONIC!);
   const requestFid = BigInt(env.FARCASTER_APP_FID!);
@@ -61,7 +69,7 @@ export async function createSignedKeyRequest(publicKey: `0x${string}`, env: Farc
   const response = await fetchImpl(`${farcasterClientAPI}/v2/signed-key-requests`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ key: publicKey, requestFid: Number(requestFid), signature, deadline: Number(deadline) }),
+    body: JSON.stringify({ key: publicKey, requestFid: Number(requestFid), signature, deadline: Number(deadline), ...(redirectUrl ? { redirectUrl } : {}) }),
   });
   const body = await response.json().catch(() => ({})) as { result?: { signedKeyRequest?: Partial<SignedKeyRequest> }; errors?: { message?: string }[] };
   const request = body.result?.signedKeyRequest;
@@ -73,7 +81,11 @@ export async function createSignedKeyRequest(publicKey: `0x${string}`, env: Farc
 }
 
 const snapchainNodes = ['https://crackle.farcaster.xyz:3381', 'https://haatz.quilibrium.com'];
-const maxMessageBytes = 4096;
+/**
+ * A signed message's largest size: a "10k" cast's data may be up to 16,384 bytes (protocol version
+ * 21, ADR 0039), plus the hash, signature and key around it.
+ */
+const maxMessageBytes = 16_384 + 512;
 
 /**
  * Forwards a cast the device already signed to a public Snapchain node. Browsers can't post to the

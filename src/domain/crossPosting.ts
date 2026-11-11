@@ -70,8 +70,14 @@ export interface CrossPostContent { text: string; title?: string; video?: CrossP
 /** `note` tells people how a network received the post when it differs from Open Media's. */
 export type PreparedCrossPost = { ok: true; content: CrossPostContent; note?: string } | { ok: false; reason: string };
 
-/** Farcaster counts UTF-8 bytes, not characters. */
-export const farcasterMaxBytes = 320;
+/**
+ * Farcaster counts UTF-8 bytes, not characters. Up to 320 bytes is an ordinary cast; longer text
+ * goes as a long cast (up to 1,024) or a "10k" cast (up to 10,000), open to every account since
+ * protocol version 21 (October 2026, ADR 0039).
+ */
+export const farcasterMaxBytes = 10_000;
+/** Above this, Farcaster apps show a cast as a long cast with "Show more". */
+export const farcasterShortCastBytes = 320;
 /** Farcaster embed URLs are limited to 256 bytes. */
 export const farcasterMaxEmbedBytes = 256;
 export const hiveMaxTitleLength = 255;
@@ -119,8 +125,9 @@ export function prepareCrossPost(body: string, network: DestinationId, video?: C
   switch (network) {
     case 'farcaster': {
       const bytes = utf8Length(text);
-      if (bytes > farcasterMaxBytes) return { ok: false, reason: `Too long for Farcaster (${bytes} of ${farcasterMaxBytes} bytes).` };
-      if (!video) return { ok: true, content: { text } };
+      if (bytes > farcasterMaxBytes) return { ok: false, reason: `Too long for Farcaster (${bytes.toLocaleString('en-US')} of ${farcasterMaxBytes.toLocaleString('en-US')} bytes).` };
+      const long = bytes > farcasterShortCastBytes ? 'Goes to Farcaster as a long cast.' : undefined;
+      if (!video) return { ok: true, content: { text }, ...(long ? { note: long } : {}) };
       if (!reachable) return { ok: false, reason: localOnly };
       if (utf8Length(video.url) > farcasterMaxEmbedBytes) return { ok: false, reason: 'The video link is too long for a Farcaster embed.' };
       return { ok: true, content: { text, video }, note: 'Farcaster apps play the video from Open Media’s link.' };

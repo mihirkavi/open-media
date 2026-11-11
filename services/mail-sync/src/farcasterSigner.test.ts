@@ -4,7 +4,7 @@ import test from 'node:test';
 import { mnemonicToAccount } from 'viem/accounts';
 import { verifyTypedData } from 'viem';
 
-import { createSignedKeyRequest, farcasterPublishingConfigured, farcasterRejection, forwardSignedMessage, parseEd25519PublicKey, signedKeyRequestDomain, signedKeyRequestTypes } from './farcasterSigner.js';
+import { approvalRedirect, createSignedKeyRequest, farcasterPublishingConfigured, farcasterRejection, forwardSignedMessage, parseEd25519PublicKey, signedKeyRequestDomain, signedKeyRequestTypes } from './farcasterSigner.js';
 
 // The well-known public development mnemonic; it controls no real Farcaster account.
 const env = { FARCASTER_APP_FID: '42', FARCASTER_APP_MNEMONIC: 'test test test test test test test test test test test junk' };
@@ -55,4 +55,15 @@ test('Signed casts are forwarded and node rejections are explained', async () =>
   await assert.rejects(forwardSignedMessage(new Uint8Array([1]).buffer, rejected), /Reconnect Farcaster/);
   await assert.rejects(forwardSignedMessage(new ArrayBuffer(0), ok), /empty or too large/);
   assert.match(farcasterRejection('storage limit exceeded'), /out of storage/);
+});
+
+test('the Farcaster app may send people back only into the Open Media app (ADR 0039)', () => {
+  assert.equal(approvalRedirect('openmedia://farcaster'), 'openmedia://farcaster');
+  for (const value of ['https://evil.example', 'javascript:alert(1)', 'openmedia://x?next=https://evil.example', 42, undefined]) assert.equal(approvalRedirect(value), undefined);
+});
+
+test('a 10k cast fits through the relay, and anything far larger is refused (ADR 0039)', async () => {
+  const fetchImpl = (async () => new Response(JSON.stringify({ hash: '0xabc' }), { status: 200 })) as unknown as typeof fetch;
+  assert.deepEqual(await forwardSignedMessage(new Uint8Array(10_200).buffer, fetchImpl), { hash: '0xabc' });
+  await assert.rejects(forwardSignedMessage(new Uint8Array(20_000).buffer, fetchImpl), /too large/);
 });

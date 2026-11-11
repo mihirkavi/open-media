@@ -9,8 +9,11 @@ import { blake3 } from '@noble/hashes/blake3';
  * Schema: farcasterxyz/snapchain proto/message.proto (Message, MessageData, CastAddBody).
  */
 const MESSAGE_TYPE_CAST_ADD = 1;
+const MESSAGE_TYPE_CAST_REMOVE = 2;
 const MESSAGE_TYPE_REACTION_ADD = 3;
 const MESSAGE_TYPE_REACTION_REMOVE = 4;
+const MESSAGE_TYPE_LINK_ADD = 5;
+const MESSAGE_TYPE_LINK_REMOVE = 6;
 const FARCASTER_NETWORK_MAINNET = 1;
 const HASH_SCHEME_BLAKE3 = 1;
 const SIGNATURE_SCHEME_ED25519 = 1;
@@ -20,6 +23,10 @@ export interface CastInput {
   fid: number;
   text: string;
   embedUrls?: string[];
+  /** A cast this one quotes, sent as a cast embed after the links (ADR 0039). */
+  quote?: CastId;
+  /** Accounts mentioned, with the UTF-8 byte offset in `text` where each name goes (ADR 0039). */
+  mentions?: { fid: number; at: number }[];
   /** Channel URL, e.g. `https://warpcast.com/~/channel/dev`. */
   parentUrl?: string;
   /** The cast this one replies to. */
@@ -50,14 +57,26 @@ export function farcasterTime(unixMs: number): number {
   return Math.round(unixMs / 1000 - farcasterEpochSeconds);
 }
 
+/**
+ * Farcaster's cast size classes (CastType): up to 320 bytes is a cast, up to 1,024 a long cast, and
+ * up to 10,000 a "10k" cast. Every account may send all three since protocol version 21 (October 2026).
+ */
+export function castType(text: string): 0 | 1 | 2 {
+  const bytes = new TextEncoder().encode(text).length;
+  return bytes > 1024 ? 2 : bytes > 320 ? 1 : 0;
+}
+
 export function encodeCastAddData(input: CastInput): Uint8Array {
   const body = new ProtoWriter();
-  body.packedVarints(2, []); // mentions
+  body.packedVarints(2, (input.mentions ?? []).map((item) => item.fid)); // mentions
   if (input.parentCastId) body.message(3, castId(input.parentCastId));
   else if (input.parentUrl) body.string(7, input.parentUrl);
   if (input.text) body.string(4, input.text); // proto3 omits empty strings (a video-only cast)
-  body.packedVarints(5, []); // mentionsPositions
+  body.packedVarints(5, (input.mentions ?? []).map((item) => item.at)); // mentionsPositions
   for (const url of input.embedUrls ?? []) body.message(6, new ProtoWriter().string(1, url));
+  if (input.quote) body.message(6, new ProtoWriter().message(2, castId(input.quote)));
+  const type = castType(input.text);
+  if (type) body.varint(8, type);
   const data = new ProtoWriter();
   data.varint(1, MESSAGE_TYPE_CAST_ADD);
   data.varint(2, input.fid);
@@ -87,6 +106,50 @@ function encodeReactionData(input: ReactionInput, type: number): Uint8Array {
   data.varint(4, FARCASTER_NETWORK_MAINNET);
   data.message(7, body);
   return data.finish();
+}
+
+/** Deletes one of the account's own casts, by its hash. */
+export function encodeCastRemoveData(input: { fid: number; hash: `0x${string}`; timestampMs?: number }): Uint8Array {
+  const data = new ProtoWriter();
+  data.varint(1, MESSAGE_TYPE_CAST_REMOVE);
+  data.varint(2, input.fid);
+  data.varint(3, farcasterTime(input.timestampMs ?? Date.now()));
+  data.varint(4, FARCASTER_NETWORK_MAINNET);
+  data.message(6, new ProtoWriter().bytes(1, fromHex(input.hash)));
+  return data.finish();
+}
+
+/** Follows (LinkAdd) or unfollows (LinkRemove) another account. */
+export interface FollowInput { fid: number; targetFid: number; timestampMs?: number }
+
+function encodeLinkData(input: FollowInput, type: number): Uint8Array {
+  const data = new ProtoWriter();
+  data.varint(1, type);
+  data.varint(2, input.fid);
+  data.varint(3, farcasterTime(input.timestampMs ?? Date.now()));
+  data.varint(4, FARCASTER_NETWORK_MAINNET);
+  data.message(14, new ProtoWriter().string(1, 'follow').varint(3, input.targetFid));
+  return data.finish();
+}
+
+export function encodeFollowData(input: FollowInput): Uint8Array {
+  return encodeLinkData(input, MESSAGE_TYPE_LINK_ADD);
+}
+
+export function encodeUnfollowData(input: FollowInput): Uint8Array {
+  return encodeLinkData(input, MESSAGE_TYPE_LINK_REMOVE);
+}
+
+export function signCastRemove(input: { fid: number; hash: `0x${string}`; timestampMs?: number }, privateKey: Uint8Array): SignedFarcasterMessage {
+  return signMessageData(encodeCastRemoveData(input), privateKey);
+}
+
+export function signFollow(input: FollowInput, privateKey: Uint8Array): SignedFarcasterMessage {
+  return signMessageData(encodeFollowData(input), privateKey);
+}
+
+export function signUnfollow(input: FollowInput, privateKey: Uint8Array): SignedFarcasterMessage {
+  return signMessageData(encodeUnfollowData(input), privateKey);
 }
 
 function castId(id: CastId) {

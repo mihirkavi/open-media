@@ -7,7 +7,8 @@ import { networks } from '../domain/networkPosts';
 import { engagementFromRecord, InteractionTarget, maxCommentLength, PostComment, postCommentFromRecord } from '../domain/postInteractions';
 import { PostEngagement } from '../domain/posts';
 import { farcasterProfile, snapchain } from '../connectors/networkFeeds';
-import { combineLinkEngagement, emptyLinkActivity, fitsFarcasterLink, FarcasterCopies, farcasterCopiesFromRecord, FarcasterLinkActivity, farcasterLinkComments, linkReplies, reactionFids, withOwnAction } from '../domain/farcasterLinks';
+import { combineLinkEngagement, emptyLinkActivity, fitsFarcasterLink, FarcasterCopies, farcasterCopiesFromRecord, FarcasterLinkActivity, farcasterLinkComments, farcasterReplyComments, linkReplies, reactionFids, withOwnAction } from '../domain/farcasterLinks';
+import { mentionedFids } from '../domain/farcasterCasts';
 import { FarcasterCastMessage } from '../domain/networkPosts';
 import { loadCrossPostPreferences, publishingConnector } from './crossPostService';
 
@@ -178,7 +179,8 @@ export async function loadWebItemComments(url: string): Promise<PostComment[]> {
   if (error) throw friendly(error);
   const own = (Array.isArray(data) ? data : []).map(postCommentFromRecord).filter((comment): comment is PostComment => Boolean(comment));
   const copied = own.map((comment) => comment.farcasterHash).filter((hash): hash is string => Boolean(hash));
-  const fids = [...new Set(activity.replies.filter((reply) => !copied.includes(reply.hash)).map((reply) => reply.data.fid))].slice(0, 50);
+  const shown = activity.replies.filter((reply) => !copied.includes(reply.hash));
+  const fids = [...new Set([...shown.map((reply) => reply.data.fid), ...mentionedFids(shown.map((reply) => reply.data.castAddBody))])].slice(0, 80);
   const profiles = new Map((await Promise.all(fids.map((fid) => farcasterProfile(fid)))).map((profile) => [profile.fid, profile]));
   return [...own, ...farcasterLinkComments(activity.replies, profiles, copied)].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
@@ -249,4 +251,39 @@ export async function interactOnNetwork(postId: string, target: InteractionTarge
   const kept = Object.entries(ledger).sort(([, a], [, b]) => b - a).slice(0, ledgerLimit);
   await AsyncStorage.setItem(ledgerKey, JSON.stringify(Object.fromEntries(kept)));
   return undefined;
+}
+
+/** Whether a network lets Open Media take back a like or reshare (Farcaster does; ADR 0039). */
+export async function canUndoOnNetwork(network: InteractionTarget['network']): Promise<boolean> {
+  return typeof (await publishingConnector(network)).undo === 'function';
+}
+
+/** Takes back a like or reshare sent from this device, as the connected account. */
+export async function undoOnNetwork(postId: string, target: InteractionTarget, kind: 'like' | 'reshare'): Promise<void> {
+  const connector = await publishingConnector(target.network);
+  const name = networks[target.network].displayName;
+  if (!connector.undo) throw new PublishingError(`To undo it, use ${name}.`);
+  if (!(await connector.account())) throw new PublishingError(`Connect ${name} in Settings → Cross-posting.`);
+  try {
+    await connector.undo(target, kind);
+  } catch (error) {
+    throw error instanceof PublishingError ? error : new PublishingError(`${name} didn’t accept that. Try again.`);
+  }
+  const ledger = await readLedger();
+  delete ledger[`${postId}:${kind}`];
+  await AsyncStorage.setItem(ledgerKey, JSON.stringify(ledger));
+}
+
+/**
+ * Replies already on a post from another network, as comments (ADR 0039). Farcaster replies are
+ * read from a public Snapchain node, newest hundred, with their authors' names. Other networks
+ * return undefined: their replies stay on the network for now.
+ */
+export async function loadNetworkReplies(target: InteractionTarget): Promise<PostComment[] | undefined> {
+  if (target.network !== 'farcaster') return undefined;
+  const page = await snapchain<{ messages?: FarcasterCastMessage[] }>(`/v1/castsByParent?fid=${target.fid}&hash=${target.hash}&pageSize=100&reverse=true`);
+  const replies = page.messages ?? [];
+  const fids = [...new Set([...replies.map((reply) => reply.data.fid), ...mentionedFids(replies.map((reply) => reply.data.castAddBody))])].slice(0, 80);
+  const profiles = new Map((await Promise.all(fids.map((fid) => farcasterProfile(fid)))).map((profile) => [profile.fid, profile]));
+  return farcasterReplyComments(replies, profiles);
 }

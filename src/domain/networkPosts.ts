@@ -1,6 +1,7 @@
-import { PostMedia, SocialPost } from './posts';
+import { PostMedia, QuotedPost, SocialPost } from './posts';
 import { cleanPostMarkdown, looksLikeMarkdown } from './markdown';
 import { initialsFor } from './publicPosts';
+import { FarcasterCastBody, quotedCast, textWithMentions } from './farcasterCasts';
 
 /**
  * Public posts from decentralized, blockchain-based social networks, normalized into the canonical
@@ -113,13 +114,14 @@ export interface FarcasterCastMessage {
     fid: number;
     /** Seconds since the Farcaster epoch, 2021-01-01T00:00:00Z. */
     timestamp: number;
-    castAddBody?: { text?: string; parentUrl?: string | null; parentCastId?: unknown; embeds?: { url?: string; castId?: unknown }[] };
+    castAddBody?: FarcasterCastBody;
   };
 }
 
-export interface FarcasterProfile { fid: number; username?: string; displayName?: string; pfpUrl?: string }
+export interface FarcasterProfile { fid: number; username?: string; displayName?: string; pfpUrl?: string; bio?: string; url?: string; location?: string }
 
-export interface FarcasterChannel { id: string; parentUrl: string }
+/** A channel the Farcaster feed reads; `followed` when the connected account follows it (ADR 0039). */
+export interface FarcasterChannel { id: string; parentUrl: string; followed?: boolean }
 
 const farcasterEpochMs = Date.UTC(2021, 0, 1);
 
@@ -137,11 +139,19 @@ export function farcasterProfileFromUserData(fid: number, messages: { data?: { t
     if (type === 'USER_DATA_TYPE_USERNAME') profile.username = value;
     else if (type === 'USER_DATA_TYPE_DISPLAY') profile.displayName = value;
     else if (type === 'USER_DATA_TYPE_PFP') profile.pfpUrl = value;
+    else if (type === 'USER_DATA_TYPE_BIO') profile.bio = value;
+    else if (type === 'USER_DATA_TYPE_URL') profile.url = value;
+    // Farcaster stores a location as a geo URI ("geo:37.77,-122.42"); only a plain place name is shown.
+    else if (type === 'USER_DATA_TYPE_LOCATION' && !/^geo:/i.test(value)) profile.location = value;
   }
   return profile;
 }
 
-export function socialPostFromFarcaster(message: FarcasterCastMessage, profile: FarcasterProfile | undefined, channel: FarcasterChannel): SocialPost | undefined {
+/**
+ * A cast as a post. `usernames` names the accounts it mentions (ADR 0039): Farcaster keeps mentions
+ * out of the text, so without them a sentence would have gaps where the names go.
+ */
+export function socialPostFromFarcaster(message: FarcasterCastMessage, profile: FarcasterProfile | undefined, channel: FarcasterChannel, usernames: ReadonlyMap<number, string | undefined> = new Map(), quotes: ReadonlyMap<string, QuotedPost> = new Map()): SocialPost | undefined {
   const body = message.data.castAddBody;
   if (message.data.type !== 'MESSAGE_TYPE_CAST_ADD' || !body || body.parentCastId) return undefined;
   const avatarUrl = safeHttpsUrl(profile?.pfpUrl);
@@ -150,9 +160,11 @@ export function socialPostFromFarcaster(message: FarcasterCastMessage, profile: 
   const images = urls.filter(looksLikeImage);
   const videoUrl = urls.find((url) => videoStreaming(url));
   const links = urls.filter((url) => !images.includes(url) && url !== videoUrl && !(body.text ?? '').includes(url));
-  const text = [body.text?.trim() ?? '', ...links].filter(Boolean).join('\n');
-  if (!text && !images.length && !videoUrl) return undefined;
-  return networkPost({
+  const text = [textWithMentions(body, usernames).trim(), ...links].filter(Boolean).join('\n');
+  const quoted = quotedCast(body);
+  const quote = quoted ? quotes.get(quoted.hash) : undefined;
+  if (!text && !images.length && !videoUrl && !quote) return undefined;
+  const post = networkPost({
     network: 'farcaster',
     externalId: message.hash,
     canonicalURL: `https://farcaster.xyz/${encodeURIComponent(profile.username)}/${message.hash.slice(0, 10)}`,
@@ -161,8 +173,23 @@ export function socialPostFromFarcaster(message: FarcasterCastMessage, profile: 
     createdAt: farcasterTimestamp(message.data.timestamp),
     images,
     video: videoUrl ? { url: videoUrl, streaming: videoStreaming(videoUrl)!, aspectRatio: 9 / 16 } : undefined,
-    selection: `Newest public cast in the /${channel.id} channel on Farcaster`,
+    selection: channel.followed ? `Newest public cast in /${channel.id}, a channel you follow on Farcaster` : `Newest public cast in the /${channel.id} channel on Farcaster`,
   });
+  return quote ? { ...post, quote } : post;
+}
+
+/** A cast shown inside the cast that quotes it (ADR 0039), with its mentions put back. */
+export function quotedPostFromFarcaster(message: FarcasterCastMessage, profile: FarcasterProfile | undefined, usernames: ReadonlyMap<number, string | undefined>): QuotedPost | undefined {
+  const body = message.data?.castAddBody;
+  if (message.data?.type !== 'MESSAGE_TYPE_CAST_ADD' || !body || !profile?.username) return undefined;
+  const text = textWithMentions(body, usernames).trim();
+  if (!text) return undefined;
+  return {
+    author: { displayName: profile.displayName || profile.username, handle: `@${profile.username}`, ...(safeHttpsUrl(profile.pfpUrl) ? { avatarUrl: safeHttpsUrl(profile.pfpUrl) } : {}) },
+    body: text,
+    createdAt: farcasterTimestamp(message.data.timestamp),
+    url: `https://farcaster.xyz/${encodeURIComponent(profile.username)}/${message.hash.slice(0, 10)}`,
+  };
 }
 
 /** A cast from Farcaster's public client search API (`/v2/search-casts`). */

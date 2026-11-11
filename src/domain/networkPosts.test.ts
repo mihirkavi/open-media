@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import {
   collapseRepeatedPosts, DesoPostRecord, FarcasterCastMessage, farcasterProfileFromUserData, farcasterTimestamp, HivePostRecord, LensPostRecord, lensMediaUrl, livepeerPlaybackId, threeSpeakVideoId, videoStreaming,
-  plainTextExcerpt, safeHttpsUrl, socialPostFromDeso, socialPostFromFarcaster, socialPostFromHive, socialPostFromLens, sourceName,
+  plainTextExcerpt, quotedPostFromFarcaster, safeHttpsUrl, socialPostFromDeso, socialPostFromFarcaster, socialPostFromHive, socialPostFromLens, sourceName,
 } from './networkPosts';
 import { clipPosts, explainFeedPost } from './posts';
 
@@ -169,4 +169,18 @@ test('Network videos become canonical video posts that Clips can show', () => {
   assert.deepEqual(clipPosts([farcaster, lensVideo]).length, 2);
   const long = { ...lensVideo, media: [{ ...lensVideo.media![0], durationSeconds: 600 }] };
   assert.equal(clipPosts([long]).length, 0, 'Clips are short videos');
+});
+
+test('a Farcaster cast shows its mentions and the cast it quotes (ADR 0039)', () => {
+  const quotedHash = `0x${'e7'.repeat(20)}`;
+  const quoted: FarcasterCastMessage = { hash: quotedHash, data: { type: 'MESSAGE_TYPE_CAST_ADD', fid: 7, timestamp: 100, castAddBody: { text: 'Shipped  today', mentions: [9], mentionsPositions: [8] } } };
+  const usernames = new Map<number, string | undefined>([[9, 'base'], [5, 'jesse']]);
+  const quote = quotedPostFromFarcaster(quoted, { fid: 7, username: 'ana', displayName: 'Ana', pfpUrl: 'https://img.example/a.png' }, usernames)!;
+  assert.equal(quote.body, 'Shipped @base today');
+  assert.equal(quote.url, `https://farcaster.xyz/ana/${quotedHash.slice(0, 10)}`);
+  const post = socialPostFromFarcaster(cast({ text: 'Congrats ', mentions: [5], mentionsPositions: [9], embeds: [{ castId: { fid: 7, hash: quotedHash } }] }), profile, channel, usernames, new Map([[quotedHash, quote]]))!;
+  assert.equal(post.body, 'Congrats @jesse');
+  assert.equal(post.quote?.author.handle, '@ana');
+  // A quote cast with no text of its own still shows, because of what it quotes.
+  assert.ok(socialPostFromFarcaster(cast({ text: '', embeds: [{ castId: { fid: 7, hash: quotedHash } }] }), profile, channel, usernames, new Map([[quotedHash, quote]])));
 });

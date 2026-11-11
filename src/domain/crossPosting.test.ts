@@ -17,10 +17,14 @@ test('The composer summarizes destinations without listing every provider', () =
 
 test('Farcaster limits are counted in UTF-8 bytes and explained before publishing', () => {
   assert.equal(utf8Length('é'), 2);
-  assert.ok(prepareCrossPost('a'.repeat(320), 'farcaster').ok);
-  const tooLong = prepareCrossPost('é'.repeat(161), 'farcaster');
+  const short = prepareCrossPost('a'.repeat(320), 'farcaster');
+  assert.ok(short.ok && !short.note, 'an ordinary cast');
+  const long = prepareCrossPost('é'.repeat(161), 'farcaster');
+  assert.ok(long.ok && long.note === 'Goes to Farcaster as a long cast.', 'over 320 bytes is a long cast (ADR 0039)');
+  assert.ok(prepareCrossPost('a'.repeat(10_000), 'farcaster').ok);
+  const tooLong = prepareCrossPost('é'.repeat(5001), 'farcaster');
   assert.equal(tooLong.ok, false);
-  assert.match(!tooLong.ok ? tooLong.reason : '', /322 of 320 bytes/);
+  assert.match(!tooLong.ok ? tooLong.reason : '', /10,002 of 10,000 bytes/);
   assert.ok(prepareCrossPost('é'.repeat(161), 'deso').ok);
 });
 
@@ -81,7 +85,7 @@ test('DeSo needs the file itself; Lens can fall back to the public URL', () => {
 });
 
 test('Farcaster video posts still respect the text limit and the embed URL limit', () => {
-  assert.equal(prepareCrossPost('a'.repeat(321), 'farcaster', publicVideo).ok, false);
+  assert.equal(prepareCrossPost('a'.repeat(10_001), 'farcaster', publicVideo).ok, false);
   const longUrl = { ...publicVideo, url: `https://abc.supabase.co/${'x'.repeat(260)}.mp4` };
   assert.match((prepareCrossPost('Hi', 'farcaster', longUrl) as { reason: string }).reason, /too long for a Farcaster embed/);
 });

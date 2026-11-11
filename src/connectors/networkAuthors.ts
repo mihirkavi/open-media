@@ -2,9 +2,10 @@ import {
   DesoPostRecord, FarcasterCastMessage, HivePostRecord, LensPostRecord, livepeerPlaybackId, NetworkId, networks, socialPostFromDeso, socialPostFromFarcaster,
   socialPostFromHive, socialPostFromLens, threeSpeakVideoId,
 } from '../domain/networkPosts';
+import { mentionedFids } from '../domain/farcasterCasts';
 import { SocialPost } from '../domain/posts';
 import { fetchBlueskyAuthor, fetchMastodonAuthor, fetchNostrAuthor } from './openNetworkFeeds';
-import { desoEndpoint, farcasterProfile, hiveEndpoint, lensEndpoint, lensPostsQuery, NetworkFeedPage, requestJSON, resolveLivepeer, resolveThreeSpeak, snapchain } from './networkFeeds';
+import { desoEndpoint, farcasterProfile, farcasterQuotes, farcasterUsernames, hiveEndpoint, lensEndpoint, lensPostsQuery, NetworkFeedPage, requestJSON, resolveLivepeer, resolveThreeSpeak, snapchain } from './networkFeeds';
 
 /**
  * One person's own public posts on an open network, newest first, for their unified profile
@@ -28,8 +29,12 @@ async function farcasterAuthor(handle: string, cursor?: string): Promise<Network
   const query = new URLSearchParams({ fid: String(proof.fid), pageSize: String(pageSize), reverse: 'true' });
   if (cursor) query.set('pageToken', cursor);
   const page = await snapchain<{ messages?: FarcasterCastMessage[]; nextPageToken?: string }>(`/v1/castsByFid?${query}`);
-  const profile = await farcasterProfile(proof.fid);
-  const posts = (page.messages ?? []).map((message) => socialPostFromFarcaster(message, profile, { id: 'profile', parentUrl: '' })).filter((post): post is SocialPost => Boolean(post));
+  const messages = page.messages ?? [];
+  const mentioned = mentionedFids(messages.map((message) => message.data.castAddBody));
+  const [profile, ...others] = await Promise.all([proof.fid, ...mentioned].map((fid) => farcasterProfile(fid)));
+  const usernames = farcasterUsernames(new Map([profile, ...others].map((item) => [item.fid, item])));
+  const quotes = await farcasterQuotes(messages).catch(() => new Map());
+  const posts = messages.map((message) => socialPostFromFarcaster(message, profile, { id: 'profile', parentUrl: '' }, usernames, quotes)).filter((post): post is SocialPost => Boolean(post));
   return { posts, cursor: page.nextPageToken || undefined };
 }
 

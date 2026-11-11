@@ -70,3 +70,43 @@ export async function crossPost(body: string, destinations: DestinationId[], pos
     }
   }));
 }
+
+// Which draft (client ID) each published post came from, so deleting the post finds its copies.
+const postsKey = 'open-media.cross-posting.posts';
+
+/** Remembers that the Open Media post `postId` was published from the draft `clientId`. */
+export async function rememberPublishedPost(postId: string, clientId: string): Promise<void> {
+  try {
+    const posts = JSON.parse((await AsyncStorage.getItem(postsKey)) ?? '{}') as Record<string, string>;
+    posts[postId] = clientId;
+    const kept = Object.entries(posts).slice(-ledgerLimit);
+    await AsyncStorage.setItem(postsKey, JSON.stringify(Object.fromEntries(kept)));
+  } catch { /* Copies just won't be deleted with the post. */ }
+}
+
+/**
+ * Deletes the copies this device published of a post, on networks that allow deleting (Farcaster's
+ * CastRemove, ADR 0039). Returns the networks where a copy could not be deleted. Copies made on
+ * another device, and on networks without deletion, stay where they are.
+ */
+export async function removeCrossPostCopies(postId: string): Promise<DestinationId[]> {
+  let clientId: string | undefined;
+  try { clientId = (JSON.parse((await AsyncStorage.getItem(postsKey)) ?? '{}') as Record<string, string>)[postId]; } catch { clientId = undefined; }
+  if (!clientId) return [];
+  const ledger = await readLedger();
+  const copies = Object.entries(ledger).filter(([key]) => key.startsWith(`${clientId}:`));
+  const failed: DestinationId[] = [];
+  await Promise.all(copies.map(async ([key, copy]) => {
+    const network = key.slice(clientId!.length + 1) as DestinationId;
+    const connector = await publishingConnector(network);
+    if (!connector.removeCopy) return;
+    try {
+      await connector.removeCopy(copy);
+      delete ledger[key];
+    } catch {
+      failed.push(network);
+    }
+  }));
+  await AsyncStorage.setItem(ledgerKey, JSON.stringify(ledger));
+  return failed;
+}

@@ -1,11 +1,14 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ed25519 } from '@noble/curves/ed25519';
 import { getRandomValues } from 'expo-crypto';
 import QRCode from 'qrcode';
 import { Linking, Platform } from 'react-native';
 
 import { deviceSecretStorage, getAPIAccessToken } from '../../auth/supabase';
+import { farcasterAccountFidKey } from '../networkFeeds';
 import { farcasterProfileFromUserData } from '../../domain/networkPosts';
-import { fromHex, signCastAdd, signReactionAdd, signReactionRemove, SignedFarcasterMessage, toHex } from './farcasterMessage';
+import { castWithMentions, mentionCandidates } from '../../domain/farcasterCasts';
+import { CastInput, fromHex, signCastAdd, signCastRemove, signFollow, signReactionAdd, signReactionRemove, SignedFarcasterMessage, signUnfollow, toHex } from './farcasterMessage';
 import { fitsFarcasterLink } from '../../domain/farcasterLinks';
 import { NetworkAccount, PublishingConnector, PublishingError } from './types';
 
@@ -72,13 +75,15 @@ export const farcasterPublisher: PublishingConnector = {
 
   async account() {
     const stored = await load();
+    // Connections made before ADR 0039 didn't record the account number for the feed.
+    if (stored) AsyncStorage.setItem(farcasterAccountFidKey, String(stored.fid)).catch(() => undefined);
     return stored ? toAccount(stored) : undefined;
   },
 
   async connect({ showApproval, signal }) {
     const privateKey = getRandomValues(new Uint8Array(32));
     const publicKey = `0x${toHex(ed25519.getPublicKey(privateKey))}`;
-    const request = await authorizedFetch('/v1/cross-posting/farcaster/signed-key-request', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: publicKey }) }) as { token?: string; deeplinkUrl?: string };
+    const request = await authorizedFetch('/v1/cross-posting/farcaster/signed-key-request', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: publicKey, ...(Platform.OS === 'web' ? {} : { redirectUrl: 'openmedia://farcaster' }) }) }) as { token?: string; deeplinkUrl?: string };
     if (!request.token || !request.deeplinkUrl?.startsWith('farcaster://')) throw new PublishingError('Farcaster didn’t start the connection. Try again.');
     if (Platform.OS === 'web') {
       const qrCode = `data:image/svg+xml;utf8,${encodeURIComponent(await QRCode.toString(request.deeplinkUrl, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }))}`;
@@ -100,6 +105,7 @@ export const farcasterPublisher: PublishingConnector = {
           const userData = await fetch(`${snapchainNode}/v1/userDataByFid?fid=${fid}`).then((item) => item.json()).catch(() => ({ messages: [] })) as { messages?: Parameters<typeof farcasterProfileFromUserData>[1] };
           const stored = { fid, privateKey: toHex(privateKey), username: farcasterProfileFromUserData(fid, userData.messages ?? []).username ?? `fid:${fid}` };
           await deviceSecretStorage().setItem(storageKey, JSON.stringify(stored));
+          await AsyncStorage.setItem(farcasterAccountFidKey, String(fid)).catch(() => undefined);
           return toAccount(stored);
         }
       }
@@ -112,12 +118,14 @@ export const farcasterPublisher: PublishingConnector = {
 
   async disconnect() {
     await deviceSecretStorage().removeItem(storageKey);
+    await AsyncStorage.removeItem(farcasterAccountFidKey).catch(() => undefined);
   },
 
   async publish(content) {
     const stored = await load();
     if (!stored) throw new PublishingError('Connect Farcaster in Settings → Cross-posting.');
-    const hash = await submit(stored, (key) => signCastAdd({ fid: stored.fid, text: content.text, embedUrls: content.video ? [content.video.url] : undefined }, key));
+    const cast = await withMentions({ fid: stored.fid, text: content.text, embedUrls: content.video ? [content.video.url] : undefined });
+    const hash = await submit(stored, (key) => signCastAdd(cast, key));
     return { externalId: hash, url: `https://farcaster.xyz/${encodeURIComponent(stored.username)}/${hash.slice(0, 10)}` };
   },
 
@@ -127,14 +135,76 @@ export const farcasterPublisher: PublishingConnector = {
     if (!stored) throw new PublishingError('Connect Farcaster in Settings → Cross-posting.');
     const cast = { fid: target.fid, hash: target.hash as `0x${string}` };
     if (interaction.kind === 'comment') {
-      const hash = await submit(stored, (key) => signCastAdd({ fid: stored.fid, text: interaction.text, parentCastId: cast }, key));
+      const reply = await withMentions({ fid: stored.fid, text: interaction.text, parentCastId: cast });
+      const hash = await submit(stored, (key) => signCastAdd(reply, key));
       return { externalId: hash, url: `https://farcaster.xyz/${encodeURIComponent(stored.username)}/${hash.slice(0, 10)}` };
     }
     // Farcaster keeps one reaction per account and cast, so a repeated like is already done.
     await submit(stored, (key) => signReactionAdd({ fid: stored.fid, type: interaction.kind === 'like' ? 'like' : 'recast', target: cast }, key), true);
     return undefined;
   },
+
+  async undo(target, kind) {
+    if (target.network !== 'farcaster') throw new PublishingError('That post isn’t on Farcaster.');
+    const stored = await load();
+    if (!stored) throw new PublishingError('Connect Farcaster in Settings → Cross-posting.');
+    // Farcaster keeps whichever reaction message came last, so removing twice is already done.
+    await submit(stored, (key) => signReactionRemove({ fid: stored.fid, type: kind === 'like' ? 'like' : 'recast', target: { fid: target.fid, hash: target.hash as `0x${string}` } }, key), true);
+  },
+
+  async removeCopy(copy) {
+    const stored = await load();
+    if (!stored) throw new PublishingError('Connect Farcaster in Settings → Cross-posting to delete the copy there.');
+    if (!/^0x[0-9a-f]{40}$/.test(copy.externalId)) throw new PublishingError('That copy isn’t a Farcaster cast.');
+    await submit(stored, (key) => signCastRemove({ fid: stored.fid, hash: copy.externalId as `0x${string}` }, key), true);
+  },
 };
+
+/**
+ * Puts real mentions into a cast (ADR 0039): each "@name" that is a Farcaster username becomes a
+ * mention, so the person is notified and every app shows their name. A name Farcaster doesn't know
+ * stays as text. Usernames are looked up on a public Snapchain node, five at a time.
+ */
+async function withMentions(cast: CastInput): Promise<CastInput> {
+  const names = mentionCandidates(cast.text).slice(0, 20);
+  if (!names.length) return cast;
+  const fids = new Map<string, number>();
+  for (let index = 0; index < names.length; index += 5) {
+    await Promise.all(names.slice(index, index + 5).map(async (name) => {
+      const fid = await farcasterFidByName(name).catch(() => undefined);
+      if (fid) fids.set(name, fid);
+    }));
+  }
+  const { text, mentions } = castWithMentions(cast.text, fids);
+  return mentions.length ? { ...cast, text, mentions } : cast;
+}
+
+/** The account (fid) that owns a Farcaster username or ENS name, if any. */
+export async function farcasterFidByName(name: string): Promise<number | undefined> {
+  const response = await fetch(`${snapchainNode}/v1/userNameProofByName?name=${encodeURIComponent(name.replace(/^@/, '').toLowerCase())}`);
+  if (!response.ok) return undefined;
+  const proof = await response.json() as { fid?: number };
+  return Number.isSafeInteger(proof.fid) && proof.fid! > 0 ? proof.fid : undefined;
+}
+
+/** Whether the connected account follows `targetFid` on Farcaster; undefined without a connection. */
+export async function farcasterFollows(targetFid: number): Promise<boolean | undefined> {
+  const stored = await load();
+  if (!stored) return undefined;
+  const response = await fetch(`${snapchainNode}/v1/linkById?fid=${stored.fid}&target_fid=${targetFid}&link_type=follow`);
+  const body = await response.json().catch(() => ({})) as { data?: { type?: string }; error_detail?: string };
+  if (response.ok) return body.data?.type === 'MESSAGE_TYPE_LINK_ADD';
+  // The node answers "NotFound" for accounts that were never followed; anything else is unknown.
+  return /NotFound/.test(body.error_detail ?? '') ? false : undefined;
+}
+
+/** Follows or unfollows an account on Farcaster as the connected account (LinkAdd / LinkRemove). */
+export async function followOnFarcaster(targetFid: number, follow: boolean): Promise<void> {
+  const stored = await load();
+  if (!stored) throw new PublishingError('Connect Farcaster in Settings → Cross-posting.');
+  if (targetFid === stored.fid) throw new PublishingError('That’s your own Farcaster account.');
+  await submit(stored, (key) => (follow ? signFollow : signUnfollow)({ fid: stored.fid, targetFid }, key), true);
+}
 
 /** The connected Farcaster account's number (fid) on this device, if any. */
 export async function farcasterAccountFid(): Promise<number | undefined> {

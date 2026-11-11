@@ -34,6 +34,7 @@ import {
   unsubscribeFromOpenMediaMessages,
 } from "../data/openMediaService";
 import { deletePost, reportPost } from "../data/postService";
+import { removeCrossPostCopies } from "../data/crossPostService";
 import { bridgedSourceOf, loadBridgedConversations, markBridgedChatRead, markBridgedChatUnread, sendBridgedMessage } from "../connectors/bridgesConnector";
 import { emailConversationId, normalizeStoredEmail, replySubject, subjectFromBody, unreadMailIn } from "../domain/emailNormalization";
 import { useLiveMail } from "./useLiveMail";
@@ -152,6 +153,8 @@ export function OpenMediaApp({
     async (postId: string) => {
       await deletePost(postId);
       feed.removePost(postId);
+      // Its copies on networks that allow deleting (Farcaster) go too, best effort (ADR 0039).
+      removeCrossPostCopies(postId).catch(() => undefined);
     },
     [feed.removePost],
   );

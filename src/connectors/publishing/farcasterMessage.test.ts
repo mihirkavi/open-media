@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { CastType, FarcasterNetwork, makeCastAdd, makeReactionAdd, makeReactionRemove, Message, MessageData, NobleEd25519Signer, ReactionType } from '@farcaster/core';
+import { CastType, FarcasterNetwork, makeCastAdd, makeCastRemove, makeLinkAdd, makeLinkRemove, makeReactionAdd, makeReactionRemove, Message, MessageData, NobleEd25519Signer, ReactionType } from '@farcaster/core';
 
-import { encodeCastAddData, encodeReactionAddData, encodeReactionRemoveData, fromHex, signCastAdd, signReactionAdd, signReactionRemove, toHex } from './farcasterMessage';
+import { castType, encodeCastAddData, encodeCastRemoveData, encodeFollowData, encodeReactionAddData, encodeReactionRemoveData, encodeUnfollowData, fromHex, signCastAdd, signCastRemove, signFollow, signReactionAdd, signReactionRemove, signUnfollow, toHex } from './farcasterMessage';
 
 // Fixed test key: never a real account's key.
 const privateKey = fromHex('1f'.repeat(32));
@@ -96,3 +96,53 @@ test('a comment on a link is a CastAdd whose parent is the link', async () => {
   if (result.isErr()) throw result.error;
   assert.equal(signCastAdd({ fid: 123456, text: 'See you there', parentUrl, timestampMs }, privateKey).hash, `0x${toHex(result.value.hash)}`);
 });
+
+// ADR 0039: deleting a cast, following, mentions, quotes and long casts, each against @farcaster/core.
+const meta039 = { fid: 123456, network: FarcasterNetwork.MAINNET, timestamp: Math.round(timestampMs / 1000 - Date.UTC(2021, 0, 1) / 1000) };
+
+test('CastRemove matches @farcaster/core', async () => {
+  const hash = `0x${'9a'.repeat(20)}` as const;
+  const result = await makeCastRemove({ targetHash: fromHex(hash) }, meta039, new NobleEd25519Signer(privateKey));
+  if (result.isErr()) throw result.error;
+  assert.equal(toHex(encodeCastRemoveData({ fid: 123456, hash, timestampMs })), toHex(MessageData.encode(result.value.data!).finish()));
+  const ours = signCastRemove({ fid: 123456, hash, timestampMs }, privateKey);
+  assert.equal(ours.hash, `0x${toHex(result.value.hash)}`);
+  assert.equal(toHex(Message.decode(ours.bytes).signature), toHex(result.value.signature));
+});
+
+for (const [name, make, encode, sign] of [
+  ['LinkAdd (follow)', makeLinkAdd, encodeFollowData, signFollow],
+  ['LinkRemove (unfollow)', makeLinkRemove, encodeUnfollowData, signUnfollow],
+] as const) {
+  test(`${name} matches @farcaster/core`, async () => {
+    const result = await make({ type: 'follow', targetFid: 3 }, meta039, new NobleEd25519Signer(privateKey));
+    if (result.isErr()) throw result.error;
+    assert.equal(toHex(encode({ fid: 123456, targetFid: 3, timestampMs })), toHex(MessageData.encode(result.value.data!).finish()));
+    assert.equal(sign({ fid: 123456, targetFid: 3, timestampMs }, privateKey).hash, `0x${toHex(result.value.hash)}`);
+  });
+}
+
+test('mentions and a quoted cast match @farcaster/core', async () => {
+  const text = 'gm  and  👋';
+  const first = new TextEncoder().encode('gm ').length;
+  const second = new TextEncoder().encode('gm  and ').length;
+  const quote = { fid: 13165, hash: `0xe7b90aa12082f288b368a76bd93b0698386bb7a8` as const };
+  const result = await makeCastAdd(
+    { text, embeds: [{ url: 'https://example.com/a' }, { castId: { fid: quote.fid, hash: fromHex(quote.hash) } }], embedsDeprecated: [], mentions: [3, 2], mentionsPositions: [first, second], type: CastType.CAST },
+    meta039, new NobleEd25519Signer(privateKey),
+  );
+  if (result.isErr()) throw result.error;
+  const input = { fid: 123456, text, embedUrls: ['https://example.com/a'], quote, mentions: [{ fid: 3, at: first }, { fid: 2, at: second }], timestampMs };
+  assert.equal(toHex(encodeCastAddData(input)), toHex(MessageData.encode(result.value.data!).finish()));
+  assert.equal(signCastAdd(input, privateKey).hash, `0x${toHex(result.value.hash)}`);
+});
+
+for (const [name, bytes, type] of [['long cast', 900, CastType.LONG_CAST], ['10k cast', 4000, CastType.TEN_K_CAST]] as const) {
+  test(`a ${name} is typed by its size and matches @farcaster/core`, async () => {
+    const text = 'a'.repeat(bytes);
+    assert.equal(castType(text), type);
+    const result = await makeCastAdd({ text, embeds: [], embedsDeprecated: [], mentions: [], mentionsPositions: [], type }, meta039, new NobleEd25519Signer(privateKey));
+    if (result.isErr()) throw result.error;
+    assert.equal(signCastAdd({ fid: 123456, text, timestampMs }, privateKey).hash, `0x${toHex(result.value.hash)}`);
+  });
+}

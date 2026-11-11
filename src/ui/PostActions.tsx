@@ -4,7 +4,7 @@ import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { createClientId } from '../data/openMediaService';
-import { addPostComment, addWebItemComment, interactOnNetwork, loadPostComments, loadWebItemComments, loadWebItemEngagement, networkInteractionsDone, setPostLike, setPostReshare, setWebItemLike, setWebItemReshare } from '../data/interactionService';
+import { addPostComment, addWebItemComment, canUndoOnNetwork, interactOnNetwork, loadNetworkReplies, loadPostComments, loadWebItemComments, loadWebItemEngagement, networkInteractionsDone, setPostLike, undoOnNetwork, setPostReshare, setWebItemLike, setWebItemReshare } from '../data/interactionService';
 import { NetworkId, networks } from '../domain/networkPosts';
 import { applyInteraction, InteractionKind, interactionLabel, interactionRoute, InteractionRoute, maxCommentLength, PostComment, webItemUrl } from '../domain/postInteractions';
 import { PostEngagement, SocialPost } from '../domain/posts';
@@ -66,7 +66,8 @@ export function PostActions({ post, signedIn, children }: { post: SocialPost; si
     if (route.via === 'sign-in') { setNotice('Sign in to like, comment, or reshare.'); return; }
     if (route.via !== 'open-media' && route.via !== 'web' && route.via !== 'network') return;
     const active = Boolean(kind === 'like' ? engagement.liked : engagement.reshared);
-    if (route.via === 'network' && active) { setNotice(`${kind === 'like' ? 'Liked' : 'Reshared'} on ${networks[route.network].displayName}. To undo it, use ${networks[route.network].displayName}.`); return; }
+    // Farcaster lets Open Media take a like or recast back (ADR 0039); other networks are undone there.
+    if (route.via === 'network' && active && !(await canUndoOnNetwork(route.network))) { setNotice(`${kind === 'like' ? 'Liked' : 'Reshared'} on ${networks[route.network].displayName}. To undo it, use ${networks[route.network].displayName}.`); return; }
     const before = engagement;
     setEngagement(applyInteraction(engagement, kind, !active)); setNotice(''); setBusy(kind);
     try {
@@ -76,6 +77,10 @@ export function PostActions({ post, signedIn, children }: { post: SocialPost; si
         const result = await (kind === 'like' ? setWebItemLike(route.url, !active) : setWebItemReshare(route.url, !active));
         setEngagement(result.engagement);
         if (result.note) setNotice(result.note);
+      }
+      else if (active) {
+        await undoOnNetwork(post.id, route.target, kind);
+        setNotice(`${kind === 'like' ? 'Like' : 'Reshare'} taken back on ${networks[route.network].displayName}.`);
       }
       else {
         await interactOnNetwork(post.id, route.target, { kind });
@@ -91,7 +96,7 @@ export function PostActions({ post, signedIn, children }: { post: SocialPost; si
   const openComments = () => {
     const route = routes.comment;
     if (route.via === 'open') { Linking.openURL(route.url).catch(() => undefined); return; }
-    if (route.via === 'open-media' || route.via === 'web' || route.via === 'network') setCommentsOpen((open) => !open);
+    if (route.via === 'open-media' || route.via === 'web' || route.via === 'network' || route.via === 'read') setCommentsOpen((open) => !open);
   };
 
   return <>
@@ -102,7 +107,7 @@ export function PostActions({ post, signedIn, children }: { post: SocialPost; si
       {children}
     </View>
     {notice ? <Text accessibilityLiveRegion="polite" style={styles.notice}>{notice}</Text> : null}
-    {commentsOpen ? <Comments post={post} route={routes.comment} signedIn={signedIn} onCommented={() => setEngagement((current) => current && { ...current, replies: current.replies + 1 })} /> : null}
+    {commentsOpen ? <Comments post={post} route={routes.comment} signedIn={signedIn} onCommented={() => setEngagement((current) => current && { ...current, replies: current.replies + 1 })} onLoaded={(count) => setEngagement((current) => current && count > current.replies ? { ...current, replies: count } : current)} /> : null}
   </>;
 }
 
@@ -138,7 +143,7 @@ function CommentBody({ comment, source, style }: { comment: PostComment; source:
   return <><RichText text={translation.texts[0]} source={source} style={style} /><TranslationNote note={translation.note} /></>;
 }
 
-function Comments({ post, route, signedIn, onCommented }: { post: SocialPost; route: InteractionRoute; signedIn: boolean; onCommented: () => void }) {
+function Comments({ post, route, signedIn, onCommented, onLoaded }: { post: SocialPost; route: InteractionRoute; signedIn: boolean; onCommented: () => void; /** How many replies the network actually has, when it is more than the post's count said. */ onLoaded?: (count: number) => void }) {
   const { colors } = useOpenMediaTheme(); const styles = useThemedStyles(createStyles);
   // Comments kept in Open Media: on its own posts, and on web feed items by article link.
   const native = route.via === 'open-media' || route.via === 'web';
@@ -150,11 +155,15 @@ function Comments({ post, route, signedIn, onCommented }: { post: SocialPost; ro
   const [sent, setSent] = useState('');
   // One client ID per draft keeps a retried send from commenting twice.
   const clientId = useRef(createClientId());
+  // Replies already on the post's own network (Farcaster, ADR 0039) show above the reply box.
+  const networkTarget = route.via === 'network' || route.via === 'read' ? route.target : undefined;
+  const listed = native || networkTarget?.network === 'farcaster';
   useEffect(() => {
-    if (!native) return;
     let live = true;
-    (itemUrl ? loadWebItemComments(itemUrl) : loadPostComments(post.id)).then((items) => { if (live) setComments(items); }).catch((reason) => { if (live) setError(reason instanceof Error ? reason.message : 'Comments didn’t load.'); });
+    const load = native ? (itemUrl ? loadWebItemComments(itemUrl) : loadPostComments(post.id)) : networkTarget ? loadNetworkReplies(networkTarget) : undefined;
+    load?.then((items) => { if (live && items) { setComments(items); if (!native) onLoaded?.(items.length); } }).catch((reason) => { if (live && native) setError(reason instanceof Error ? reason.message : 'Comments didn’t load.'); });
     return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [native, itemUrl, post.id]);
   const send = async () => {
     const text = draft.trim();
@@ -183,16 +192,17 @@ function Comments({ post, route, signedIn, onCommented }: { post: SocialPost; ro
   };
   const placeholder = route.via === 'network' ? `Reply on ${networks[route.network].displayName} as ${route.handle}…` : 'Add a comment…';
   return <View style={styles.comments}>
-    {native && comments === undefined && !error ? <Loader color={colors.textSecondary} /> : null}
-    {native && comments?.length === 0 ? <Text style={styles.commentMeta}>No comments yet.</Text> : null}
+    {listed && comments === undefined && !error ? <Loader color={colors.textSecondary} /> : null}
+    {listed && comments?.length === 0 ? <Text style={styles.commentMeta}>{native ? 'No comments yet.' : 'No replies yet.'}</Text> : null}
     {comments?.map((comment) => <View key={comment.id} style={styles.comment}>
-      <Text numberOfLines={1} style={styles.commentMeta}><Text style={styles.commentAuthor}>{comment.author.displayName}</Text> {comment.author.handle} · {formatRelativeTime(comment.createdAt)}{comment.network === 'farcaster' ? ' · on Farcaster' : comment.farcasterHash ? ' · also on Farcaster' : ''}</Text>
+      <Text numberOfLines={1} style={styles.commentMeta}><Text style={styles.commentAuthor}>{comment.author.displayName}</Text> {comment.author.handle} · {formatRelativeTime(comment.createdAt)}{native && comment.network === 'farcaster' ? ' · on Farcaster' : comment.farcasterHash ? ' · also on Farcaster' : ''}</Text>
       <CommentBody comment={comment} source={comment.network ?? post.provenance.connectorId} style={styles.commentBody} />
     </View>)}
     {!native && route.via === 'network' ? <Text style={styles.commentMeta}>Other replies are on {networks[route.network].displayName}.</Text> : null}
     {error ? <Text accessibilityLiveRegion="assertive" style={styles.error}>{error}</Text> : null}
     {sent ? <Text accessibilityLiveRegion="polite" style={styles.commentMeta}>{sent}</Text> : null}
-    {signedIn ? <View style={styles.commentField}>
+    {route.via === 'read' ? <Text style={styles.commentMeta}><Text accessibilityRole="link" onPress={() => { Linking.openURL(route.url).catch(() => undefined); }} style={styles.commentAuthor}>Reply on {route.name}</Text>, or connect {route.name} in Settings → Cross-posting to reply here.</Text>
+    : signedIn ? <View style={styles.commentField}>
       <TextInput accessibilityLabel={placeholder.replace('…', '')} value={draft} onChangeText={setDraft} placeholder={placeholder} placeholderTextColor={colors.textTertiary} maxLength={maxCommentLength} editable={!sending} returnKeyType="send" submitBehavior="submit" onSubmitEditing={send} style={styles.commentInput} />
       {sending ? <Loader color={colors.textSecondary} /> : null}
     </View> : <Text style={styles.commentMeta}>Sign in to comment.</Text>}

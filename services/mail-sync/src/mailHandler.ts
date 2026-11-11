@@ -7,7 +7,7 @@ import { z } from 'zod';
 
 import { Bridges, BridgesEnv, withoutReadTimes } from './bridges.js';
 import { decryptSecret, encryptSecret } from './crypto.js';
-import { createSignedKeyRequest, FarcasterSignerEnv, farcasterPublishingConfigured, forwardSignedMessage, parseEd25519PublicKey } from './farcasterSigner.js';
+import { approvalRedirect, createSignedKeyRequest, FarcasterSignerEnv, farcasterPublishingConfigured, forwardSignedMessage, parseEd25519PublicKey } from './farcasterSigner.js';
 import { UserFacingError } from './errors.js';
 import { formatCursor, parseCursor } from './mailCursor.js';
 import { markSeenImap, syncImap, testImap } from './imap.js';
@@ -259,8 +259,8 @@ export async function handleMailRequest(request: Request, env: MailEnv): Promise
     // Cross-posting: sign a Farcaster key request for a key generated on the person's device.
     if (request.method === 'POST' && url.pathname === '/v1/cross-posting/farcaster/signed-key-request') {
       if (!await allowed(env.MAIL_CONNECT_RATE_LIMITER, session.userId)) return rateLimited(headers);
-      const { key } = (await readJSON(request)) as { key?: unknown };
-      return json(201, await createSignedKeyRequest(parseEd25519PublicKey(key), env), headers);
+      const { key, redirectUrl } = (await readJSON(request)) as { key?: unknown; redirectUrl?: unknown };
+      return json(201, await createSignedKeyRequest(parseEd25519PublicKey(key), env, fetch, Date.now(), approvalRedirect(redirectUrl)), headers);
     }
 
     if (request.method === 'POST' && url.pathname === '/v1/cross-posting/farcaster/messages') {

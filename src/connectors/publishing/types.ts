@@ -67,6 +67,10 @@ export interface PublishingConnector {
    * A comment returns its published copy; likes and reshares return nothing.
    */
   interact(target: InteractionTarget, interaction: NetworkInteraction, idempotencyKey: string): Promise<PublishedCopy | undefined>;
+  /** Takes back a like or reshare, where the network allows it (Farcaster's ReactionRemove). */
+  undo?(target: InteractionTarget, kind: 'like' | 'reshare'): Promise<void>;
+  /** Deletes a copy this connector published, where the network allows it (Farcaster's CastRemove). */
+  removeCopy?(copy: PublishedCopy): Promise<void>;
 }
 
 /** A like, a reshare (recast, reblog, or repost), or a comment whose text is already fitted to the network. */

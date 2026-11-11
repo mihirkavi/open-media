@@ -47,7 +47,10 @@ test('network posts use the connected account, and otherwise open the post on it
   const connected = { farcaster: '@me' };
   assert.deepEqual(interactionRoute(farcaster, 'like', { signedIn: true, connected }), { via: 'network', network: 'farcaster', target: { network: 'farcaster', fid: 42, hash: castHash }, handle: '@me' });
   assert.deepEqual(interactionRoute(hive, 'like', { signedIn: true, connected }), { via: 'open', url: 'https://peakd.com/@ada/my-first-post', name: 'Hive' });
-  assert.deepEqual(interactionRoute(farcaster, 'comment', { signedIn: false, connected }), { via: 'open', url: farcaster.provenance.canonicalURL, name: 'Farcaster' }, 'signed out never posts to a network');
+  // Signed out never posts to a network; Farcaster's replies can still be read here (ADR 0039).
+  assert.deepEqual(interactionRoute(farcaster, 'comment', { signedIn: false, connected }), { via: 'read', network: 'farcaster', target: { network: 'farcaster', fid: 42, hash: castHash }, url: farcaster.provenance.canonicalURL, name: 'Farcaster' });
+  assert.deepEqual(interactionRoute(farcaster, 'like', { signedIn: false, connected }), { via: 'open', url: farcaster.provenance.canonicalURL, name: 'Farcaster' }, 'signed out never likes on a network');
+  assert.equal(interactionRoute(hive, 'comment', { signedIn: true, connected }).via, 'open', 'networks whose replies aren’t read here still open the post');
   assert.deepEqual(interactionRoute({ ...hive, provenance: { ...hive.provenance, canonicalURL: 'javascript:alert(1)' } }, 'like', { signedIn: true, connected }), { via: 'none' }, 'only HTTPS links are opened');
 });
 

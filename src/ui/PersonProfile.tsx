@@ -5,7 +5,9 @@ import { Image, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-n
 import { Loader } from './Loader';
 
 import { FollowStatus, followPerson, loadPublicPerson, loadTimeline, PublicPerson, resumeUrl, sourcesFor, TimelineSource, unfollowPerson } from '../data/peopleService';
-import { networks } from '../domain/networkPosts';
+import { farcasterFollowCounts, farcasterProfile } from '../connectors/networkFeeds';
+import { followCountsLine } from '../domain/farcasterCasts';
+import { networks, safeHttpsUrl } from '../domain/networkPosts';
 import { ContactCard, contactName, identitiesOf, IdentityRef, refKey, resolveContact, selfCard, selfLabel, shownName } from '../domain/people';
 import { SocialPost } from '../domain/posts';
 import { initialsFor } from '../domain/publicPosts';
@@ -93,6 +95,41 @@ function PersonView({ target, viewerId, onBack, onClose, onMessage }: PersonProf
   const self = Boolean(viewerId && person?.id === viewerId) || mine;
   const locked = Boolean(person && !person.canView);
 
+  // A Farcaster person can be followed from here with the connected Farcaster account (ADR 0039).
+  // The signing code loads only when such a profile opens.
+  const farcasterName = target.ref.kind === 'network' && target.ref.network === 'farcaster' ? handle : undefined;
+  const [farcasterFollow, setFarcasterFollow] = useState<{ fid: number; following: boolean }>();
+  // What their Farcaster profile says about them: bio, link, place and follow counts.
+  const [farcasterAbout, setFarcasterAbout] = useState<{ bio?: string; url?: string; location?: string; counts?: string }>();
+  useEffect(() => {
+    setFarcasterFollow(undefined);
+    setFarcasterAbout(undefined);
+    if (!farcasterName) return;
+    let active = true;
+    (async () => {
+      const farcaster = await import('../connectors/publishing/farcaster');
+      const fid = await farcaster.farcasterFidByName(farcasterName);
+      if (!fid || !active) return;
+      const [profile, counts, following] = await Promise.all([farcasterProfile(fid), farcasterFollowCounts(fid).catch(() => undefined), farcaster.farcasterFollows(fid).catch(() => undefined)]);
+      if (!active) return;
+      setFarcasterAbout({ bio: profile.bio, url: safeHttpsUrl(profile.url), location: profile.location, counts: counts ? followCountsLine(counts) : undefined });
+      if (following !== undefined) setFarcasterFollow({ fid, following });
+    })().catch(() => undefined);
+    return () => { active = false; };
+  }, [farcasterName]);
+  const toggleFarcasterFollow = async () => {
+    if (!farcasterFollow) return;
+    setFollowError('');
+    const before = farcasterFollow;
+    setFarcasterFollow({ ...before, following: !before.following });
+    try {
+      await (await import('../connectors/publishing/farcaster')).followOnFarcaster(before.fid, !before.following);
+    } catch (reason) {
+      setFarcasterFollow(before);
+      setFollowError(reason instanceof Error ? reason.message : 'Farcaster didn’t take that. Try again.');
+    }
+  };
+
   const toggleFollow = async () => {
     if (!person) return;
     setFollowError('');
@@ -116,7 +153,10 @@ function PersonView({ target, viewerId, onBack, onClose, onMessage }: PersonProf
       <VerifiedSeal verification={person?.verified ? personVerification(name) : undefined} size={88}>{avatar ? <Image accessibilityIgnoresInvertColors source={{ uri: avatar }} style={styles.avatar} /> : <View style={[styles.avatar, styles.avatarEmpty]}><Text style={styles.initials}>{initialsFor(name.replace(/^@/, '')) || '?'}</Text></View>}</VerifiedSeal>
       <View style={styles.nameLine}><Text accessibilityRole="header" style={styles.name}>{name}</Text></View>
       <Text style={styles.meta}>{[alsoKnownAs, handle ? `@${handle}` : undefined, where].filter(Boolean).join(' · ')}</Text>
-      {person?.bio ? <Text style={styles.bio}>{person.bio}</Text> : null}
+      {person?.bio ? <Text style={styles.bio}>{person.bio}</Text> : farcasterAbout?.bio ? <Text style={styles.bio}>{farcasterAbout.bio}</Text> : null}
+      {farcasterAbout && (farcasterAbout.counts || farcasterAbout.location || farcasterAbout.url) ? <Text style={styles.small}>
+        {[farcasterAbout.counts, farcasterAbout.location].filter(Boolean).join(' · ')}{farcasterAbout.url ? <>{farcasterAbout.counts || farcasterAbout.location ? ' · ' : ''}<Text accessibilityRole="link" onPress={() => { Linking.openURL(farcasterAbout.url!).catch(() => undefined); }} style={styles.fieldLink}>{farcasterAbout.url.replace(/^https:\/\/(www\.)?/, '').replace(/\/$/, '')}</Text></> : null}
+      </Text> : null}
       <ProfessionalLines profile={person?.professional} />
       {person?.fields.length ? <View style={styles.fields}>{person.fields.map((item) => {
         const href = fieldHref(item.field, item.value);
@@ -128,6 +168,9 @@ function PersonView({ target, viewerId, onBack, onClose, onMessage }: PersonProf
       <View style={styles.actions}>
         {person && viewerId && !self ? <Pressable accessibilityRole="button" accessibilityState={{ selected: Boolean(follow) }} onPress={toggleFollow} style={[styles.button, !follow && styles.primary]}>
           <Text style={follow ? styles.buttonText : styles.primaryText}>{follow === 'accepted' ? 'Following' : follow === 'pending' ? 'Requested' : 'Follow'}</Text>
+        </Pressable> : null}
+        {farcasterFollow ? <Pressable accessibilityRole="button" accessibilityLabel={farcasterFollow.following ? `Following on Farcaster. Unfollow` : `Follow on Farcaster`} accessibilityState={{ selected: farcasterFollow.following }} onPress={toggleFarcasterFollow} style={[styles.button, !farcasterFollow.following && styles.primary]}>
+          <Text style={farcasterFollow.following ? styles.buttonText : styles.primaryText}>{farcasterFollow.following ? 'Following' : 'Follow'}</Text>
         </Pressable> : null}
         {person && onMessage && !self ? <Pressable accessibilityRole="button" onPress={() => onMessage(person.handle)} style={[styles.button, styles.primary]}><Ionicons name="chatbubble-outline" size={16} color={colors.surface} /><Text style={styles.primaryText}>Message</Text></Pressable> : null}
         {external ? <Pressable accessibilityRole="link" onPress={() => { Linking.openURL(external).catch(() => undefined); }} style={styles.button}><Text style={styles.buttonText}>Open on {where}</Text><Ionicons name="open-outline" size={14} color={colors.text} /></Pressable> : null}

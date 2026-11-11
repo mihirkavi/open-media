@@ -1,9 +1,12 @@
 import {
   collapseRepeatedPosts, DesoPostRecord, livepeerPlaybackId, ResolvedVideo, threeSpeakVideoId, FarcasterCastMessage, FarcasterChannel, FarcasterProfile, farcasterProfileFromUserData, HivePostRecord,
   LensPostRecord, minimumLensAccountScore, NetworkId, networks, socialPostFromDeso, socialPostFromFarcaster, socialPostFromHive,
-  socialPostFromLens,
+  socialPostFromLens, quotedPostFromFarcaster,
 } from '../domain/networkPosts';
-import { clipPosts, SocialPost } from '../domain/posts';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+import { mentionedFids, quotedCast } from '../domain/farcasterCasts';
+import { clipPosts, QuotedPost, SocialPost } from '../domain/posts';
 import { fetchBlueskyFeed, fetchMastodonFeed, fetchNostrFeed } from './openNetworkFeeds';
 import { CommunicationConnector, ConnectorDescriptor } from './types';
 
@@ -70,9 +73,55 @@ export function farcasterProfile(fid: number) {
 }
 
 /** Cursor: per-channel Snapchain page tokens; a channel missing from it has no more casts. */
+/**
+ * The casts a page of casts quotes (ADR 0039), read by id from a public Snapchain node, at most 20
+ * per page. A quoted cast that was deleted or can't be read is left out; its quote cast still shows.
+ */
+export async function farcasterQuotes(messages: FarcasterCastMessage[]): Promise<Map<string, QuotedPost>> {
+  const wanted = [...new Map(messages.map((message) => quotedCast(message.data.castAddBody ?? {})).filter((item): item is NonNullable<typeof item> => Boolean(item)).map((item) => [item.hash, item])).values()].slice(0, 20);
+  if (!wanted.length) return new Map();
+  const quoted = (await Promise.all(wanted.map((item) => snapchain<FarcasterCastMessage>(`/v1/castById?fid=${item.fid}&hash=${item.hash}`).catch(() => undefined)))).filter((item): item is FarcasterCastMessage => Boolean(item?.data));
+  const fids = [...new Set([...quoted.map((item) => item.data.fid), ...mentionedFids(quoted.map((item) => item.data.castAddBody))])];
+  const profiles = new Map((await Promise.all(fids.map((fid) => farcasterProfile(fid)))).map((profile) => [profile.fid, profile]));
+  const usernames = farcasterUsernames(profiles);
+  const out = new Map<string, QuotedPost>();
+  for (const item of quoted) {
+    const post = quotedPostFromFarcaster(item, profiles.get(item.data.fid), usernames);
+    if (post) out.set(item.hash.toLowerCase(), post);
+  }
+  return out;
+}
+
+/** Usernames by account, for putting mentions back into cast text. */
+export function farcasterUsernames(profiles: ReadonlyMap<number, FarcasterProfile>): Map<number, string | undefined> {
+  return new Map([...profiles].map(([fid, profile]) => [fid, profile.username]));
+}
+
+/** The connected Farcaster account's number, kept apart from its key so reading never touches the key. */
+export const farcasterAccountFidKey = 'open-media.network.farcaster.fid';
+let followedChannels: { fid: number; at: number; channels: Promise<FarcasterChannel[]> } | undefined;
+
+/**
+ * The channels the Farcaster feed reads (ADR 0039): with a connected account, up to eight channels
+ * that account follows, from Farcaster's public channel API; otherwise the four default channels.
+ * The list is kept for 30 minutes.
+ */
+export async function farcasterFeedChannels(): Promise<FarcasterChannel[]> {
+  const fid = Number(await AsyncStorage.getItem(farcasterAccountFidKey).catch(() => null));
+  if (!Number.isSafeInteger(fid) || fid <= 0) return farcasterChannels;
+  if (!followedChannels || followedChannels.fid !== fid || Date.now() - followedChannels.at > 30 * 60_000) {
+    const channels = requestJSON<{ result?: { channels?: { id?: string; url?: string }[] } }>(`https://api.farcaster.xyz/v1/user-following-channels?fid=${fid}&limit=8`)
+      .then((body) => (body.result?.channels ?? []).filter((item): item is { id: string; url: string } => typeof item.id === 'string' && /^[a-z0-9-]{1,32}$/.test(item.id) && typeof item.url === 'string' && item.url.length <= 256).slice(0, 8).map((item) => ({ id: item.id, parentUrl: item.url, followed: true })));
+    followedChannels = { fid, at: Date.now(), channels };
+  }
+  const followed = await followedChannels.channels.catch(() => []);
+  if (!followed.length) followedChannels = undefined;
+  return followed.length ? followed : farcasterChannels;
+}
+
 export async function fetchFarcasterFeed(cursor?: string, kind: FeedKind = 'feed'): Promise<NetworkFeedPage> {
   const tokens: Record<string, string> | undefined = cursor ? JSON.parse(cursor) : undefined;
-  const channels = farcasterChannels.filter((channel) => !tokens || tokens[channel.id]);
+  const channels = (await farcasterFeedChannels()).filter((channel) => !tokens || tokens[channel.id]);
   // Snapchain returns up to `pageSize` casts from each of its shards (two today), and some are filtered out.
   const perChannel = kind === 'clips' ? 25 : Math.ceil(pageSize / (channels.length * 2)) + 1;
   const pages = await Promise.all(channels.map(async (channel) => {
@@ -84,9 +133,13 @@ export async function fetchFarcasterFeed(cursor?: string, kind: FeedKind = 'feed
   const profiles = new Map<number, FarcasterProfile>();
   // Clips only need authors of casts with a video, so skip the other profile lookups.
   const hasVideo = (message: FarcasterCastMessage) => (message.data.castAddBody?.embeds ?? []).some((embed) => /\.m3u8(\?|$)|stream\.farcaster\.xyz\/v1\/video\//.test(embed.url ?? ''));
-  const fids = [...new Set(pages.flatMap((page) => page.messages.filter((message) => kind === 'feed' || hasVideo(message)).map((message) => message.data.fid)))];
+  const shown = pages.flatMap((page) => page.messages.filter((message) => kind === 'feed' || hasVideo(message)));
+  // Authors, and the people their casts mention, whose names go back into the text (ADR 0039).
+  const fids = [...new Set([...shown.map((message) => message.data.fid), ...mentionedFids(shown.map((message) => message.data.castAddBody))])];
   await Promise.all(fids.map(async (fid) => profiles.set(fid, await farcasterProfile(fid))));
-  const all = collapseRepeatedPosts(pages.flatMap(({ channel, messages }) => messages.map((message) => socialPostFromFarcaster(message, profiles.get(message.data.fid), channel))).filter((post): post is SocialPost => Boolean(post)));
+  const usernames = farcasterUsernames(profiles);
+  const quotes = await farcasterQuotes(shown).catch(() => new Map<string, QuotedPost>());
+  const all = collapseRepeatedPosts(pages.flatMap(({ channel, messages }) => messages.map((message) => socialPostFromFarcaster(message, profiles.get(message.data.fid), channel, usernames, quotes))).filter((post): post is SocialPost => Boolean(post)));
   const posts = kind === 'clips' ? clipPosts(all) : all;
   const next = Object.fromEntries(pages.filter((page) => page.next).map((page) => [page.channel.id, page.next!]));
   return { posts, cursor: Object.keys(next).length ? JSON.stringify(next) : undefined };
@@ -226,3 +279,28 @@ export const networkConnectors: (CommunicationConnector & { id: NetworkId; fetch
   fetchFeed: (cursor?: string) => fetchers[id](cursor, 'feed'),
   fetchClips: (cursor?: string) => fetchers[id](cursor, 'clips'),
 }));
+
+/**
+ * How many accounts follow a Farcaster account, and how many it follows (ADR 0039), counted from
+ * its follow links on a public Snapchain node, a page at a time up to 5,000. Beyond that the count
+ * reads "5,000+".
+ */
+export async function farcasterFollowCounts(fid: number): Promise<{ followers: number; following: number; moreFollowers: boolean; moreFollowing: boolean }> {
+  const count = async (path: string) => {
+    let total = 0;
+    let token: string | undefined;
+    do {
+      const page = await snapchain<{ messages?: unknown[]; nextPageToken?: string }>(`${path}&pageSize=1000${token ? `&pageToken=${encodeURIComponent(token)}` : ''}`);
+      total += page.messages?.length ?? 0;
+      token = page.nextPageToken || undefined;
+    } while (token && total < followCountCap);
+    return token ? { total: followCountCap, more: true } : { total, more: false };
+  };
+  const [followers, following] = await Promise.all([
+    count(`/v1/linksByTargetFid?target_fid=${fid}&link_type=follow`),
+    count(`/v1/linksByFid?fid=${fid}&link_type=follow`),
+  ]);
+  return { followers: followers.total, following: following.total, moreFollowers: followers.more, moreFollowing: following.more };
+}
+
+const followCountCap = 5000;

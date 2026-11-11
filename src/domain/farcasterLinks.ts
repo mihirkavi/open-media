@@ -1,4 +1,5 @@
 import { FarcasterCastMessage, FarcasterProfile, farcasterTimestamp, safeHttpsUrl } from './networkPosts';
+import { textWithMentions } from './farcasterCasts';
 import { PostComment } from './postInteractions';
 import { PostEngagement } from './posts';
 
@@ -79,20 +80,29 @@ export function withOwnAction(activity: FarcasterLinkActivity, fid: number, acti
   return { ...activity, [key]: action.on ? [...others, fid] : others };
 }
 
-/** Farcaster replies as comments, oldest first, leaving out the ones that copy an Open Media comment. */
+/** Farcaster replies as comments, oldest first, leaving out the ones that copy an Open Media comment. `profiles` names authors and mentioned people. */
 export function farcasterLinkComments(replies: FarcasterCastMessage[], profiles: Map<number, FarcasterProfile>, copiedHashes: Iterable<string>): PostComment[] {
   const copied = new Set(copiedHashes);
-  return replies.filter((reply) => !copied.has(reply.hash)).map((reply): PostComment => {
+  return farcasterReplyComments(replies.filter((reply) => !copied.has(reply.hash)), profiles);
+}
+
+/**
+ * Replies to a cast or a link as comments, oldest first (ADR 0039): each with its author and with
+ * mentions put back into the text. Removed and empty casts are left out.
+ */
+export function farcasterReplyComments(replies: FarcasterCastMessage[], profiles: Map<number, FarcasterProfile>): PostComment[] {
+  const usernames = new Map([...profiles].map(([fid, profile]) => [fid, profile.username]));
+  return replies.filter((reply) => reply.data?.type === 'MESSAGE_TYPE_CAST_ADD' && isHash(reply.hash)).map((reply): PostComment => {
     const profile = profiles.get(reply.data.fid);
     const handle = profile?.username ? `@${profile.username}` : `fid:${reply.data.fid}`;
     const displayName = profile?.displayName?.trim() || profile?.username || handle;
     const avatarUrl = safeHttpsUrl(profile?.pfpUrl);
     return {
       id: `farcaster:${reply.hash}`,
-      body: reply.data.castAddBody?.text?.trim() ?? '',
+      body: textWithMentions(reply.data.castAddBody ?? {}, usernames).trim(),
       createdAt: farcasterTimestamp(reply.data.timestamp),
       author: { id: `farcaster:${reply.data.fid}`, handle, displayName, initials: displayName.replace(/^@/, '').slice(0, 2).toUpperCase(), ...(avatarUrl ? { avatarUrl } : {}) },
       network: 'farcaster',
     };
-  }).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }).filter((comment) => comment.body).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
