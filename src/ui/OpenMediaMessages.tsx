@@ -169,14 +169,7 @@ export function OpenMediaMessages({
     <View style={styles.layout}>
       <View style={[styles.list, compact && styles.listCompact]}>
         <View style={styles.heading}>
-          <View style={styles.headingCopy}>
-            <Text style={styles.title}>Messages</Text>
-            <Text style={styles.subtitle}>
-              {messageMode === "matrix"
-                ? "Local Matrix sandbox room."
-                : "Everyone you talk to, in one place."}
-            </Text>
-          </View>
+          <Text accessibilityRole="header" style={styles.title}>Messages</Text>
           {messageMode === "open_media" ? (
             <View style={styles.headingActions}>
               {/* Unread only, as an envelope with a dot like Apple Mail's; filled while it's on. */}
@@ -222,7 +215,7 @@ export function OpenMediaMessages({
           style={styles.filterBar}
           contentContainerStyle={styles.filters}
         >
-          {(["all", "direct", "groups", "favorites"] as const).map(
+          {(["all", "direct", "companies", "groups", "favorites"] as const).map(
             (filter) => (
               <Pressable
                 key={filter}
@@ -240,7 +233,7 @@ export function OpenMediaMessages({
                     peopleFilter === filter && styles.chipTextActive,
                   ]}
                 >
-                  {filter === "direct" ? "People" : capitalize(filter)}
+                  {filterLabel(filter)}
                 </Text>
               </Pressable>
             ),
@@ -324,6 +317,10 @@ export function OpenMediaMessages({
             <Text style={styles.statusText}>No unread messages or email.</Text>
           </View>
           </PullToRefresh>
+        ) : peopleFilter !== "all" && conversations.length ? (
+          <View style={styles.center}>
+            <Text style={styles.statusText}>{`No ${filterLabel(peopleFilter).toLowerCase()} yet`}</Text>
+          </View>
         ) : (
           <PullToRefresh onRefresh={onRefresh} style={styles.pullEmpty} contentContainerStyle={styles.pullEmptyContent}>
           <View style={styles.center}>
@@ -2157,6 +2154,10 @@ function useKeyboardInset(target: React.RefObject<View | null>) {
   return inset;
 }
 
+function filterLabel(filter: PeopleFilter) {
+  return filter === "direct" ? "People" : capitalize(filter);
+}
+
 function capitalize(value: string) {
   return value[0].toUpperCase() + value.slice(1);
 }
@@ -2195,24 +2196,23 @@ function createStyles(colors: ThemeColors) {
     listCompact: { maxWidth: "100%", borderRightWidth: 0 },
     heading: {
       paddingHorizontal: 18,
-      paddingTop: 24,
-      paddingBottom: 13,
+      paddingTop: 18,
+      paddingBottom: 4,
       flexDirection: "row",
       alignItems: "center",
       gap: 12,
     },
-    headingCopy: { flex: 1 },
     title: {
+      flex: 1,
       color: colors.text,
       fontSize: 28,
       fontWeight: "800",
       letterSpacing: -0.8,
     },
-    subtitle: { marginTop: 5, color: colors.textSecondary, fontSize: 12 },
     newButton: {
-      width: 42,
-      height: 42,
-      borderRadius: 21,
+      width: 38,
+      height: 38,
+      borderRadius: 19,
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: colors.text,
@@ -2222,16 +2222,14 @@ function createStyles(colors: ThemeColors) {
     pullEmptyContent: { flexGrow: 1 },
     // A quiet outlined twin of New message; it fills in, like New message, while it's on.
     unreadButton: {
-      width: 42,
-      height: 42,
-      borderRadius: 21,
+      width: 38,
+      height: 38,
+      borderRadius: 19,
       alignItems: "center",
       justifyContent: "center",
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: colors.border,
-      backgroundColor: colors.surface,
+      backgroundColor: colors.chrome,
     },
-    unreadButtonHover: { backgroundColor: colors.chrome },
+    unreadButtonHover: { backgroundColor: colors.border },
     unreadButtonActive: { backgroundColor: colors.text, borderColor: colors.text },
     matrixBadge: {
       minHeight: 30,
@@ -2249,12 +2247,12 @@ function createStyles(colors: ThemeColors) {
       letterSpacing: 0.8,
     },
     filterBar: { flexGrow: 0, flexShrink: 0 },
-    filters: { paddingHorizontal: 18, paddingVertical: 10, gap: 7, alignItems: "center" },
+    filters: { paddingHorizontal: 18, paddingTop: 8, paddingBottom: 10, gap: 5, alignItems: "center" },
     chip: {
-      height: 34,
+      height: 32,
       justifyContent: "center",
-      paddingHorizontal: 13,
-      borderRadius: 17,
+      paddingHorizontal: 11,
+      borderRadius: 16,
       backgroundColor: colors.chrome,
     },
     chipActive: { backgroundColor: colors.text },

@@ -149,4 +149,4 @@ export interface DraftMessage {
   replyToSourceMessageId?: string;
 }
 
-export type PeopleFilter = 'all' | 'direct' | 'groups' | 'favorites';
+export type PeopleFilter = 'all' | 'direct' | 'companies' | 'groups' | 'favorites';

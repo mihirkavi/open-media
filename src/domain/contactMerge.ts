@@ -119,7 +119,7 @@ export function mergeByContact(conversations: Conversation[], cards: ContactCard
       return merged({ id: own?.id ?? 'me', name: selfLabel(profileName), initials: initialsOf(profileName || 'Me') }, mine.map((conversation) => asMe(conversation, profileName)));
     }
     const { card, members } = byCard.get(item)!;
-    return members.length === 1 ? named(members[0], card) : merged({ id: card.id, name: contactName(card) }, members);
+    return members.length === 1 ? named(members[0], card) : merged({ id: card.id, name: contactName(card), company: card.company }, members);
   }).sort((a, b) => Date.parse(b.lastMessageAt) - Date.parse(a.lastMessageAt));
 }
 
@@ -130,14 +130,16 @@ function asMe(conversation: Conversation, profileName: string): Conversation {
 
 function named(conversation: Conversation, card: ContactCard): Conversation {
   const name = contactName(card);
-  if (!name) return { ...conversation, contactId: card.id };
-  return { ...conversation, contactId: card.id, participants: conversation.participants.map((person) => ({ ...person, name, initials: initialsOf(name) })) };
+  // A contact saved as a company makes its conversation a company's, whatever the address looks like.
+  const company = card.company ? conversation.company ?? (name || card.id) : conversation.company;
+  if (!name) return { ...conversation, contactId: card.id, ...(company ? { company } : {}) };
+  return { ...conversation, contactId: card.id, ...(company ? { company } : {}), participants: conversation.participants.map((person) => ({ ...person, name, initials: initialsOf(name) })) };
 }
 
 /** Marks where the conversation with yourself goes in the list (no card id can look like this). */
 const selfKey = '\u0000self';
 
-function merged(card: { id: string; name: string; initials?: string }, members: Conversation[]): Conversation {
+function merged(card: { id: string; name: string; initials?: string; company?: boolean }, members: Conversation[]): Conversation {
   const channels = [...members].sort((a, b) => Date.parse(b.lastMessageAt) - Date.parse(a.lastMessageAt));
   const latest = channels[0];
   const people = channels.map((channel) => channel.participants[0]).filter(Boolean);
@@ -170,6 +172,8 @@ function merged(card: { id: string; name: string; initials?: string }, members: 
     starred: channels.some((channel) => channel.starred) || undefined,
     labels: [...new Set(channels.flatMap((channel) => channel.labels))],
     channels,
+    // A company when saved as one, or when every chat it joins is a company's.
+    ...(card.company || channels.every((channel) => channel.company) ? { company: latest.company ?? name } : {}),
   };
 }
 

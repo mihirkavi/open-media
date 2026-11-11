@@ -328,3 +328,13 @@ test('one chat linked twice (first by its number, then by the Signal account) co
   // A different person's Signal chat still links separately.
   assert.equal(reconcile([card({ phones: ['+15550100009'], links: [byAccount] })], [{ ref: { kind: 'bridge', network: 'signal', id: '+15550100009' }, phones: ['+15550100009'] }]).cards[0].links.length, 2);
 });
+
+test('a contact saved as a company makes its conversations a company’s; a person stays a person', () => {
+  const [email] = normalizeStoredEmail([mail({ from: 'Acme Billing <accounts-team@acme.com>' })]);
+  const [asCompany] = mergeByContact([email], [card({ name: 'Acme', company: true, emails: ['accounts-team@acme.com'] })]);
+  assert.ok(asCompany.company, 'saved as a company');
+  const [asPerson] = mergeByContact([email], [card({ emails: ['accounts-team@acme.com'] })]);
+  assert.equal(asPerson.company, email.company, 'a person card keeps what the address says');
+  const merged = mergeByContact([email, ...whatsapp('acme', 'Acme', Date.parse(now))], [card({ name: 'Acme', company: true, emails: ['accounts-team@acme.com'], phones: [] , links: [] })]);
+  assert.ok(merged.every((conversation) => conversation.contactId !== 'c1' || conversation.company));
+});

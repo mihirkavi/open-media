@@ -3,7 +3,8 @@ import test from 'node:test';
 
 import { mockConversations, mockPeople } from '../data/mockData';
 import { canMergeIdentity, suggestIdentityMatch } from './identityResolution';
-import { filterConversations } from './selectors';
+import { aiConversationId } from './aiChat';
+import { filterConversations, isBusinessNumber, openMediaNoticesId } from './selectors';
 
 test('filters people-first conversations without splitting them by source', () => {
   const results = filterConversations(mockConversations, {
@@ -64,4 +65,38 @@ test('People leaves out company mail', () => {
   assert.deepEqual(people.map((conversation) => conversation.id), ['maya-direct']);
   const all = filterConversations([person, company], { peopleFilter: 'all', query: '', unreadOnly: false });
   assert.equal(all.length, 2, 'All still shows it');
+});
+
+test('People shows individuals only; Companies shows company mail and business texts', () => {
+  const [person] = mockConversations.filter((conversation) => conversation.participants.length === 1);
+  const as = (id: string, change: Partial<typeof person>, phone?: string) => ({
+    ...person, id, ...change,
+    participants: [{ ...person.participants[0], id, identities: phone ? [{ id: `${id}-phone`, personId: id, kind: 'phone' as const, value: phone, source: 'sms' as const, label: 'Mobile', verifiedByUser: false }] : person.participants[0].identities }],
+  });
+  const list = [
+    as('friend', {}, '+91 98765 43210'),
+    as('newsletter', { company: 'example.com' }),
+    as('bank-short-code', {}, '57575'),
+    as('bank-sender-id', {}, 'AX-HDFCBK'),
+  ];
+  const ids = (peopleFilter: 'direct' | 'companies') => filterConversations(list, { peopleFilter, query: '', unreadOnly: false }).map((item) => item.id);
+  assert.deepEqual(ids('direct'), ['friend']);
+  assert.deepEqual(ids('companies'), ['newsletter', 'bank-short-code', 'bank-sender-id']);
+});
+
+test('business numbers: short codes and named senders, never a full phone number', () => {
+  assert.equal(isBusinessNumber('57575'), true);
+  assert.equal(isBusinessNumber('VM-AMAZON'), true);
+  assert.equal(isBusinessNumber('+1 555 010 0142'), false);
+  assert.equal(isBusinessNumber('+91 98765 43210'), false);
+  assert.equal(isBusinessNumber(''), false);
+});
+
+test('Open Media AI is not a person, and Open Media’s notices account is a company', () => {
+  const [person] = mockConversations.filter((conversation) => conversation.participants.length === 1);
+  const ai = { ...person, id: aiConversationId };
+  const notices = { ...person, id: 'notices', participants: [{ ...person.participants[0], id: openMediaNoticesId }] };
+  const ids = (peopleFilter: 'direct' | 'companies') => filterConversations([ai, notices], { peopleFilter, query: '', unreadOnly: false }).map((item) => item.id);
+  assert.deepEqual(ids('direct'), []);
+  assert.deepEqual(ids('companies'), ['notices']);
 });
