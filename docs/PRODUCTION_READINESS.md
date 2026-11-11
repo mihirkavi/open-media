@@ -20,6 +20,7 @@ This checklist defines “production ready” for the current onboarding private
 ## Contact resolver and contact discovery (ADR 0037; deployed 2026-11-10)
 
 - [x] Owner said "yes please push and deploy". Pushed `a40b02e` to `main`. Applied `20261123120000_contact_discovery.sql` with `npx supabase db push --linked` after a dry run (only that migration was pending). Built the web app and deployed Worker `convo-mail-sync` version `c97d9e8b-5df5-4d0a-b366-f8e0aabe3333` (rollback `f940b35e-3c11-4a87-aa3f-242c84368a44`) with Node 22 (Wrangler refuses Node 20). Live: `/v1/posts` 200; `POST /v1/me/contacts/discover` without a token 401.
+- [x] Owner said "push and deploy" for the reply-thread fix `48178c9`. A first deploy from the shared working folder (version `a1193e30-caec-48c3-8fea-d66e78780742`) also picked up another session's then-uncommitted ADR 0038 work, so `48178c9` was rebuilt from a clean checkout and deployed as version `bdefbf04-5e56-4e72-9f59-b48d4fad9c5f` (rollback `c97d9e8b-5df5-4d0a-b366-f8e0aabe3333`). ADR 0038 (`b9e2417`) is pushed but not deployed. Live: openmedia.site 200 and serves the clean build's bundle, `/v1/posts` 200, discover without a token 401. **Deploy from a clean checkout of a pushed commit**, never the shared working folder.
 
 ## Passwords and passkeys (ADR 0034; deployed 2026-11-07)
 
