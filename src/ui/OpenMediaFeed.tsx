@@ -1,6 +1,7 @@
 import Ionicons from './Icon';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Image, KeyboardAvoidingView, Linking, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useThemedStyles } from './useThemedStyles';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FlatList, Image, KeyboardAvoidingView, Linking, ListRenderItem, NativeScrollEvent, NativeSyntheticEvent, Platform, Pressable, StyleSheet, View, ViewToken } from 'react-native';
 import { Loader } from './Loader';
 import { EventMeta, ListingCard, ListingFields, PaidPostBlock, PaidPostFields, PaidPostInput } from './ListingCards';
 import { PaymentSheet, PaymentTarget } from './PaymentSheet';
@@ -29,6 +30,7 @@ import { formatRelativeTime, maxPostLength } from '../domain/publicPosts';
 import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { ClipVideo } from './ClipVideo';
+import { reportVisibleMedia, usePlayback } from './usePlayback';
 import { canRecordVideo, pickVideo } from './pickVideo';
 import { useCrossPosting } from './useCrossPosting';
 import { TranslationNote, useTranslation } from './useTranslation';
@@ -69,7 +71,7 @@ export interface FeedViewProps {
 }
 
 export function FeedView({ lens, lenses, onLensChange, lensContext, posts, loading, error, hasMore, onRetry, onLoadMore, sources, loadingMore = false, pendingCount = 0, onShowPending, viewer, composing = false, onComposingChange, onPublished, onDeletePost, onReportPost }: FeedViewProps) {
-  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors } = useOpenMediaTheme(); const styles = useThemedStyles(createStyles);
   // Upcoming public events are part of the mixed Feed: the lens filters and ranks them with every
   // other post, so the person's own algorithm decides where (and whether) they appear.
   const events = useUpcomingEvents(Boolean(sources));
@@ -102,7 +104,7 @@ export function FeedView({ lens, lenses, onLensChange, lensContext, posts, loadi
   const showComposer = viewer && onComposingChange && onPublished;
   // Continuous and live: older posts load as the reader nears the end; new posts slide in only while
   // the reader is at the very top, otherwise a pill offers them so nothing moves under the reader.
-  const scroller = useRef<ScrollView>(null);
+  const scroller = useRef<FlatList<SocialPost>>(null);
   const [atTop, setAtTop] = useState(true);
   useEffect(() => { if (atTop && pendingCount && onShowPending) { onShowPending(); rerank(); } }, [atTop, pendingCount, onShowPending, rerank]);
   const canLoadMore = !loading && !loadingMore && !error && hasMore;
@@ -121,23 +123,51 @@ export function FeedView({ lens, lenses, onLensChange, lensContext, posts, loadi
     const timer = setTimeout(() => { extraPages.current.count += 1; onLoadMore(); }, 1500);
     return () => clearTimeout(timer);
   }, [lens.id, canLoadMore, ordered.length, posts.length, onLoadMore]);
-  const jumpToNew = () => { onShowPending?.(); rerank(); scroller.current?.scrollTo({ y: 0, animated: true }); };
+  const jumpToNew = () => { onShowPending?.(); rerank(); scroller.current?.scrollToOffset({ offset: 0, animated: true }); };
   const retry = () => { rerank(); onRetry(); };
+  const rowContext = useMemo(() => ({ lens, lensContext: rankingContext, viewer, onDeletePost, onReportPost }), [lens, rankingContext, viewer, onDeletePost, onReportPost]);
+  const renderPost = useCallback<ListRenderItem<SocialPost>>(({ item }) => <PostCard post={item} mode={rowContext.lens} lensContext={rowContext.lensContext} viewer={rowContext.viewer} onDelete={rowContext.onDeletePost} onReport={rowContext.onReportPost} />, [rowContext]);
+  // A playing video that scrolls out of view pauses (FlatList requires these two to never change).
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => reportVisibleMedia(viewableItems.map((token) => String(token.key)))).current;
   // iOS moves focused fields above the keyboard through the scroll view's insets; Android (edge to edge) needs the screen to shrink.
   return <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'android' ? 'height' : undefined}>
   {pendingCount > 0 && !atTop ? <Pressable accessibilityRole="button" accessibilityLabel={`Show ${pendingCount} new ${pendingCount === 1 ? 'post' : 'posts'}`} onPress={jumpToNew} style={styles.newPosts}><Ionicons name="arrow-up" size={14} color={colors.surface} /><Text style={styles.newPostsText}>{pendingCount} new {pendingCount === 1 ? 'post' : 'posts'}</Text></Pressable> : null}
-  <ScrollView ref={scroller} onScroll={onScroll} scrollEventThrottle={64} style={styles.screen} contentContainerStyle={styles.stream} keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
+  {/* Virtualized (not ScrollView + map): rows far off screen unmount, so memory and render cost
+      stay flat however far someone scrolls, and their videos give their players back. */}
+  <FlatList
+    ref={scroller}
+    data={ordered}
+    keyExtractor={postKey}
+    renderItem={renderPost}
+    extraData={rowContext}
+    onScroll={onScroll}
+    scrollEventThrottle={64}
+    onViewableItemsChanged={onViewableItemsChanged}
+    viewabilityConfig={viewability}
+    initialNumToRender={6}
+    maxToRenderPerBatch={6}
+    windowSize={7}
+    style={styles.screen}
+    contentContainerStyle={styles.stream}
+    keyboardShouldPersistTaps="handled"
+    automaticallyAdjustKeyboardInsets
+    ListHeaderComponent={<>
     <View style={styles.header}><View style={styles.headerCopy}><Text style={styles.title}>Feed</Text><Text style={styles.subtitle}>{subtitle}</Text></View><FeedPicker value={lens.id} lenses={lenses} onChange={onLensChange} /></View>
     {showComposer ? <Composer viewer={viewer} open={composing} onOpenChange={onComposingChange} onPublished={onPublished} /> : null}
     {!error && unreachable.length ? <View style={styles.sourceNotice}><Text accessibilityLiveRegion="polite" style={styles.sourceNoticeText}>{unreachable.map((item) => sourceName(item.id)).join(', ')} {unreachable.length === 1 ? 'isn’t' : 'aren’t'} loading right now. Everything else is up to date.</Text><Pressable accessibilityRole="button" onPress={retry} style={styles.sourceNoticeButton}><Text style={styles.statusButtonText}>Retry</Text></Pressable></View> : null}
-    {ordered.map((post) => <PostCard key={post.id} post={post} mode={lens} lensContext={rankingContext} viewer={viewer} onDelete={onDeletePost} onReport={onReportPost} />)}
+    </>}
+    ListFooterComponent={<>
     {loading || loadingMore ? <View style={styles.status}><Loader color={colors.text} /></View> : null}
     {!loading && error ? <View style={styles.status}><Text accessibilityLiveRegion="assertive" style={styles.statusText}>{error}</Text><Pressable accessibilityRole="button" onPress={retry} style={styles.statusButton}><Text style={styles.statusButtonText}>Try again</Text></Pressable></View> : null}
     {!loading && !loadingMore && !error && !ordered.length ? <View style={styles.status}><Ionicons name="newspaper-outline" size={26} color={colors.textSecondary} /><Text style={styles.emptyTitle}>{posts.length ? `Nothing here fits ${lens.name}` : 'No public posts yet'}</Text><Text style={styles.statusText}>{posts.length ? `${lens.name} keeps only posts that match its rules. Choose Relevant or Raw to see everything, or older posts may fit.` : viewer ? 'Be the first to share something.' : 'Sign in to share the first one.'}</Text></View> : null}
     {canLoadMore ? <Pressable accessibilityRole="button" onPress={onLoadMore} style={[styles.statusButton, styles.loadMore]}><Text style={styles.statusButtonText}>Load older posts</Text></Pressable> : null}
-  </ScrollView>
+    </>}
+  />
   </KeyboardAvoidingView>;
 }
+
+const postKey = (post: SocialPost) => post.id;
+const viewability = { itemVisiblePercentThreshold: 25 };
 
 function useUpcomingEvents(enabled: boolean): SocialPost[] {
   const [events, setEvents] = useState<SocialPost[]>([]);
@@ -155,7 +185,7 @@ type PublishStage = 'idle' | 'preparing' | 'uploading' | 'publishing' | 'crossPo
 
 /** Writing happens right in the feed: tap the row to expand it, publish, and it collapses. */
 function Composer({ viewer, open, onOpenChange, onPublished }: { viewer: FeedViewer; open: boolean; onOpenChange: (open: boolean) => void; onPublished: (post: SocialPost) => void }) {
-  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors } = useOpenMediaTheme(); const styles = useThemedStyles(createStyles);
   const [body, setBody] = useState(''); const [stage, setStage] = useState<PublishStage>('idle'); const [error, setError] = useState('');
   const busy = stage !== 'idle';
   // One client ID per draft keeps retries idempotent on the server and on every network.
@@ -255,7 +285,7 @@ function Composer({ viewer, open, onOpenChange, onPublished }: { viewer: FeedVie
     {offer ? <ListingFields value={offer} onChange={setOffer} onRemove={() => setOffer(undefined)} disabled={busy} /> : null}
     {paidPart ? <PaidPostFields value={paidPart} onChange={setPaidPart} onRemove={() => setPaidPart(undefined)} disabled={busy} /> : null}
     {video ? <View style={styles.attachment}>
-      <FeedVideo uri={video.previewUri} streaming="progressive" posterUrl={undefined} aspectRatio={video.width / video.height} altText="Your video" />
+      <FeedVideo id={`draft:${video.previewUri}`} uri={video.previewUri} streaming="progressive" posterUrl={undefined} aspectRatio={video.width / video.height} altText="Your video" />
       <View style={styles.attachmentRow}>
         <Text style={styles.attachmentMeta}>{formatDuration(video.durationSeconds)} · {formatBytes(video.bytes.length)}{video.removedMetadata ? ' · Location and device details removed' : ''}</Text>
         <Pressable accessibilityRole="button" accessibilityLabel="Remove video" disabled={busy} onPress={() => setVideo(undefined)} style={styles.menuChip}><Text style={styles.menuText}>Remove</Text></Pressable>
@@ -323,7 +353,7 @@ function listFormat(items: string[]) {
  * past three choices. Other saved lenses are reached by name from Search.
  */
 export function FeedPicker({ value, lenses = [], onChange }: { value: string; lenses?: FeedLens[]; onChange: (id: string) => void }) {
-  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors } = useOpenMediaTheme(); const styles = useThemedStyles(createStyles);
   // Your tuned copy of Relevant (ADR 0021) takes Relevant's place, so there is one Relevant to choose.
   // Open Media's own Relevant comes back from Search (“original relevant”) or when the copy is removed.
   const own = value === 'relevant' ? undefined : lenses.find((item) => item.id === ownCopyId(relevantLens));
@@ -338,12 +368,15 @@ export function FeedPicker({ value, lenses = [], onChange }: { value: string; le
 type PostCardProps = { post: SocialPost; mode: FeedMode | FeedLens; lensContext?: LensContext; viewer?: FeedViewer; onDelete?: (postId: string) => Promise<void>; onReport?: (postId: string, reason: PostReportReason) => Promise<void> };
 
 /** One post in the Feed or Search. Items from web feeds get their own news card (ADR 0024). */
-export function PostCard(props: PostCardProps) {
+/** Memoized: a Feed holds hundreds of these, and a new post or a poll must not re-render all of them. */
+export const PostCard = memo(function PostCard(props: PostCardProps) {
   return props.post.webFeed ? <WebFeedCard post={props.post} mode={props.mode} lensContext={props.lensContext} signedIn={Boolean(props.viewer)} /> : <NetworkPostCard {...props} />;
-}
+});
 
 function NetworkPostCard({ post, mode, lensContext, viewer, onDelete, onReport }: PostCardProps) {
-  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]); const [expanded, setExpanded] = useState(false); const [menuOpen, setMenuOpen] = useState(false); const explanation = explainFeedPost(post, mode, lensContext);
+  const { colors } = useOpenMediaTheme(); const styles = useThemedStyles(createStyles); const [expanded, setExpanded] = useState(false); const [menuOpen, setMenuOpen] = useState(false);
+  // Only built when “Why this?” is open: scoring every post on every render was wasted work.
+  const explanation = useMemo(() => expanded ? explainFeedPost(post, mode, lensContext) : undefined, [expanded, post, mode, lensContext]);
   const native = post.provenance.connectorId === 'open-media';
   const own = Boolean(native && viewer && viewer.id === post.author.id);
   // People the viewer saved show under the name they saved (ADR 0023).
@@ -381,14 +414,14 @@ function NetworkPostCard({ post, mode, lensContext, viewer, onDelete, onReport }
     {paid ? <PaidPostBlock paid={paid} onUnlock={native && !own && viewer && !paid.unlocked ? () => setPayTarget({ kind: 'paid_post', postId: post.id, paid }) : undefined} /> : null}
     {payTarget ? <PaymentSheet target={payTarget} recipient={post.author.handle.replace(/^@/, '')} onClose={() => setPayTarget(undefined)} onPaid={payTarget.kind === 'paid_post' ? reloadPaid : undefined} /> : null}
     {long ? <Pressable accessibilityRole="button" accessibilityState={{ expanded: showAll }} onPress={() => setShowAll((value) => !value)} style={styles.showMore}><Text style={styles.whyText}>{showAll ? 'Show less' : 'Show more'}</Text></Pressable> : null}
-    {post.event ? null : image?.kind === 'image' && image.url ? <PostImage url={image.url} altText={image.altText} /> : image?.kind === 'video' && image.url ? <FeedVideo uri={image.url} streaming={image.streaming} posterUrl={image.posterUrl} aspectRatio={image.aspectRatio} altText={image.altText} /> : image ? <View accessibilityLabel={image.altText} style={[styles.media, post.kind === 'video' && styles.video]}><Ionicons name={post.kind === 'video' ? 'play' : 'image-outline'} size={30} color="#FFFFFF" /><Text style={styles.alt}>{image.altText}</Text></View> : null}
+    {post.event ? null : image?.kind === 'image' && image.url ? <PostImage url={image.url} altText={image.altText} /> : image?.kind === 'video' && image.url ? <FeedVideo id={post.id} uri={image.url} streaming={image.streaming} posterUrl={image.posterUrl} aspectRatio={image.aspectRatio} altText={image.altText} /> : image ? <View accessibilityLabel={image.altText} style={[styles.media, post.kind === 'video' && styles.video]}><Ionicons name={post.kind === 'video' ? 'play' : 'image-outline'} size={30} color="#FFFFFF" /><Text style={styles.alt}>{image.altText}</Text></View> : null}
     <PostActions post={post} signedIn={Boolean(viewer)}>{registration && registerUrl ? <RegisterAction url={registerUrl} label={registration.label} short={registration.short} /> : null}<View style={styles.trailing}>{original ? <OriginalLink url={original} label={`Open on ${sourceName(post.provenance.connectorId)}`} accessibilityLabel={`Open this post on ${sourceName(post.provenance.connectorId)}`} /> : null}<Pressable accessibilityRole="button" accessibilityState={{ expanded }} onPress={() => setExpanded((value) => !value)} style={styles.why}><Text style={styles.whyText}>Why this?</Text></Pressable></View></PostActions>
-    {expanded ? <View style={styles.explanation}><Text style={styles.explanationTitle}>Why you’re seeing this</Text>{explanation.used.map((item) => <Text key={item} style={styles.explanationItem}>✓ {item}</Text>)}<Text style={styles.explanationSubtitle}>How {explanation.lens} works</Text><Text style={styles.explanationItem}>{explanation.rules.join(' · ')}</Text><Text style={styles.explanationSubtitle}>How {explanation.lens} weighed this post</Text>{explanation.scoring.map((item) => <Text key={item} style={styles.explanationItem}>{item}</Text>)}<Text style={styles.notUsed}>{explanation.tuneHint}</Text>{explanation.filters.length ? <><Text style={styles.explanationSubtitle}>Filters applied to {sourceName(post.provenance.connectorId)}</Text>{explanation.filters.map((item) => <Text key={item} style={styles.explanationItem}>· {item}</Text>)}<Text style={styles.notUsed}>Filtered posts stay on {sourceName(post.provenance.connectorId)}; Open Media only leaves them out of this Feed.{network ? ` ${network.about}` : ''}</Text></> : null}{explanation.checks?.map((item) => <Text key={item} style={styles.explanationItem}>✓ {item}</Text>)}<Text style={styles.notUsed}>Not used: {explanation.notUsed.join(', ')}</Text></View> : null}
+    {expanded && explanation ? <View style={styles.explanation}><Text style={styles.explanationTitle}>Why you’re seeing this</Text>{explanation.used.map((item) => <Text key={item} style={styles.explanationItem}>✓ {item}</Text>)}<Text style={styles.explanationSubtitle}>How {explanation.lens} works</Text><Text style={styles.explanationItem}>{explanation.rules.join(' · ')}</Text><Text style={styles.explanationSubtitle}>How {explanation.lens} weighed this post</Text>{explanation.scoring.map((item) => <Text key={item} style={styles.explanationItem}>{item}</Text>)}<Text style={styles.notUsed}>{explanation.tuneHint}</Text>{explanation.filters.length ? <><Text style={styles.explanationSubtitle}>Filters applied to {sourceName(post.provenance.connectorId)}</Text>{explanation.filters.map((item) => <Text key={item} style={styles.explanationItem}>· {item}</Text>)}<Text style={styles.notUsed}>Filtered posts stay on {sourceName(post.provenance.connectorId)}; Open Media only leaves them out of this Feed.{network ? ` ${network.about}` : ''}</Text></> : null}{explanation.checks?.map((item) => <Text key={item} style={styles.explanationItem}>✓ {item}</Text>)}<Text style={styles.notUsed}>Not used: {explanation.notUsed.join(', ')}</Text></View> : null}
   </View>;
 }
 
 function PostMenu({ own, listing, onDelete, onReport, onTip, tipTo }: { own: boolean; listing: boolean; onDelete: () => Promise<void>; onReport: (reason: PostReportReason) => Promise<void>; onTip?: () => void; tipTo?: string }) {
-  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors } = useOpenMediaTheme(); const styles = useThemedStyles(createStyles);
   const [busy, setBusy] = useState(false); const [notice, setNotice] = useState(''); const [confirming, setConfirming] = useState(false);
   const run = async (action: () => Promise<void>, done: string) => { setBusy(true); setNotice(''); try { await action(); setNotice(done); } catch (reason) { setNotice(reason instanceof Error ? reason.message : 'That didn’t work. Try again.'); } finally { setBusy(false); } };
   return <View style={styles.menu}>
@@ -402,27 +435,33 @@ function PostMenu({ own, listing, onDelete, onReport, onTip, tipTo }: { own: boo
 }
 
 function Avatar({ initials, imageUrl }: { initials: string; imageUrl?: string }) {
-  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]); const [failed, setFailed] = useState(false);
+  const { colors } = useOpenMediaTheme(); const styles = useThemedStyles(createStyles); const [failed, setFailed] = useState(false);
   const url = failed ? undefined : safeHttpsUrl(imageUrl);
   return <View style={styles.avatar}>{url ? <Image source={{ uri: url }} accessibilityIgnoresInvertColors onError={() => setFailed(true)} style={styles.avatarImage} /> : <Text style={styles.avatarText}>{initials}</Text>}</View>;
 }
 
-/** Feed videos show their poster until tapped, then play inline with sound; tap again to pause. */
-function FeedVideo({ uri, streaming, posterUrl, aspectRatio, altText }: { uri: string; streaming?: 'hls' | 'progressive'; posterUrl?: string; aspectRatio: number; altText: string }) {
-  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
-  const [started, setStarted] = useState(false); const [playing, setPlaying] = useState(false); const [failed, setFailed] = useState(false);
+/**
+ * Feed videos show their poster until tapped, then play inline with sound; tap again to pause.
+ * Players come from the shared playback store (`usePlayback`): one plays at a time, at most two
+ * exist, and one that scrolls away pauses. Before this, every video ever started kept its player
+ * (and kept playing off screen), which is what made scrolling stall after a few videos.
+ */
+function FeedVideo({ id, uri, streaming, posterUrl, aspectRatio, altText }: { id: string; uri: string; streaming?: 'hls' | 'progressive'; posterUrl?: string; aspectRatio: number; altText: string }) {
+  const styles = useThemedStyles(createStyles);
+  const { playing, live, toggle } = usePlayback(id);
+  const [failed, setFailed] = useState(false);
   const onError = useCallback(() => setFailed(true), []);
   if (failed) return null;
   const frame = [styles.feedVideo, { aspectRatio: Math.max(aspectRatio, 4 / 5) }];
-  return <Pressable accessibilityRole="button" accessibilityLabel={`${playing ? 'Pause' : 'Play'} video: ${altText}`} onPress={() => { setStarted(true); setPlaying((value) => !value); }} style={frame}>
-    {started ? <ClipVideo uri={uri} streaming={streaming} posterUrl={posterUrl} active={playing} muted={false} contentFit="contain" onError={onError} style={StyleSheet.absoluteFill} /> : posterUrl ? <Image source={{ uri: posterUrl }} resizeMode="contain" style={StyleSheet.absoluteFill} /> : null}
+  return <Pressable accessibilityRole="button" accessibilityLabel={`${playing ? 'Pause' : 'Play'} video: ${altText}`} onPress={toggle} style={frame}>
+    {live ? <ClipVideo uri={uri} streaming={streaming} posterUrl={posterUrl} active={playing} muted={false} contentFit="contain" onError={onError} style={StyleSheet.absoluteFill} /> : posterUrl ? <Image source={{ uri: posterUrl }} resizeMode="contain" style={StyleSheet.absoluteFill} /> : null}
     {!playing ? <View style={styles.feedVideoPlay}><Ionicons name="play" size={30} color="#FFFFFF" /></View> : null}
   </Pressable>;
 }
 
 /** Shared images keep their own shape (within limits) and disappear quietly if they fail to load. */
 function PostImage({ url, altText }: { url: string; altText: string }) {
-  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors } = useOpenMediaTheme(); const styles = useThemedStyles(createStyles);
   const [aspectRatio, setAspectRatio] = useState(4 / 3); const [failed, setFailed] = useState(false);
   useEffect(() => { let live = true; Image.getSize(url, (width, height) => { if (live && width && height) setAspectRatio(Math.min(2, Math.max(0.8, width / height))); }, () => undefined); return () => { live = false; }; }, [url]);
   if (failed) return null;

@@ -1,4 +1,5 @@
 import { createContext, Fragment, useContext, useMemo } from 'react';
+import { useThemedStyles } from './useThemedStyles';
 import { Linking, Platform, StyleProp, StyleSheet, TextStyle } from 'react-native';
 
 import { mentionRef, tokenizeRichText } from '../domain/richText';
@@ -54,7 +55,7 @@ export function Highlighted({ text }: { text: string }) {
 }
 
 export function RichText({ text, source, style, numberOfLines, selectable = true }: { text: string; source: string; style?: StyleProp<TextStyle>; numberOfLines?: number; selectable?: boolean }) {
-  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors } = useOpenMediaTheme(); const styles = useThemedStyles(createStyles);
   const people = usePeople();
   const tokens = useMemo(() => tokenizeRichText(text), [text]);
   const terms = useContext(SearchHighlight);

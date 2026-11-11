@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import type { ClipVideoProps } from './ClipVideo';
+import { trackResource } from './diagnostics';
 
 /**
  * Web: a plain <video>. Safari plays HLS itself; other browsers get hls.js, loaded only when an HLS
@@ -10,6 +11,7 @@ import type { ClipVideoProps } from './ClipVideo';
 export function ClipVideo({ uri, streaming, posterUrl, active, muted, contentFit = 'cover', onError, style }: ClipVideoProps) {
   const video = useRef<HTMLVideoElement>(null);
   const errored = useRef(false);
+  useEffect(() => trackResource('video-player'), []);
 
   useEffect(() => {
     const element = video.current;

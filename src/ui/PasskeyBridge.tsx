@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useThemedStyles } from './useThemedStyles';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { credentialToJSON, encodeBridge, passkeyBridgeReturn, publicKeyFromJSON, readBridgeRequest, type PasskeyBridgeResponse } from '../domain/passkeyBridge';
@@ -15,7 +16,7 @@ import { Text } from './Text';
  */
 export function PasskeyBridge() {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const request = useMemo(() => readBridgeRequest(typeof window === 'undefined' ? '' : window.location.hash), []);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');

@@ -1,4 +1,5 @@
 import Ionicons from './Icon';
+import { useThemedStyles } from './useThemedStyles';
 import { useMemo, useState } from 'react';
 import { Pressable, SectionList, StyleSheet, useWindowDimensions, View } from 'react-native';
 
@@ -26,7 +27,7 @@ type Panel = 'import' | undefined;
 
 export function ContactsPage({ handle, onBack }: { handle: string; onBack?: () => void }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const { width } = useWindowDimensions();
   const people = usePeople();
   const contacts = people?.contacts;

@@ -1,4 +1,5 @@
 import Ionicons from './Icon';
+import { useThemedStyles } from './useThemedStyles';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from './Text';
@@ -35,7 +36,7 @@ const riskText = {
  */
 export function BridgedChatsSettings() {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const [statuses, setStatuses] = useState<BridgeNetworkStatus[] | null>(null);
   const [loadError, setLoadError] = useState('');
   const [flow, setFlow] = useState<Flow | null>(null);
@@ -174,7 +175,7 @@ function FlowCard({ flow, phone, error, onBegin, onClose, onSubmit, onValues }: 
   onValues: (values: Record<string, string>) => void;
 }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const step = flow.step;
   const guide = chatNetwork(flow.network);
 
@@ -278,7 +279,7 @@ function FlowCard({ flow, phone, error, onBegin, onClose, onSubmit, onValues }: 
 
 function Button({ label, onPress, primary, danger, disabled }: { label: string; onPress: () => void; primary?: boolean; danger?: boolean; disabled?: boolean }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   return <Pressable accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={onPress} style={[styles.button, primary && styles.primary, disabled && styles.disabled]}>
     <Text style={[styles.buttonText, primary && styles.primaryText, danger && styles.danger]}>{label}</Text>
   </Pressable>;

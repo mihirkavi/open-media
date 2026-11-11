@@ -4,6 +4,7 @@
  * nothing is ever lost.
  */
 import { useMemo, useState } from "react";
+import { useThemedStyles } from './useThemedStyles';
 import { Image, Linking, Pressable, StyleSheet, View } from "react-native";
 import { MessageMedia } from "../domain/messageMedia";
 import { ThemeColors } from "../theme";
@@ -15,7 +16,7 @@ const stickerSize = 132;
 
 export function MessageMediaView({ media, outbound, pending }: { media: MessageMedia; outbound: boolean; pending?: boolean }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const [failed, setFailed] = useState(false);
   const [loaded, setLoaded] = useState(false);
   if (failed) {

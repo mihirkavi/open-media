@@ -1,4 +1,5 @@
 import Ionicons from './Icon';
+import { useThemedStyles } from './useThemedStyles';
 import { useEffect, useMemo, useState } from 'react';
 import { Linking, Pressable, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from './Text';
@@ -31,7 +32,7 @@ const keyShapes: Record<string, string> = { openai: 'sk-…', anthropic: 'sk-ant
  * Only its provider and last four characters are shown.
  */
 export function AiModelsSettings({ signedIn }: { signedIn: boolean }) {
-  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors } = useOpenMediaTheme(); const styles = useThemedStyles(createStyles);
   const [summary, setSummary] = useState<AiKeysSummary>();
   const [provider, setProvider] = useState('anthropic');
   const [key, setKey] = useState('');

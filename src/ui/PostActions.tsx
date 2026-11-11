@@ -1,4 +1,5 @@
 import Ionicons from './Icon';
+import { useThemedStyles } from './useThemedStyles';
 import { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 
@@ -26,7 +27,7 @@ const zero: PostEngagement = { replies: 0, reposts: 0, likes: 0, liked: false, r
  * post on its network. `children` (the post's links) follow the icons.
  */
 export function PostActions({ post, signedIn, children }: { post: SocialPost; signedIn: boolean; children?: ReactNode }) {
-  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors } = useOpenMediaTheme(); const styles = useThemedStyles(createStyles);
   const native = post.provenance.connectorId === 'open-media';
   const item = useMemo(() => webItemUrl(post), [post]);
   const [engagement, setEngagement] = useState<PostEngagement | undefined>(post.engagement ?? (native || item ? zero : undefined));
@@ -106,7 +107,7 @@ export function PostActions({ post, signedIn, children }: { post: SocialPost; si
 }
 
 function Action({ icon, activeIcon, active, count, route, label, busy = false, expanded, onPress }: { icon: keyof typeof Ionicons.glyphMap; activeIcon: keyof typeof Ionicons.glyphMap; active: boolean; count: number; route: InteractionRoute; label: string; busy?: boolean; expanded?: boolean; onPress: () => void }) {
-  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors } = useOpenMediaTheme(); const styles = useThemedStyles(createStyles);
   const content = <><Ionicons name={active ? activeIcon : icon} size={17} color={active ? colors.text : colors.textSecondary} /><Text style={[styles.actionText, active && styles.actionTextActive]}>{count}</Text></>;
   // A post with no way to act (for example an event) keeps plain counts, never a button that does nothing.
   if (route.via === 'none') return <View accessible accessibilityLabel={label} style={styles.action}>{content}</View>;
@@ -119,7 +120,7 @@ function Action({ icon, activeIcon, active, count, route, label, busy = false, e
  * where people register themselves; Open Media can't see whether they did, so it has no filled state.
  */
 export function RegisterAction({ url, label, short }: { url: string; label: string; short: string }) {
-  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors } = useOpenMediaTheme(); const styles = useThemedStyles(createStyles);
   const [hovered, setHovered] = useState(false);
   return <View style={styles.tipAnchor}>
     {/* React Native Web drops `title`, so web gets its tooltip here; phones read the label instead. */}
@@ -138,7 +139,7 @@ function CommentBody({ comment, source, style }: { comment: PostComment; source:
 }
 
 function Comments({ post, route, signedIn, onCommented }: { post: SocialPost; route: InteractionRoute; signedIn: boolean; onCommented: () => void }) {
-  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors } = useOpenMediaTheme(); const styles = useThemedStyles(createStyles);
   // Comments kept in Open Media: on its own posts, and on web feed items by article link.
   const native = route.via === 'open-media' || route.via === 'web';
   const itemUrl = route.via === 'web' ? route.url : undefined;

@@ -1,4 +1,5 @@
 import Ionicons from './Icon';
+import { useThemedStyles } from './useThemedStyles';
 import { useEffect, useMemo, useState } from 'react';
 import { Image, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Loader } from './Loader';
@@ -34,7 +35,7 @@ export function PersonProfile(props: PersonProfileProps) {
 
 function PersonView({ target, viewerId, onBack, onClose, onMessage }: PersonProfileProps) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const people = usePeople();
   const contacts = people?.contacts;
   const [person, setPerson] = useState<PublicPerson | null>();

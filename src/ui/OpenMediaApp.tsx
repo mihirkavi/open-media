@@ -1,6 +1,7 @@
 import Ionicons from "./Icon";
+import { useThemedStyles } from './useThemedStyles';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Image, Platform, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
+import { AppState, Image, Platform, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import { Text } from "./Text";
 
 import {
@@ -120,7 +121,7 @@ export function OpenMediaApp({
 }) {
   const { width } = useWindowDimensions();
   const { colors, setAppearance } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const compact = width < 760;
   const initialDestination: Destination =
     destinationFromURL() ?? (messageMode === "matrix" ? "messages" : "feed");
@@ -171,6 +172,8 @@ export function OpenMediaApp({
     Conversation[]
   >([]);
   // WhatsApp and other bridged chats (ADR 0011); empty until a network is connected.
+  const bridgedSignature = useRef("");
+  const bridgedQuietUntil = useRef(0);
   const [bridgedConversations, setBridgedConversations] = useState<
     Conversation[]
   >([]);
@@ -256,6 +259,7 @@ export function OpenMediaApp({
     const rooms = channels.filter((channel) => channel.unreadCount && bridgedSourceOf(channel));
     if (rooms.length) {
       const roomIds = rooms.map((room) => room.id);
+      bridgedSignature.current = ""; // the next poll applies the server's state again
       setBridgedConversations((current) => current.map((item) => (roomIds.includes(item.id) ? { ...item, unreadCount: 0 } : item)));
       for (const room of rooms) {
         // A chat marked unread may have nothing new from them: its newest message is read instead.
@@ -278,6 +282,7 @@ export function OpenMediaApp({
       setMailStore((current) => ({ ...current, stored: current.stored.map((item) => (item.accountId === accountId && item.sourceMessageId === message.sourceMessageId ? { ...item, unread: true } : item)) }));
       markMailUnseen(accountId, [message.sourceMessageId]).catch(() => undefined);
     } else if (bridgedSourceOf(channel)) {
+      bridgedSignature.current = ""; // the next poll applies the server's state again
       setBridgedConversations((current) => current.map((item) => (item.id === channel.id ? { ...item, unreadCount: Math.max(1, item.unreadCount) } : item)));
       markBridgedChatUnread(channel.id).catch(() => undefined);
     } else if (channel.sourceSummary.includes("open_media")) {
@@ -310,16 +315,28 @@ export function OpenMediaApp({
       unsubscribeFromOpenMediaMessages(channel);
     };
   }, [messageMode, refreshMessages]);
+  // Polled every 5 s, so it must stay cheap for the rest of the app: state changes only when the
+  // chats actually changed (a new array re-rendered the whole app, every Feed post included), polls
+  // stop while the app is in the background or the tab is hidden, and a server without bridges is
+  // asked again only once a minute.
   const refreshBridged = useCallback(async () => {
     if (messageMode !== "open_media" || !currentUserId) return;
+    if (AppState.currentState !== "active" || (Platform.OS === "web" && typeof document !== "undefined" && document.visibilityState !== "visible")) return;
+    if (Date.now() < bridgedQuietUntil.current) return;
+    let next: Awaited<ReturnType<typeof loadBridgedConversations>> = [];
     try {
-      setBridgedConversations(await loadBridgedConversations());
+      next = await loadBridgedConversations();
     } catch {
       // No bridges on this server, or none connected: nothing to show.
-      setBridgedConversations([]);
+      bridgedQuietUntil.current = Date.now() + 60_000;
     }
+    const signature = JSON.stringify(next);
+    if (signature === bridgedSignature.current) return;
+    bridgedSignature.current = signature;
+    setBridgedConversations(next);
   }, [currentUserId, messageMode]);
   useEffect(() => {
+    bridgedQuietUntil.current = 0;
     refreshBridged();
     const timer = setInterval(refreshBridged, 5000);
     return () => clearInterval(timer);
@@ -724,7 +741,7 @@ function DesktopRail({
   onCompose: () => void;
 }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   return (
     <View style={styles.rail}>
       <Pressable
@@ -784,7 +801,7 @@ function DesktopRail({
  */
 function AskTrigger({ active, onPress }: { active: boolean; onPress: () => void }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   return (
     <Pressable
       accessibilityRole="button"
@@ -827,7 +844,7 @@ function NavButton({
   onPress: () => void;
 }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   return (
     <Pressable
       accessibilityRole="button"
@@ -867,7 +884,7 @@ function Header({
   onBack: () => void;
 }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const utility = back || !primary.some((item) => item.id === destination);
   return (
     <View style={styles.header}>
@@ -919,7 +936,7 @@ function Header({
 
 function BrandIcon() {
   const { colors, isDark } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   // The transparent mark, dark on light and light on dark (assets/brand).
   return (
     <Image
@@ -940,7 +957,7 @@ export function IconButton({
   onPress: () => void;
 }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   return (
     <Pressable
       accessibilityRole="button"
@@ -965,7 +982,7 @@ export function MobileTabs({
   onCompose?: () => void;
 }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   return (
     <View style={styles.tabs}>
       {primary.map((item) => (

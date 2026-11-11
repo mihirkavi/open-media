@@ -1,4 +1,5 @@
 import Ionicons from './Icon';
+import { useThemedStyles } from './useThemedStyles';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Linking, Platform, Pressable, StyleSheet, Switch, View } from 'react-native';
 
@@ -27,7 +28,7 @@ export function shortAddress(address: string) {
  */
 export function PaymentsSettings() {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const [setup, setSetup] = useState<PaymentSetup>();
   const [history, setHistory] = useState<Payment[]>([]);
   const [busy, setBusy] = useState('');

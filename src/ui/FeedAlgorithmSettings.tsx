@@ -1,4 +1,5 @@
 import Ionicons from './Icon';
+import { useThemedStyles } from './useThemedStyles';
 import { useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Text, TextInput } from './Text';
@@ -24,7 +25,7 @@ const examples = 'more videos, less hive, only people I follow, mute crypto';
  * own Feed, before they choose it; saving says whether the account kept it, and which version.
  */
 export function FeedAlgorithmSettings({ lenses, signedIn, posts = [] }: { lenses: FeedLenses; signedIn: boolean; posts?: SocialPost[] }) {
-  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors } = useOpenMediaTheme(); const styles = useThemedStyles(createStyles);
   const [words, setWords] = useState('');
   const [saved, setSaved] = useState('');
   const rows = useLensRows(words, lenses, signedIn);
@@ -84,7 +85,7 @@ export function FeedAlgorithmSettings({ lenses, signedIn, posts = [] }: { lenses
 
 /** A manifest or a patch, in a monospace block; added lines are marked +, removed ones − and struck through. */
 function Code({ lines }: { lines: SourceLine[] }) {
-  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors } = useOpenMediaTheme(); const styles = useThemedStyles(createStyles);
   return <ScrollView horizontal style={styles.code} contentContainerStyle={styles.codeContent}>
     <View>
       {lines.map((line, index) => <Text key={index} selectable style={[styles.codeLine, line.kind === 'add' && styles.codeAdd, line.kind === 'remove' && styles.codeRemove]}>

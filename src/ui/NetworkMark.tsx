@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useThemedStyles } from './useThemedStyles';
 import { StyleSheet, View } from 'react-native';
 
 import { ThemeColors } from '../theme';
@@ -26,7 +27,7 @@ const letters: Record<string, string> = {
 
 export function NetworkMark({ id, name, size = 36, muted }: { id: string; name: string; size?: number; muted?: boolean }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const glyph = glyphs[id];
   const color = muted ? colors.textTertiary : colors.text;
   return <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" style={[styles.tile, { width: size, height: size, borderRadius: Math.round(size * 0.3) }, muted && styles.mutedTile]}>

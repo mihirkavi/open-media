@@ -3,6 +3,8 @@ import { useVideoPlayer, VideoView } from 'expo-video';
 import { useEffect, useState } from 'react';
 import { Image, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
 
+import { trackResource } from './diagnostics';
+
 export interface ClipVideoProps {
   uri: string;
   streaming?: 'hls' | 'progressive';
@@ -21,6 +23,7 @@ export function ClipVideo({ uri, streaming, posterUrl, active, muted, contentFit
   const player = useVideoPlayer({ uri, contentType: streaming ?? 'auto' }, (created) => { created.loop = true; created.muted = muted; });
   const { status } = useEvent(player, 'statusChange', { status: player.status });
   const [firstFrame, setFirstFrame] = useState(false);
+  useEffect(() => trackResource('video-player'), []);
   useEffect(() => { if (active) player.play(); else player.pause(); }, [active, player]);
   useEffect(() => { player.muted = muted; }, [muted, player]);
   useEffect(() => { if (status === 'error') onError?.(); }, [status, onError]);

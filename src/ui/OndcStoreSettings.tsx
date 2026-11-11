@@ -1,4 +1,5 @@
 import Ionicons from './Icon';
+import { useThemedStyles } from './useThemedStyles';
 import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, Switch, View } from 'react-native';
 
@@ -31,7 +32,7 @@ const fields: { key: Field; label: string; placeholder: string; keyboard?: 'nume
  */
 export function OndcStoreSettings() {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState<SavedOndcStore | null>();
   const [draft, setDraft] = useState<OndcStore>(emptyOndcStore);

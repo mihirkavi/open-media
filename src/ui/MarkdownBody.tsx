@@ -1,4 +1,5 @@
 import { Fragment, useMemo } from 'react';
+import { useThemedStyles } from './useThemedStyles';
 import { Linking, Platform, ScrollView, StyleProp, StyleSheet, TextStyle, View } from 'react-native';
 
 import { collapsedTableRows, inlineText, isNumericCell, MdBlock, MdInline } from '../domain/markdown';
@@ -20,7 +21,7 @@ const expandedTableRows = 30;
  */
 export function MarkdownBody({ blocks, source, style, collapsed }: { blocks: MdBlock[]; source: string; style?: StyleProp<TextStyle>; collapsed: boolean }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const base = StyleSheet.flatten(style) ?? {};
   const inline = (content: MdInline[]) => <Inline content={content} source={source} styles={styles} />;
   return <View style={[styles.stack, { marginTop: base.marginTop ?? 10 }]}>

@@ -1,6 +1,6 @@
 import Ionicons from './Icon';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Image, LayoutChangeEvent, Linking, NativeScrollEvent, NativeSyntheticEvent, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FlatList, Image, LayoutChangeEvent, Linking, ListRenderItem, NativeScrollEvent, NativeSyntheticEvent, Pressable, StyleSheet, View } from 'react-native';
 import { PersonLink, targetForPost } from './people';
 import { Text } from './Text';
 
@@ -55,7 +55,7 @@ export function ClipsView({ sessionKey, lens = rawLens, lensContext }: { session
   }, [clips.posts, settled, lens, lensContext]);
   const byId = useMemo(() => new Map(clips.posts.map((post) => [post.id, post])), [clips.posts]);
   const ordered = useMemo(() => order.map((id) => byId.get(id)).filter((post): post is SocialPost => Boolean(post)), [order, byId]);
-  const scroller = useRef<ScrollView>(null);
+  const scroller = useRef<FlatList<SocialPost>>(null);
   const [height, setHeight] = useState(0);
   const [active, setActive] = useState(0);
   activeRef.current = active;
@@ -71,14 +71,34 @@ export function ClipsView({ sessionKey, lens = rawLens, lensContext }: { session
     const index = Math.max(0, Math.min(visible.length - 1, Math.round(nativeEvent.contentOffset.y / height)));
     if (index !== active) setActive(index);
   };
-  const jumpToNew = () => { mergeOnTop.current = true; clips.showPending(); setActive(0); requestAnimationFrame(() => scroller.current?.scrollTo({ y: 0, animated: false })); };
+  const jumpToNew = () => { mergeOnTop.current = true; clips.showPending(); setActive(0); requestAnimationFrame(() => scroller.current?.scrollToOffset({ offset: 0, animated: false })); };
   const markFailed = useCallback((id: string) => setFailed((current) => new Set(current).add(id)), []);
+  const toggleMute = useCallback(() => setMuted((value) => !value), []);
+  // Virtualized with a fixed row height: only the clips around the one being watched exist at all
+  // (players for ±1, posters and overlays for a few more), so a long session never piles up
+  // full-screen images and overlays. Rows are memoized, so changing clips re-renders three rows, not all.
+  const renderClip = useCallback<ListRenderItem<SocialPost>>(({ item, index }) => <Clip post={item} lens={lens} lensContext={lensContext} height={height} active={index === active} mounted={Math.abs(index - active) <= 1} muted={muted} onToggleMute={toggleMute} onFailed={markFailed} />, [lens, lensContext, height, active, muted, toggleMute, markFailed]);
+  const clipLayout = useCallback((_: ArrayLike<SocialPost> | null | undefined, index: number) => ({ length: height, offset: height * index, index }), [height]);
 
   return <View style={styles.screen} onLayout={onLayout}>
-    {height ? <ScrollView ref={scroller} pagingEnabled showsVerticalScrollIndicator={false} onScroll={onScroll} scrollEventThrottle={32} style={styles.screen}>
-      {visible.map((post, index) => <Clip key={post.id} post={post} lens={lens} lensContext={lensContext} height={height} active={index === active} mounted={Math.abs(index - active) <= 1} muted={muted} onToggleMute={() => setMuted((value) => !value)} onFailed={markFailed} />)}
-      {clips.loadingMore ? <View style={[styles.status, { height: height / 3 }]}><Loader color="#FFFFFF" /></View> : null}
-    </ScrollView> : null}
+    {height ? <FlatList
+      ref={scroller}
+      data={visible}
+      keyExtractor={clipKey}
+      renderItem={renderClip}
+      getItemLayout={clipLayout}
+      extraData={renderClip}
+      pagingEnabled
+      showsVerticalScrollIndicator={false}
+      onScroll={onScroll}
+      scrollEventThrottle={32}
+      initialNumToRender={2}
+      maxToRenderPerBatch={2}
+      windowSize={3}
+      removeClippedSubviews
+      style={styles.screen}
+      ListFooterComponent={clips.loadingMore ? <View style={[styles.status, { height: height / 3 }]}><Loader color="#FFFFFF" /></View> : null}
+    /> : null}
     {clips.pendingCount > 0 ? <Pressable accessibilityRole="button" accessibilityLabel={`Show ${clips.pendingCount} new ${clips.pendingCount === 1 ? 'clip' : 'clips'}`} onPress={jumpToNew} style={styles.newClips}><Ionicons name="arrow-up" size={14} color="#111111" /><Text style={styles.newClipsText}>{clips.pendingCount} new {clips.pendingCount === 1 ? 'clip' : 'clips'}</Text></Pressable> : null}
     {(clips.loading || !settled) && !visible.length ? <View style={[StyleSheet.absoluteFill, styles.status]}><Loader color="#FFFFFF" /><Text style={styles.statusText}>Finding new clips…</Text></View> : null}
     {!clips.loading && settled && !visible.length ? <View style={[StyleSheet.absoluteFill, styles.status]}>
@@ -89,7 +109,9 @@ export function ClipsView({ sessionKey, lens = rawLens, lensContext }: { session
   </View>;
 }
 
-function Clip({ post, lens, lensContext, height, active, mounted, muted, onToggleMute, onFailed }: { post: SocialPost; lens: FeedLens; lensContext?: LensContext; height: number; active: boolean; mounted: boolean; muted: boolean; onToggleMute: () => void; onFailed: (id: string) => void }) {
+const clipKey = (post: SocialPost) => post.id;
+
+const Clip = memo(function Clip({ post, lens, lensContext, height, active, mounted, muted, onToggleMute, onFailed }: { post: SocialPost; lens: FeedLens; lensContext?: LensContext; height: number; active: boolean; mounted: boolean; muted: boolean; onToggleMute: () => void; onFailed: (id: string) => void }) {
   const media = post.media?.find((item) => item.kind === 'video');
   const [why, setWhy] = useState(false);
   const [paused, setPaused] = useState(false);
@@ -97,7 +119,7 @@ function Clip({ post, lens, lensContext, height, active, mounted, muted, onToggl
   const original = safeHttpsUrl(post.provenance.canonicalURL);
   const network = sourceName(post.provenance.connectorId);
   const translation = useTranslation(post.id, [post.title ?? post.body]);
-  const explanation = explainFeedPost(post, lens, lensContext);
+  const explanation = useMemo(() => why ? explainFeedPost(post, lens, lensContext) : undefined, [why, post, lens, lensContext]);
   const fail = useCallback(() => onFailed(post.id), [onFailed, post.id]);
   if (!media?.url) return null;
   return <View style={[styles.clip, { height }]}>
@@ -117,7 +139,7 @@ function Clip({ post, lens, lensContext, height, active, mounted, muted, onToggl
         {original ? <Pressable accessibilityRole="link" accessibilityLabel={`Open this clip on ${network}`} onPress={() => { Linking.openURL(original).catch(() => undefined); }} style={styles.link}><Text style={styles.linkText}>Open on {network}</Text><Ionicons name="open-outline" size={12} color="#E8E8E3" /></Pressable> : null}
         <Pressable accessibilityRole="button" accessibilityState={{ expanded: why }} onPress={() => setWhy((value) => !value)} style={styles.link}><Text style={styles.linkText}>Why this?</Text></Pressable>
       </View>
-      {why ? <View style={styles.why}>
+      {why && explanation ? <View style={styles.why}>
         {explanation.used.map((item) => <Text key={item} style={styles.whyText}>✓ {item}</Text>)}
         <Text style={styles.whyText}>{explanation.lens}: {explanation.rules.join(' · ')}</Text>
         {explanation.scoring.map((item) => <Text key={item} style={styles.whyText}>{item}</Text>)}
@@ -126,7 +148,7 @@ function Clip({ post, lens, lensContext, height, active, mounted, muted, onToggl
       </View> : null}
     </View>
   </View>;
-}
+});
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: '#000000' },

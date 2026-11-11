@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
+import { useThemedStyles } from './useThemedStyles';
 import { Animated, Easing, Platform, Pressable, StyleSheet, View } from "react-native";
 
 import Ionicons from "./Icon";
@@ -26,7 +27,7 @@ export function TapbackBar({
   onReply?: () => void;
 }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const mine = myReaction(reactions);
   const progress = useRef(new Animated.Value(reduceMotion ? 1 : 0)).current;
   useEffect(() => {
@@ -102,7 +103,7 @@ export function ReactionBadges({
   onPress?: () => void;
 }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const summary = summarizeReactions(reactions);
   const pop = useRef(new Animated.Value(1)).current;
   const signature = summary.map((item) => `${item.emoji}${item.count}${item.mine ? "m" : ""}`).join();

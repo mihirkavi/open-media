@@ -22,6 +22,14 @@ Open Media ships as one app on web, iOS, and Android. A change is not done until
 - Screens and heavy features that aren't on the first page load with `lazyComponent` (`src/ui/lazyComponent.tsx`) or `import()`, so the web build splits them into their own files. Keep large data (catalogs, SDKs, signing code) out of modules the first page imports.
 - Content-hashed build files are served with a one-year immutable cache (`services/mail-sync/src/webApp.ts`), and `npm run build:web` adds font preloads and preconnects to the page.
 
+## Memory and scrolling (ADR 0038)
+
+- Long lists are `FlatList`, never `ScrollView` + `.map`; rows are `React.memo` with stable callbacks.
+- Inline video goes through `usePlayback` (`src/ui/usePlayback.ts`): one plays, at most two players exist, and lists report `onViewableItemsChanged` via `reportVisibleMedia`.
+- Styles: `useThemedStyles(createStyles)`, never `useMemo(() => createStyles(colors))` per instance.
+- Polls set state only when data changed and stop in the background. Module-level caches must be bounded. Context provider values must be memoized.
+- Leak check: `globalThis.__openMedia.resources()` in development (web console or Playwright); register new expensive resources with `trackResource`. `src/domain/performanceRules.test.ts` enforces these rules. Open issues and the plan: `docs/PERFORMANCE_SECURITY_REVIEW.md`.
+
 ## Agent plugin and agent site
 
 - Skills live in `src/domain/agentSkills.ts`; run `npm run agent-plugin:sync` after changing them (a test fails if `agent-plugin/skills` drifts). Never edit the generated `SKILL.md` files.

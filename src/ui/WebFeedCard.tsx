@@ -1,4 +1,5 @@
 import Ionicons from './Icon';
+import { useThemedStyles } from './useThemedStyles';
 import { useEffect, useMemo, useState } from 'react';
 import { Image, Pressable, StyleSheet, View } from 'react-native';
 
@@ -26,7 +27,7 @@ import { usePeople, webFeedTarget } from './people';
  * outlet's or weather service's own domain carry the blue tick, labelled as an official feed.
  */
 export function WebFeedCard({ post, mode, lensContext, signedIn = false, inProfile = false }: { post: SocialPost; mode: FeedMode | FeedLens; lensContext?: LensContext; signedIn?: boolean; /** Shown on the feed's own profile, where tapping it has nowhere further to go. */ inProfile?: boolean }) {
-  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors } = useOpenMediaTheme(); const styles = useThemedStyles(createStyles);
   const feed = post.webFeed!;
   const [expanded, setExpanded] = useState(false);
   const explanation = explainFeedPost(post, mode, lensContext);

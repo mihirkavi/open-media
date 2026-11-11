@@ -1,4 +1,5 @@
 import Ionicons from './Icon';
+import { useThemedStyles } from './useThemedStyles';
 import { Children, Fragment, isValidElement, useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Linking, Platform, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 
@@ -46,7 +47,7 @@ const groupNotes: Record<FieldGroup, string> = {
  */
 export function EditProfile({ profile, onClose, onSaved }: { profile: OpenMediaProfile; onClose: () => void; onSaved: (profile: OpenMediaProfile) => void }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const [name, setName] = useState(profile.displayName);
   const [bio, setBio] = useState(profile.bio ?? '');
   const [fields, setFields] = useState<ProfileFieldValue[]>(editableFields([]));

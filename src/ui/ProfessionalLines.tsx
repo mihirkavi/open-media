@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useThemedStyles } from './useThemedStyles';
 import { StyleSheet, View } from 'react-native';
 
 import { isEmptyProfessional, ProfessionalProfile, professionalLines } from '../domain/professionalProfile';
@@ -9,7 +10,7 @@ import { Text } from './Text';
 /** The work side of a profile as plain lines under the bio (ADR 0018): no controls, nothing to learn. */
 export function ProfessionalLines({ profile }: { profile?: ProfessionalProfile }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   if (!profile || isEmptyProfessional(profile)) return null;
   const { headline, lines } = professionalLines(profile);
   return <View accessibilityLabel={['Professional profile', headline, ...lines].filter(Boolean).join('. ')} style={styles.block}>

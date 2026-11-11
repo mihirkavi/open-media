@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useThemedStyles } from './useThemedStyles';
 import Ionicons from './Icon';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Keyboard, Platform, Pressable, ScrollView, Share, StyleSheet, View } from 'react-native';
@@ -46,7 +47,7 @@ interface ResultItem { key: string; section: string; icon: keyof typeof Ionicons
  * email and Open Media to answer.
  */
 export function SearchView({ posts, conversations, viewer, lenses, onNavigate, onOpenSetting, onOpenConversation, onClose, onDismiss, onAsk, initialQuery = '' }: { posts: SocialPost[]; conversations: Conversation[]; viewer?: FeedViewer; lenses?: FeedLenses; onNavigate?: (target: SearchTarget) => void; /** Opens one setting where it lives, scrolled to it. */ onOpenSetting?: (id: string) => void; onOpenConversation?: (id: string) => void; onClose?: () => void; /** Esc on an empty field: back to where the person was. */ onDismiss?: () => void; /** Signed in: send this to Open Media AI. */ onAsk?: (text: string) => void; initialQuery?: string }) {
-  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors } = useOpenMediaTheme(); const styles = useThemedStyles(createStyles);
   const [query, setQuery] = useState(initialQuery);
   // A hashtag tapped in a post opens Search with it filled in.
   useEffect(() => { if (initialQuery) setQuery(initialQuery); }, [initialQuery]);

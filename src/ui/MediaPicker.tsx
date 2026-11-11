@@ -4,6 +4,7 @@
  * sends the moment you choose it, as in other chat apps.
  */
 import Ionicons from "./Icon";
+import { useThemedStyles } from './useThemedStyles';
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, Animated, Easing, FlatList, Image, LayoutChangeEvent, Platform, Pressable, ScrollView, StyleSheet, View, ViewToken } from "react-native";
 import { GifsUnavailable, MediaPreferences, loadMediaPreferences, saveMediaPreferences, searchGifs, withRecentEmoji } from "../data/messageMediaService";
@@ -54,7 +55,7 @@ export function MediaPicker({
   onMedia: (url: string) => void;
 }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const [tab, setTab] = useState<Tab>("emoji");
   const [preferences, setPreferences] = useState<MediaPreferences>();
   useEffect(() => { loadMediaPreferences().then(setPreferences); }, []);
@@ -128,7 +129,7 @@ export function MediaPicker({
 
 function SearchField({ value, onChange, placeholder, children }: React.PropsWithChildren<{ value: string; onChange: (value: string) => void; placeholder: string }>) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   return (
     <View style={styles.searchRow}>
       <View style={styles.search}>
@@ -163,7 +164,7 @@ const headerHeight = 30;
 
 function EmojiTab({ preferences, onPick, onSkinTone }: { preferences?: MediaPreferences; onPick: (emoji: string) => void; onSkinTone: (tone: SkinTone) => void }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const [query, setQuery] = useState("");
   const [width, setWidth] = useState(0);
   const [activeGroup, setActiveGroup] = useState("Smileys");
@@ -298,7 +299,7 @@ function EmojiTab({ preferences, onPick, onSkinTone }: { preferences?: MediaPref
 
 function GifTab({ kind, compact, onPick, query: fixedQuery, header }: { kind: "gifs" | "stickers"; compact: boolean; onPick: (url: string) => void; query?: string; header?: React.ReactNode }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const [ownQuery, setOwnQuery] = useState("");
   const query = fixedQuery ?? ownQuery;
   const [gifs, setGifs] = useState<GifResult[]>([]);
@@ -410,7 +411,7 @@ const animatedPack = "Animated";
 
 function StickerTab({ compact, onPick }: { compact: boolean; onPick: (url: string) => void }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const [pack, setPack] = useState(stickerCategories[0]?.name ?? "Smileys");
   const [query, setQuery] = useState("");
   const [width, setWidth] = useState(0);
@@ -488,7 +489,7 @@ function StickerTab({ compact, onPick }: { compact: boolean; onPick: (url: strin
 
 function AvatarTab({ seed, onSeed, onPick }: { seed?: string; onSeed: (seed: string) => void; onPick: (url: string) => void }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const [width, setWidth] = useState(0);
   // Other looks to choose from; your current one stays first.
   const [looks, setLooks] = useState<string[]>(() => Array.from({ length: 5 }, () => newAvatarSeed()));
@@ -584,7 +585,7 @@ function AvatarImage({ uri, size }: { uri: string; size: number }) {
 
 function Empty({ icon, text }: { icon: keyof typeof Ionicons.glyphMap; text: string }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   return (
     <View style={styles.center}>
       <View style={styles.emptyIcon}><Ionicons name={icon} size={20} color={colors.textTertiary} /></View>

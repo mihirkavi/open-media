@@ -1,4 +1,5 @@
 import Ionicons from './Icon';
+import { useThemedStyles } from './useThemedStyles';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 import { Text, TextInput } from './Text';
@@ -61,7 +62,7 @@ function toConfiguration(form: MailForm): MailAccountConfiguration {
 export function SettingsView({ onClose, onMailSynced, focus }: SettingsViewProps) {
   const { colors } = useOpenMediaTheme();
   const scroller = useRef<ScrollView>(null);
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const [mailForm, setMailForm] = useState<MailForm>();
   const [detected, setDetected] = useState<DetectedMailProvider>();
   const [detecting, setDetecting] = useState(false);
@@ -323,7 +324,7 @@ export function SettingsView({ onClose, onMailSynced, focus }: SettingsViewProps
 
 function useStyles() {
   const { colors } = useOpenMediaTheme();
-  return { colors, styles: useMemo(() => createStyles(colors), [colors]) };
+  return { colors, styles: useThemedStyles(createStyles) };
 }
 
 function Field(props: React.ComponentProps<typeof TextInput> & { label: string }) {

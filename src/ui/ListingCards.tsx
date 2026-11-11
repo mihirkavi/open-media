@@ -1,4 +1,5 @@
 import Ionicons from './Icon';
+import { useThemedStyles } from './useThemedStyles';
 import { useMemo, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Switch, View } from 'react-native';
 
@@ -12,7 +13,7 @@ import { Text, TextInput } from './Text';
 /** A product or service inside a post: what it is, the price, where, and a way to ask about it. */
 export function ListingCard({ listing, onMessage, onRate, onBuy }: { listing: PostListing; onMessage?: () => void; onRate?: (stars: number | null) => Promise<ListingRating>; onBuy?: () => void }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const soldOut = listing.availability === 'sold_out';
   const [rating, setRating] = useState<ListingRating>(listing.rating ?? { average: null, count: 0, mine: null });
   const [note, setNote] = useState('');
@@ -69,7 +70,7 @@ export function ListingCard({ listing, onMessage, onRate, onBuy }: { listing: Po
 /** An event's date, time, place and price under its title; registering happens from the action row. */
 export function EventMeta({ event }: { event: PostEvent }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   return <View style={styles.eventMeta}>
     <Text style={styles.eventLine}>{eventMetaLine(event)}</Text>
     {event.sources.length > 1 ? <Text style={styles.small}>Listed on {event.sources.map((source) => providerName(source.provider)).join(', ')}</Text> : null}
@@ -79,7 +80,7 @@ export function EventMeta({ event }: { event: PostEvent }) {
 /** The composer's listing fields: kind, title, price, where. */
 export function ListingFields({ value, onChange, onRemove, disabled }: { value: ListingInput; onChange: (value: ListingInput) => void; onRemove: () => void; disabled?: boolean }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const set = (change: Partial<ListingInput>) => onChange({ ...value, ...change });
   // Saying when it starts is what makes a listing an event; there is no separate event button.
   const when = value.when?.trim() ? parseEventTime(value.when) : null;
@@ -118,7 +119,7 @@ export interface PaidPostInput { price: string; text: string }
 /** The composer's paid-post fields: the price and the part only buyers can read. */
 export function PaidPostFields({ value, onChange, onRemove, disabled }: { value: PaidPostInput; onChange: (value: PaidPostInput) => void; onRemove: () => void; disabled?: boolean }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   return <View style={styles.fields}>
     <View style={styles.row}>
       <View style={styles.kind}><Ionicons name="lock-closed-outline" size={13} color={colors.textSecondary} /><Text style={styles.kindText}>Paid post</Text></View>
@@ -133,7 +134,7 @@ export function PaidPostFields({ value, onChange, onRemove, disabled }: { value:
 /** The paid part of a post: locked with its price, or shown once unlocked. */
 export function PaidPostBlock({ paid, onUnlock }: { paid: PostPaid; onUnlock?: () => void }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const price = formatPrice(paid.priceMinor, paid.currency);
   if (paid.unlocked && paid.body) return <View style={styles.card}>
     <View style={styles.kind}><Ionicons name="lock-open-outline" size={13} color={colors.textSecondary} /><Text style={styles.kindText}>Paid post</Text></View>

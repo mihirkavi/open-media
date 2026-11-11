@@ -1,4 +1,5 @@
 import Ionicons from './Icon';
+import { useThemedStyles } from './useThemedStyles';
 import { useMemo } from 'react';
 import { Linking, Pressable, StyleSheet } from 'react-native';
 
@@ -13,7 +14,7 @@ import { Text } from './Text';
  * outlined rather than filled so the post itself stays the loudest thing on the card.
  */
 export function OriginalLink({ url, label, accessibilityLabel }: { url: string; label: string; accessibilityLabel: string }) {
-  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors } = useOpenMediaTheme(); const styles = useThemedStyles(createStyles);
   return <Pressable
     accessibilityRole="link"
     accessibilityLabel={accessibilityLabel}

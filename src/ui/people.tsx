@@ -1,4 +1,5 @@
 import { createContext, PropsWithChildren, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useThemedStyles } from './useThemedStyles';
 import { Image, Platform, Pressable, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
 
 import { readDeviceContacts } from '../contacts/deviceContacts';
@@ -143,7 +144,9 @@ export function useContactsStore(enabled: boolean, encounters: Encounter[]): Con
     await apply(cardsRef.current.map((item) => item.id === cardId ? next : item), [next]);
   }, [apply]);
 
-  return {
+  // Memoized: this is the PeopleProvider value, read by every post header and person link. A new
+  // object on each render re-rendered every consumer whenever the app re-rendered.
+  return useMemo(() => ({
     cards, suggestions, ready, error,
     confirm: (cardId, ref) => update(cardId, (card) => confirmLink(card, ref)),
     reject: (cardId, ref) => update(cardId, (card) => rejectSuggestion(card, ref)),
@@ -168,7 +171,7 @@ export function useContactsStore(enabled: boolean, encounters: Encounter[]): Con
       await apply(next, next);
       return snapshots.length;
     },
-  };
+  }), [cards, suggestions, ready, error, update, apply]);
 }
 
 /** The name the viewer saved for this person, when they have one (ADR 0023). */
@@ -188,7 +191,7 @@ export function newId(): string {
 export function PersonLink({ target, children, style, label }: PropsWithChildren<{ target: PersonTarget; style?: StyleProp<ViewStyle>; label?: string }>) {
   const people = usePeople();
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const anchor = useRef<View>(null);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const [preview, setPreview] = useState<{ x: number; y: number }>();
@@ -220,7 +223,7 @@ export function PersonLink({ target, children, style, label }: PropsWithChildren
 /** The small desktop preview: who it is, where they are, and a way to open the full profile. */
 function ProfilePreview({ target, onOpen }: { target: PersonTarget; onOpen: () => void }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const [person, setPerson] = useState<PublicPerson>();
   useEffect(() => {
     if (target.ref.kind !== 'open_media') return;

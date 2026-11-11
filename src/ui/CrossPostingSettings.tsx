@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useThemedStyles } from './useThemedStyles';
 import { Linking, Pressable, StyleSheet, Switch, View } from 'react-native';
 import { Text, TextInput } from './Text';
 
@@ -18,7 +19,7 @@ const QrGrid = lazyComponent(() => import('./QrGrid').then((module) => module.Qr
  * too, unless its “Include by default” switch is off. Disconnecting forgets this device’s key.
  */
 export function CrossPostingSettings() {
-  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors } = useOpenMediaTheme(); const styles = useThemedStyles(createStyles);
   const crossPosting = useCrossPosting();
   const { prepareConnect } = crossPosting;
   // Connect buttons are on screen: load what they need now, so a tap opens the network right away.
@@ -86,7 +87,7 @@ const about: Partial<Record<DestinationId, string>> = {
 };
 
 function TextRequestCard({ request, onSubmit, onCancel }: { request: { title: string; message: string; placeholder: string; secret?: boolean }; onSubmit: (value: string) => void; onCancel: () => void }) {
-  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors } = useOpenMediaTheme(); const styles = useThemedStyles(createStyles);
   const [value, setValue] = useState('');
   return <View style={styles.approval}>
     <Text style={styles.name}>{request.title}</Text>

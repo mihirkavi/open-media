@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useThemedStyles } from './useThemedStyles';
 import { StyleSheet, View } from 'react-native';
 
 import { connectorCatalog } from '../connectors/catalog';
@@ -19,7 +20,7 @@ import { CrossPostNetworkState, useCrossPosting } from './useCrossPosting';
 type Tile = { id: string; name: string; state: 'connected' | 'ready' | 'soon' | 'no' };
 
 export function ConnectionsOverview() {
-  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors } = useOpenMediaTheme(); const styles = useThemedStyles(createStyles);
   const crossPosting = useCrossPosting();
   const byId = new Map<string, CrossPostNetworkState>(crossPosting.networks.map((item) => [item.network, item]));
   const catalog = new Map<string, ConnectorDescriptor>(connectorCatalog.map((connector) => [connector.id, connector]));

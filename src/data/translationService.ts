@@ -51,6 +51,7 @@ const timers: Partial<Record<TranslationPrivacy, ReturnType<typeof setTimeout>>>
 /** Set when the server says it has no translation engine, so the app stops asking this session. */
 let unavailable = false;
 const batchDelayMs = 40;
+const maxCachedTranslations = 600;
 
 /** The translation of one item, or undefined when it can't be translated now. */
 export function translateText(text: string, source: string, target: string, privacy: TranslationPrivacy): Promise<TranslatedItem | undefined> {
@@ -65,6 +66,9 @@ export function translateText(text: string, source: string, target: string, priv
     else timers[privacy] ??= setTimeout(() => flush(privacy, target), batchDelayMs);
   });
   results.set(key, promise);
+  // Bounded: an endless Feed would otherwise keep every translated post for the whole session.
+  // Maps iterate in insertion order, so the first key is the oldest.
+  if (results.size > maxCachedTranslations) results.delete(results.keys().next().value!);
   return promise;
 }
 

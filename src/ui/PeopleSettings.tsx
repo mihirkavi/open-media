@@ -1,4 +1,5 @@
 import Ionicons from './Icon';
+import { useThemedStyles } from './useThemedStyles';
 import { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Loader } from './Loader';
@@ -21,7 +22,7 @@ const handlePattern = /^[A-Za-z0-9._-]{1,64}$/;
  */
 export function PeopleSettings({ handle, onOpenContacts }: { handle: string; onOpenContacts?: () => void }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const people = usePeople();
   const contacts = people?.contacts;
   const [accounts, setAccounts] = useState<LinkedAccount[]>();

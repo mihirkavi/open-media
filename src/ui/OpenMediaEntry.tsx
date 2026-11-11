@@ -1,4 +1,5 @@
 import Ionicons from './Icon';
+import { useThemedStyles } from './useThemedStyles';
 import { Session } from '@supabase/supabase-js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Image, KeyboardAvoidingView, Linking, Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
@@ -183,7 +184,7 @@ function PublicSite({ onSignIn }: { onSignIn: () => void }) {
  * same tabs the app has. Messages needs an account, so that tab asks to sign in.
  */
 function PublicHome({ kind, onSignIn, onNavigate }: { kind: 'feed' | 'clips'; onSignIn: () => void; onNavigate: (page: PublicPage) => void }) {
-  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors } = useOpenMediaTheme(); const styles = useThemedStyles(createStyles);
   const [searching, setSearching] = useState<string | false>(false);
   const [feedPosts, setFeedPosts] = useState<SocialPost[]>([]);
   const lenses = useFeedLenses(undefined, 'raw');
@@ -200,7 +201,7 @@ function PublicHome({ kind, onSignIn, onNavigate }: { kind: 'feed' | 'clips'; on
 }
 
 function PublicFeed({ lenses, onPosts, onDevelopers }: { lenses: ReturnType<typeof useFeedLenses>; onPosts: (posts: SocialPost[]) => void; onDevelopers: () => void }) {
-  const { colors } = useOpenMediaTheme(); const styles = useMemo(() => createStyles(colors), [colors]);
+  const { colors } = useOpenMediaTheme(); const styles = useThemedStyles(createStyles);
   const feed = useMixedFeed();
   useEffect(() => { onPosts(feed.posts); }, [feed.posts, onPosts]);
   return <>

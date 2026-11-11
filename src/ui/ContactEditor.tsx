@@ -1,4 +1,5 @@
 import Ionicons from './Icon';
+import { useThemedStyles } from './useThemedStyles';
 import { useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Loader } from './Loader';
@@ -58,7 +59,7 @@ function draftFrom(name: string, notes: string, entries: Entry[]): ContactDraft 
 
 export function ContactEditor({ card, cards, selfName, onSave, onCancel, onDelete }: { card: ContactCard; cards: ContactCard[]; /** Set for the viewer's own card: its name comes from their profile. */ selfName?: string; onSave: (card: ContactCard) => Promise<void>; onCancel: () => void; onDelete?: () => Promise<void> }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const initial = useMemo(() => draftOf(card), [card]);
   const [name, setName] = useState(selfName ?? initial.name);
   const [notes, setNotes] = useState(initial.notes);

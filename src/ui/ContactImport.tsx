@@ -1,4 +1,5 @@
 import Ionicons from './Icon';
+import { useThemedStyles } from './useThemedStyles';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import { Loader } from './Loader';
@@ -24,7 +25,7 @@ interface Review { source: string; contacts: ImportedContact[]; plan: ImportPlan
 
 export function ContactImport({ contacts, onDone }: { contacts: ContactsState; /** Called after an import is saved. */ onDone?: () => void }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const [review, setReview] = useState<Review>();
   const [busy, setBusy] = useState('');
   const [message, setMessage] = useState('');

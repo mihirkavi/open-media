@@ -1,4 +1,5 @@
 import Ionicons from './Icon';
+import { useThemedStyles } from './useThemedStyles';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Linking, Platform, Pressable, StyleSheet, View } from 'react-native';
 
@@ -24,7 +25,7 @@ const tierCopy: Record<MyIdentity['tier'], string> = {
  */
 export function IdentitySettings({ handle }: { handle: string }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const people = usePeople();
   const [identity, setIdentity] = useState<MyIdentity>();
   const [follows, setFollows] = useState<MyFollows>();

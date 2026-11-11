@@ -1,4 +1,5 @@
 import Ionicons from './Icon';
+import { useThemedStyles } from './useThemedStyles';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Pressable, StyleSheet, View } from 'react-native';
 
@@ -44,7 +45,7 @@ async function optionsFor(target: PaymentTarget, recipient: string): Promise<Opt
  */
 export function PaymentSheet({ target, recipient, onClose, onPaid }: { target: PaymentTarget; recipient: string; onClose: () => void; onPaid?: () => void }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const [options, setOptions] = useState<Options>();
   const [rail, setRail] = useState<PaymentRail>();
   const [tip, setTip] = useState(500);

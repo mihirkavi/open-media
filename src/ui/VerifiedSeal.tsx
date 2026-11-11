@@ -1,4 +1,5 @@
 import { PropsWithChildren, useMemo, useState } from 'react';
+import { useThemedStyles } from './useThemedStyles';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Text } from './Text';
 import { ThemeColors } from '../theme';
@@ -49,7 +50,7 @@ export function officialFeedVerification(name: string, domain: string): Verifica
  */
 export function VerifiedSeal({ verification, size, children }: PropsWithChildren<{ verification?: Verification; size: number }>) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const [open, setOpen] = useState(false);
   if (!verification) return <>{children}</>;
   const seal = Math.max(14, Math.round(size * 0.42));
@@ -85,7 +86,7 @@ export function VerifiedSeal({ verification, size, children }: PropsWithChildren
  */
 export function VerifiedTickWithCard({ verification, size = 14 }: { verification: Verification; size?: number }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const [open, setOpen] = useState(false);
   return (
     <View style={[styles.inline, open && styles.raised]}>
@@ -112,7 +113,7 @@ const cardWidth = 236;
 
 function CredentialsCard({ verification, style }: { verification: Verification; style: { top: number; left: number } }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   return (
     <View style={[styles.card, style]}>
       <View style={styles.titleLine}>

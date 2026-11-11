@@ -1,4 +1,5 @@
 import Ionicons from "./Icon";
+import { useThemedStyles } from './useThemedStyles';
 import { PropsWithChildren, useEffect, useMemo, useRef, useState } from "react";
 import { Animated, Easing, PanResponder, Platform, StyleSheet, View } from "react-native";
 
@@ -20,7 +21,7 @@ const travel = (dx: number) => (dx <= trigger ? Math.max(0, dx) : Math.min(limit
  */
 export function SwipeToToggleRead({ unread, onToggle, children }: PropsWithChildren<{ unread: boolean; onToggle?: () => void }>) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const x = useRef(new Animated.Value(0)).current;
   const [armed, setArmed] = useState(false);
   const latest = useRef({ onToggle, armed });

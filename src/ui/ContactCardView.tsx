@@ -1,4 +1,5 @@
 import Ionicons from './Icon';
+import { useThemedStyles } from './useThemedStyles';
 import { useEffect, useMemo, useState } from 'react';
 import { Linking, Pressable, StyleSheet, View } from 'react-native';
 
@@ -36,7 +37,7 @@ export function ContactCardView({ contacts, card, self, meName, target, publicNa
   onAddNew: () => Promise<void>;
 }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const [busy, setBusy] = useState('');
   const [picking, setPicking] = useState(false);
   const [query, setQuery] = useState('');

@@ -1,4 +1,5 @@
 import Ionicons from './Icon';
+import { useThemedStyles } from './useThemedStyles';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
@@ -16,7 +17,7 @@ import { Text, TextInput } from './Text';
  */
 export function SignInSecuritySettings() {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const [passkeys, setPasskeys] = useState<Passkey[]>();
   const [editingPassword, setEditingPassword] = useState(false);
   const [password, setPasswordValue] = useState('');

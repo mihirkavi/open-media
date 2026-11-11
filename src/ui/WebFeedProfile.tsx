@@ -1,4 +1,5 @@
 import Ionicons from './Icon';
+import { useThemedStyles } from './useThemedStyles';
 import { useEffect, useMemo, useState } from 'react';
 import { Image, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
@@ -21,7 +22,7 @@ import { WebFeedCard } from './WebFeedCard';
  */
 export function WebFeedProfile({ feed, viewerId, onBack }: { feed: WebFeedPostInfo; viewerId?: string; onBack?: () => void }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const [posts, setPosts] = useState<SocialPost[]>();
   const [error, setError] = useState('');
   const [subscription, setSubscription] = useState<WebFeedSubscription | null>();

@@ -1,4 +1,5 @@
 import Ionicons from './Icon';
+import { useThemedStyles } from './useThemedStyles';
 import { useMemo } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { Text } from './Text';
@@ -37,7 +38,7 @@ export function sourceLabel(source: MessageSource): string {
 /** A quiet, monochrome hint of where a message came from. */
 export function SourceMarker({ source, showLabel = false, inverse = false }: { source: MessageSource; showLabel?: boolean; inverse?: boolean }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const detail = sourceDetails[source];
   const foreground = inverse ? colors.surface : colors.textTertiary;
 

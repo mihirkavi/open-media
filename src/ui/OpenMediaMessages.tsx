@@ -1,4 +1,5 @@
 import Ionicons from "./Icon";
+import { useThemedStyles } from './useThemedStyles';
 import { PropsWithChildren, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, Animated, Easing, Image, Keyboard, LayoutChangeEvent, Linking, Modal, PanResponder, Platform, Pressable, ScrollView, StyleProp, StyleSheet, TextStyle, View, ViewStyle, useWindowDimensions } from "react-native";
 import { Loader } from "./Loader";
@@ -99,7 +100,7 @@ export function OpenMediaMessages({
   const { width } = useWindowDimensions();
   const compact = width < 760;
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [selectedId, setSelectedId] = useState<string | undefined>(openConversationId);
   useEffect(() => { if (openConversationId) setSelectedId(openConversationId); }, [openConversationId]);
@@ -443,7 +444,7 @@ function Appear({ animate, style, children }: React.PropsWithChildren<{ animate:
  */
 function SendButton({ ready, reduceMotion, onPress }: { ready: boolean; reduceMotion: boolean; onPress: () => void }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const progress = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     const native = Platform.OS !== "web";
@@ -503,7 +504,7 @@ function MessageThread({
   const threadRef = useRef<View>(null);
   const keyboardInset = useKeyboardInset(threadRef);
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const [body, setBody] = useState("");
   // The mic shows while the box is empty; once there is text the send button takes its place.
   const hasText = Boolean(body.trim());
@@ -1229,7 +1230,7 @@ function NewMessagePanel({
   emailContacts: EmailContact[];
 }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const reduceMotion = useReducedMotion();
   const [query, setQuery] = useState("");
   const [recipients, setRecipients] = useState<Array<{ address: string; name: string }>>([]);
@@ -1483,7 +1484,7 @@ function AiAvatar({ size }: { size: number }) {
 /** Round picture: tries each image in order (BIMI logo, company icon), then shows initials. */
 function Avatar({ initials, imageUrls = [], size = 40 }: { initials: string; imageUrls?: string[]; size?: number }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   // Native image views cannot draw SVG (BIMI logos); the web can.
   const candidates = useMemo(
     () => imageUrls.filter((url) => Platform.OS === "web" || !/\.svg(\?|$)/i.test(url)),
@@ -1526,7 +1527,7 @@ function GroupAwareHeading({ group, target, label, style, children }: PropsWithC
  */
 function GroupEmailPeople({ people, ownAddress }: { people: Person[]; ownAddress: string }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   return (
     <ScrollView
       horizontal
@@ -1685,7 +1686,7 @@ function MessageBubble({
   style: StyleProp<ViewStyle>;
 }>) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const [hovered, setHovered] = useState(false);
   const lastTap = useRef(0);
   // In a narrow window the tray keeps to its two buttons; the time would run off the edge.
@@ -1756,7 +1757,7 @@ function MessageBubble({
  */
 function SwipeTime({ reveal, outbound, sentAt, onLayout, style, children }: React.PropsWithChildren<{ reveal: Animated.Value; outbound: boolean; sentAt: string; onLayout: (y: number) => void; style: StyleProp<ViewStyle> }>) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const measure = (event: LayoutChangeEvent) => onLayout(event.nativeEvent.layout.y);
   if (Platform.OS === "web") return <View onLayout={measure} style={[styles.swipeRow, style]}>{children}</View>;
   return (
@@ -1800,7 +1801,7 @@ function clearSelection() {
  */
 function ReplyContext({ outbound, name, text, reacted, onPress }: { outbound: boolean; name: string; text: string; reacted?: boolean; onPress?: () => void }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   return (
     <View style={[styles.replyContext, outbound && styles.replyContextOutbound, reacted && styles.replyContextReacted]}>
       <View pointerEvents="none" style={[styles.replyConnector, outbound ? styles.replyConnectorOutbound : styles.replyConnectorInbound, reacted && styles.replyConnectorReacted]} />
@@ -1847,7 +1848,7 @@ function ThreadFocus({
   onShowInChat: (messageId: string) => void;
 }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const progress = useRef(new Animated.Value(reduceMotion ? 1 : 0)).current;
   const scroll = useRef<ScrollView>(null);
   useEffect(() => {
@@ -1941,7 +1942,7 @@ const minInlineImageBytes = 8 * 1024;
 /** Photos as rounded bubbles, files as chips, remote images on request. */
 function MessageMedia({ message }: { message: Message }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const [showRemote, setShowRemote] = useState(false);
   const attachments = (message.attachments ?? []).filter(
     (item) => !(item.inline && item.contentType.startsWith("image/") && item.size < minInlineImageBytes),
@@ -1982,7 +1983,7 @@ function MessageMedia({ message }: { message: Message }) {
 
 function PhotoBubble({ attachment, url: directURL }: { attachment?: MessageAttachment; url?: string }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const [url, setURL] = useState(directURL);
   const [ratio, setRatio] = useState(4 / 3);
   const [failed, setFailed] = useState(false);
@@ -2022,7 +2023,7 @@ function PhotoBubble({ attachment, url: directURL }: { attachment?: MessageAttac
 
 function FileChip({ attachment }: { attachment: MessageAttachment }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const [busy, setBusy] = useState(false);
   const available = Boolean(attachment.storagePath);
   const open = async () => {
@@ -2101,7 +2102,7 @@ function PersonText({ message, style }: { message: Message; style: StyleProp<Tex
 /** Email shown like a message: links as words, quoted history hidden, long mail collapsed. */
 function EmailBody({ message }: { message: Message }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const formatted = useMemo(() => formatEmailBody(message.body), [message.body]);
   const long = formatted.plain.length > 600 || formatted.plain.split("\n").length > 10;
   const [expanded, setExpanded] = useState(false);
@@ -2167,7 +2168,7 @@ function capitalize(value: string) {
  */
 function ReceiptLine({ message, withLabel }: { message: Message; withLabel: boolean }) {
   const { colors } = useOpenMediaTheme();
-  const styles = useMemo(() => createStyles(colors), [colors]);
+  const styles = useThemedStyles(createStyles);
   const receipt = receiptOf(message);
   if (!receipt) return null;
   const icon = receipt === "sending" ? "time-outline" : receipt === "failed" ? "alert-circle" : receipt === "sent" ? "checkmark" : "checkmark-done";
