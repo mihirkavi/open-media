@@ -17,6 +17,10 @@ This checklist defines “production ready” for the current onboarding private
 - [x] Local browser flow: magic-link onboarding, callback cleanup, profile creation, profile search, direct conversation, send, realtime receive, account export, and responsive layout.
 - [x] Latest signed iOS Store build finished successfully: build 9, EAS `f5916bd3-c316-487a-bbed-f6085bc38fcc`.
 
+## Contact resolver and contact discovery (ADR 0037; deployed 2026-11-10)
+
+- [x] Owner said "yes please push and deploy". Pushed `a40b02e` to `main`. Applied `20261123120000_contact_discovery.sql` with `npx supabase db push --linked` after a dry run (only that migration was pending). Built the web app and deployed Worker `convo-mail-sync` version `c97d9e8b-5df5-4d0a-b366-f8e0aabe3333` (rollback `f940b35e-3c11-4a87-aa3f-242c84368a44`) with Node 22 (Wrangler refuses Node 20). Live: `/v1/posts` 200; `POST /v1/me/contacts/discover` without a token 401.
+
 ## Passwords and passkeys (ADR 0034; deployed 2026-11-07)
 
 - [x] Owner said "commit push and deploy please!". Pushed `d3c22c2` to `main`. Applied `20261121120000_passkey_second_step.sql` with `npx supabase db push --linked` after a dry run (only that migration was pending). Deployed with `npm run deploy`: Worker `convo-mail-sync` version `541d441c-7332-451d-b85c-9210fd6c8116`, rollback `86ebbce2-422b-4452-8648-4ccbf779a041`.

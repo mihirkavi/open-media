@@ -547,11 +547,11 @@ function MessageThread({
   }, [focusOnOpen, canSend]);
   // Fetch the picker's code while the person reads, so the smile opens it instantly.
   useEffect(() => (canSend ? whenIdle(() => { MediaPicker.preload().catch(() => undefined); }) : undefined), [canSend]);
-  const startReply = (message: Message) => {
+  const startReply = (message: Message, { focus = true } = {}) => {
     setReplyTo(message);
     // Replying to a message answers it where it came from.
     if (channelOf(conversation, message.conversationId) && message.conversationId !== via.id) setChannelId(message.conversationId);
-    setTimeout(() => composerInput.current?.focus(), 0);
+    if (focus) setTimeout(() => composerInput.current?.focus(), 0);
   };
   const byId = useMemo(() => new Map(conversation.messages.map((message) => [message.id, message])), [conversation.messages]);
   const isGroup = conversation.participants.length > 1;
@@ -696,18 +696,22 @@ function MessageThread({
   const focusedThread = useMemo(() => (threadFor ? replyThread(shownMessages, threadFor) : []), [shownMessages, threadFor]);
   const focusedIds = useMemo(() => new Set(focusedThread.map((message) => message.id)), [focusedThread]);
   const lastInThread = focusedThread[focusedThread.length - 1];
+  // On a phone the keyboard would cover the thread you opened to read, so it stays down until you tap the box.
+  const touchScreen = Platform.OS !== "web" || Boolean(window.matchMedia?.("(pointer: coarse)").matches);
   const openThread = (messageId: string) => {
     setTapbackFor(undefined);
+    if (touchScreen) Keyboard.dismiss();
     setThreadFor(messageId);
   };
   const closeThread = () => {
+    if (touchScreen) Keyboard.dismiss();
     setThreadFor(undefined);
     setReplyTo(undefined);
   };
   // While a thread is focused, what you type answers its latest message.
   useEffect(() => {
     if (!threadFor || !lastInThread || !canSend) return;
-    if (!replyTo || !focusedIds.has(replyTo.id)) startReply(lastInThread);
+    if (!replyTo || !focusedIds.has(replyTo.id)) startReply(lastInThread, { focus: !touchScreen });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadFor, lastInThread?.id, replyTo?.id]);
   useEffect(() => {
@@ -800,6 +804,8 @@ function MessageThread({
       <View style={styles.threadBody} {...swipePan.panHandlers}>
       <ScrollView
         ref={threadScroll}
+        keyboardDismissMode="interactive"
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.threadContent}
         scrollEventThrottle={64}
         onScroll={(event) => {
@@ -1032,8 +1038,9 @@ function MessageThread({
               </View>
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Cancel reply"
-                onPress={() => setReplyTo(undefined)}
+                accessibilityLabel={threadFor ? "Close thread" : "Cancel reply"}
+                // In a thread every message answers it, so leaving the reply means leaving the thread.
+                onPress={() => (threadFor ? closeThread() : setReplyTo(undefined))}
                 style={({ hovered }: { hovered?: boolean; pressed: boolean }) => [styles.replyCancel, hovered && styles.trayButtonHover]}
               >
                 <Ionicons name="close" size={17} color={colors.textSecondary} />
@@ -1877,6 +1884,8 @@ function ThreadFocus({
       <ScrollView
         ref={scroll}
         pointerEvents="box-none"
+        keyboardDismissMode="on-drag"
+        keyboardShouldPersistTaps="handled"
         style={styles.focusScroll}
         contentContainerStyle={styles.focusContent}
         onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: false })}
