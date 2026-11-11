@@ -458,6 +458,8 @@ export function OpenMediaApp({
     return handle ? { ref: { kind: "open_media", handle } } : undefined;
   });
   const [openConversationId, setOpenConversationId] = useState<string>();
+  // An open conversation on a phone brings its own header, and the tabs would only crowd the composer.
+  const [threadOpen, setThreadOpen] = useState(false);
   // A question asked from Ask or search, sent in the AI chat once Messages opens it.
   const [aiAsk, setAiAsk] = useState<{ text: string; at: number }>();
   const encounters = useMemo(
@@ -577,6 +579,7 @@ export function OpenMediaApp({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aiActions]);
 
+  const chatFullScreen = threadOpen && !person && destination === "messages";
   return (
     <PeopleProvider value={people}>
     <View style={[styles.app, compact && styles.appCompact]}>
@@ -589,7 +592,7 @@ export function OpenMediaApp({
         />
       ) : null}
       <View style={styles.content}>
-        {compact ? (
+        {compact && !chatFullScreen ? (
           <Header
             destination={destination}
             avatarUrl={profile.avatarUrl}
@@ -654,6 +657,7 @@ export function OpenMediaApp({
             onReport={reportConversation}
             openConversationId={openConversationId}
             aiAsk={aiAsk}
+            onThreadOpenChange={setThreadOpen}
           />
         ) : null}
         {!person && destination === "search" ? (
@@ -694,7 +698,7 @@ export function OpenMediaApp({
           />
         ) : null}
       </View>
-      {compact && primary.some((item) => item.id === destination) ? (
+      {compact && primary.some((item) => item.id === destination) && !chatFullScreen ? (
         <MobileTabs
           destination={destination as PrimaryDestination}
           onNavigate={navigate}

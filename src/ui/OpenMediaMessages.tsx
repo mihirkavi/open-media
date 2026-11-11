@@ -55,6 +55,8 @@ interface Props {
   openConversationId?: string;
   /** Something asked from Search, sent in the Open Media AI chat as if typed there. */
   aiAsk?: { text: string; at: number };
+  /** On a phone, true while a conversation fills the screen, so the app can put away its own header and tabs. */
+  onThreadOpenChange?: (open: boolean) => void;
   /** Pull down on the list: ask every mailbox and chat for anything new. */
   onRefresh?: () => Promise<void>;
   /** The conversation on screen has been seen: record it as read (ADR 0026). */
@@ -93,6 +95,7 @@ export function OpenMediaMessages({
   onRead,
   onToggleRead,
   onReact,
+  onThreadOpenChange,
 }: Props) {
   const { width } = useWindowDimensions();
   const compact = width < 760;
@@ -143,7 +146,11 @@ export function OpenMediaMessages({
             emailContacts={emailContacts}
           />
   );
-  if (compact && selected && !composing)
+  // Like Messages on iPhone, an open conversation has the whole screen: its own header has the way back.
+  const threadFullScreen = compact && Boolean(selected) && !composing;
+  useEffect(() => { onThreadOpenChange?.(threadFullScreen); }, [threadFullScreen]);
+  useEffect(() => () => onThreadOpenChange?.(false), []);
+  if (threadFullScreen && selected)
     return (
       <MessageThread
         key={selected.id}
@@ -431,11 +438,14 @@ function Appear({ animate, style, children }: React.PropsWithChildren<{ animate:
   );
 }
 
-/** The send button wakes up with a small spring once there is something to send. */
+/**
+ * The send button. Like Messages on iPhone it only appears once there is something to send, taking
+ * the mic's place, and arrives with a small spring.
+ */
 function SendButton({ ready, reduceMotion, onPress }: { ready: boolean; reduceMotion: boolean; onPress: () => void }) {
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const progress = useRef(new Animated.Value(ready ? 1 : 0)).current;
+  const progress = useRef(new Animated.Value(0)).current;
   useEffect(() => {
     const native = Platform.OS !== "web";
     if (reduceMotion) progress.setValue(ready ? 1 : 0);
@@ -496,6 +506,8 @@ function MessageThread({
   const { colors } = useOpenMediaTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
   const [body, setBody] = useState("");
+  // The mic shows while the box is empty; once there is text the send button takes its place.
+  const hasText = Boolean(body.trim());
   const [busy, setBusy] = useState(false);
   // Messages show the moment you send them, like a chat, and leave once the real one arrives.
   const [pending, setPending] = useState<PendingMessage[]>([]);
@@ -723,24 +735,29 @@ function MessageThread({
   );
   return (
     <View ref={threadRef} style={[styles.thread, keyboardInset ? { paddingBottom: keyboardInset } : null]}>
-      <View style={styles.threadHeader}>
-        {onBack ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Back to messages"
-            onPress={onBack}
-            style={styles.back}
-          >
-            <Ionicons name="chevron-back" size={22} color={colors.text} />
-          </Pressable>
-        ) : null}
+      <View style={[styles.threadHeader, compactThread && styles.threadHeaderCompact]}>
+        {/* Both sides keep the same width, so the picture and name sit in the true centre. */}
+        <View style={styles.threadSide}>
+          {onBack ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Back to messages"
+              hitSlop={6}
+              onPress={onBack}
+              style={({ pressed }) => [styles.back, pressed && styles.backPressed]}
+            >
+              <Ionicons name="chevron-back" size={24} color={colors.text} />
+            </Pressable>
+          ) : null}
+        </View>
         <GroupAwareHeading group={groupEmail} target={threadTarget(conversation, otherPerson)} label={`Open ${conversationTitle(conversation)}’s profile`} style={styles.threadHeadingLink}>
         <View style={styles.threadHeading}>
-          <VerifiedAvatar people={conversation.participants} size={44} />
-          <View style={[styles.rowTitleLine, styles.threadNameLine]}>
+          <VerifiedAvatar people={conversation.participants} size={compactThread ? 40 : 44} />
+          <View style={styles.threadNameLine}>
             <Text numberOfLines={1} style={styles.threadTitle}>
               {conversationTitle(conversation)}
             </Text>
+            {groupEmail ? null : <Ionicons name="chevron-forward" size={12} color={colors.textTertiary} style={styles.threadNameChevron} />}
           </View>
           <Text numberOfLines={1} style={styles.threadMeta}>
             {channels.length
@@ -762,21 +779,24 @@ function MessageThread({
           {groupEmail && conversation.email ? <GroupEmailPeople people={conversation.participants} ownAddress={conversation.email.accountEmail} /> : null}
         </View>
         </GroupAwareHeading>
-        {channelPerson &&
-        !conversation.groupTitle &&
-        via.sourceSummary.includes("open_media") ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Conversation safety"
-            onPress={() => {
-              setSafetyStatus("");
-              setSafetyOpen(true);
-            }}
-            style={styles.back}
-          >
-            <Ionicons name="ellipsis-horizontal" size={22} color={colors.text} />
-          </Pressable>
-        ) : null}
+        <View style={styles.threadSide}>
+          {channelPerson &&
+          !conversation.groupTitle &&
+          via.sourceSummary.includes("open_media") ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Conversation safety"
+              hitSlop={6}
+              onPress={() => {
+                setSafetyStatus("");
+                setSafetyOpen(true);
+              }}
+              style={({ pressed }) => [styles.back, pressed && styles.backPressed]}
+            >
+              <Ionicons name="ellipsis-horizontal" size={22} color={colors.text} />
+            </Pressable>
+          ) : null}
+        </View>
       </View>
       <View style={styles.threadBody} {...swipePan.panHandlers}>
       <ScrollView
@@ -1055,9 +1075,10 @@ function MessageThread({
                     : "Message"
               }
               placeholderTextColor={colors.textTertiary}
+              dictationHidden={hasText}
               style={[styles.composerInput, { height: inputHeight }]}
             />
-            <SendButton ready={Boolean(body.trim())} reduceMotion={reduceMotion} onPress={submit} />
+            {hasText ? <SendButton ready reduceMotion={reduceMotion} onPress={submit} /> : null}
           </View>
           </View>
         </View>
@@ -2332,26 +2353,32 @@ function createStyles(colors: ThemeColors) {
     thread: { flex: 1, backgroundColor: colors.surface },
     threadHeadingLink: { flex: 1, minWidth: 0 },
     threadHeader: {
-      minHeight: 96,
-      paddingHorizontal: 12,
+      minHeight: 92,
+      paddingHorizontal: 8,
       paddingVertical: 10,
       flexDirection: "row",
       alignItems: "center",
-      gap: 6,
-      borderBottomWidth: 1,
+      gap: 4,
+      borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: colors.border,
       backgroundColor: colors.surface,
     },
-    threadHeading: { flex: 1, minWidth: 0, alignItems: "center", gap: 4 },
-    threadNameLine: { justifyContent: "center", maxWidth: "100%" },
+    // A phone has little room: the header is as tall as the picture, name and one line need.
+    threadHeaderCompact: { minHeight: 0, paddingTop: 4, paddingBottom: 8, paddingHorizontal: 4 },
+    threadSide: { width: 44, alignSelf: "flex-start", alignItems: "center" },
+    threadHeading: { minWidth: 0, alignItems: "center", gap: 3 },
+    threadNameLine: { maxWidth: "100%", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 2, marginTop: 2 },
+    threadNameChevron: { marginTop: 1 },
     back: {
       width: 44,
       height: 44,
+      borderRadius: 22,
       alignItems: "center",
       justifyContent: "center",
     },
-    threadTitle: { flexShrink: 1, color: colors.text, fontSize: 15, fontWeight: "700" },
-    threadMeta: { maxWidth: "100%", color: colors.textTertiary, fontSize: 12, textAlign: "center" },
+    backPressed: { backgroundColor: colors.chrome },
+    threadTitle: { flexShrink: 1, color: colors.text, fontSize: 14, lineHeight: 18, fontWeight: "600" },
+    threadMeta: { maxWidth: "100%", color: colors.textTertiary, fontSize: 11, lineHeight: 14, textAlign: "center" },
     threadContent: {
       width: "100%",
       maxWidth: 760,

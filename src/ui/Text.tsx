@@ -55,6 +55,11 @@ const outerKeys = new Set<keyof ViewStyle>([
 export interface OpenMediaTextInputProps extends TextInputProps {
   /** Show the dictation mic (ADR 0031). Left out, fields people write words in get one. */
   dictation?: boolean;
+  /**
+   * Puts the mic away for now without changing the field, so focus and the keyboard stay. A chat
+   * composer does this once there is text, where the send button takes the mic's place.
+   */
+  dictationHidden?: boolean;
 }
 
 /**
@@ -62,7 +67,7 @@ export interface OpenMediaTextInputProps extends TextInputProps {
  * their right edge (ADR 0031): in browsers that can record, and in the iPhone app. Android keeps
  * its keyboard's own dictation.
  */
-export const TextInput = forwardRef<NativeTextInput, OpenMediaTextInputProps>(function TextInput({ style, dictation, onChangeText, onSelectionChange, ...props }, ref) {
+export const TextInput = forwardRef<NativeTextInput, OpenMediaTextInputProps>(function TextInput({ style, dictation, dictationHidden = false, onChangeText, onSelectionChange, ...props }, ref) {
   const node = useRef<NativeTextInput | null>(null);
   const [fieldHeight, setFieldHeight] = useState<number | undefined>();
   const setRef = useCallback((value: NativeTextInput | null) => {
@@ -113,11 +118,11 @@ export const TextInput = forwardRef<NativeTextInput, OpenMediaTextInputProps>(fu
   if (outer.flex !== undefined || outer.flexGrow !== undefined) inner.flexGrow = 1;
   if (outer.position === 'absolute' && inner.height === undefined) inner.height = '100%';
   const ownRight = Number(inner.paddingRight ?? inner.paddingHorizontal ?? inner.padding ?? 0) || 0;
-  inner.paddingRight = Math.max(ownRight, dictationInset);
+  if (!dictationHidden) inner.paddingRight = Math.max(ownRight, dictationInset);
   return (
     <View style={outer} onLayout={(event) => setFieldHeight(Math.round(event.nativeEvent.layout.height))}>
       <NativeTextInput ref={setRef} {...props} {...handlers} style={inner} />
-      <DictationButton target={target} multiline={Boolean(props.multiline)} maxLength={props.maxLength} fieldHeight={fieldHeight} />
+      <DictationButton target={target} multiline={Boolean(props.multiline)} maxLength={props.maxLength} fieldHeight={fieldHeight} hidden={dictationHidden} />
     </View>
   );
 });

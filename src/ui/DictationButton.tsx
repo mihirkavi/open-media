@@ -64,7 +64,7 @@ export function canDictateHere(): boolean {
   return supported;
 }
 
-export function DictationButton({ target, multiline, maxLength, fieldHeight }: { target: () => DictationField | null; multiline?: boolean; maxLength?: number; fieldHeight?: number }) {
+export function DictationButton({ target, multiline, maxLength, fieldHeight, hidden = false }: { target: () => DictationField | null; multiline?: boolean; maxLength?: number; fieldHeight?: number; hidden?: boolean }) {
   const theme = useOptionalOpenMediaTheme();
   const colors = theme?.colors ?? lightColors;
   const reduced = useReducedMotion();
@@ -150,6 +150,8 @@ export function DictationButton({ target, multiline, maxLength, fieldHeight }: {
   }, [phase, cancel]);
 
   if (!canDictateHere()) return null;
+  // Hidden only between takes: a take that is listening or writing keeps its button to the end.
+  if (hidden && phase === 'idle') return null;
 
   const listening = phase === 'listening';
   // A tall box (a post, a bio) keeps the mic in its bottom corner; one-line fields centre it.
