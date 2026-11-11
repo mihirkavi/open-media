@@ -281,6 +281,7 @@ export function holdsRef(card: ContactCard, ref: IdentityRef): boolean {
 /**
  * The viewer's card for this identity: the one it is linked to, else the only card that holds it
  * as an email, phone or handle. When two cards hold it, neither is chosen (ADR 0023).
+ * A building block of `resolveContact`; screens ask `resolveContact` instead (ADR 0037).
  */
 export function cardFor(cards: ContactCard[], ref: IdentityRef): ContactCard | undefined {
   if (isMine(cards, ref)) return undefined;
@@ -290,6 +291,103 @@ export function cardFor(cards: ContactCard[], ref: IdentityRef): ContactCard | u
   if (linked) return linked;
   const holding = others.filter((card) => holdsRef(card, ref));
   return holding.length === 1 ? holding[0] : undefined;
+}
+
+/**
+ * Everything the app knows about who someone is, to find them among the viewer's contacts
+ * (ADR 0037). `cardId` is a contact already matched: a conversation shown under a contact's name,
+ * a row in Contacts. `alsoKnownAs` are other identities of the same sender, such as a company
+ * writing from two mailboxes.
+ */
+export interface ContactQuery {
+  ref: IdentityRef;
+  cardId?: string;
+  alsoKnownAs?: IdentityRef[];
+}
+
+export interface ResolvedContact {
+  card?: ContactCard;
+  /** The identity is the viewer's own; `card` is then their own card, if they made one. */
+  mine: boolean;
+}
+
+/**
+ * The one answer to "which of my contacts is this?" (ADR 0037). Messages, profiles, Feed names,
+ * Contacts and the To field all ask here, so a person shown under a contact's name opens that
+ * same contact everywhere. In order:
+ *
+ * 1. a contact already matched (`cardId`), while it still exists;
+ * 2. the viewer's own card, for their own addresses and accounts;
+ * 3. the contact linked to the identity, else the only contact holding it (`cardFor`);
+ * 4. the only contact holding any of the sender's other identities.
+ */
+export function resolveContact(cards: ContactCard[], query: ContactQuery): ResolvedContact {
+  const known = query.cardId ? cards.find((card) => card.id === query.cardId) : undefined;
+  if (known) return { card: known, mine: Boolean(known.self) };
+  if (isMine(cards, query.ref)) return { card: selfCard(cards), mine: true };
+  const direct = cardFor(cards, query.ref);
+  if (direct) return { card: direct, mine: false };
+  const found = new Map<string, ContactCard>();
+  for (const ref of query.alsoKnownAs ?? []) {
+    const card = cardFor(cards, ref);
+    if (card) found.set(card.id, card);
+  }
+  return { card: found.size === 1 ? [...found.values()][0] : undefined, mine: false };
+}
+
+/** The name the viewer saved for someone, or '' (never for the viewer's own identities). */
+export function savedName(cards: ContactCard[], query: ContactQuery): string {
+  const resolved = resolveContact(cards, query);
+  return resolved.mine ? '' : contactName(resolved.card);
+}
+
+/** Every identity of a resolved contact, with the one that was opened first when the card lacks it. */
+export function identitiesOf(card: ContactCard | undefined, ref: IdentityRef): IdentityRef[] {
+  const refs = card ? cardRefs(card) : [];
+  return refs.some((item) => refKey(item) === refKey(ref)) ? refs : [ref, ...refs];
+}
+
+/** An Open Media account that uses an email or number saved on the viewer's contacts. */
+export interface AccountMatch {
+  kind: 'email' | 'phone';
+  value: string;
+  handle: string;
+}
+
+/**
+ * What to ask the server about (ADR 0037): every email and every international number on the
+ * viewer's contacts that are not yet connected to an Open Media account. Their own card is left out.
+ */
+export function discoveryRequest(cards: ContactCard[]): { emails: string[]; phones: string[] } {
+  const open = cards.filter((card) => !card.self && !cardRefs(card).some((ref) => ref.kind === 'open_media'));
+  const emails = [...new Set(open.flatMap((card) => card.emails).map(normalizeEmail).filter((email) => email.includes('@')))];
+  const phones = [...new Set(open.flatMap((card) => card.phones).map(normalizePhone).filter((phone) => phone.startsWith('+')))];
+  return { emails, phones };
+}
+
+/**
+ * Connects contacts to the Open Media accounts that use their saved email or number. A match links
+ * only when exactly one contact holds that email or number, no contact already has that account,
+ * and the viewer never said the account is not this person. Inputs are never mutated.
+ */
+export function linkDiscoveredAccounts(cards: ContactCard[], matches: AccountMatch[], now = new Date().toISOString()): { cards: ContactCard[]; changed: ContactCard[] } {
+  const next = new Map(cards.map((card) => [card.id, card]));
+  const changed = new Set<string>();
+  for (const match of matches) {
+    const account: IdentityRef = { kind: 'open_media', handle: match.handle.replace(/^@/, '') };
+    const key = refKey(account);
+    const current = [...next.values()];
+    if (current.some((card) => cardRefs(card).some((ref) => refKey(ref) === key))) continue;
+    const saved: IdentityRef = match.kind === 'email' ? { kind: 'email', address: match.value } : { kind: 'phone', number: match.value };
+    const holders = current.filter((card) => !card.self && holdsRef(card, saved));
+    if (holders.length !== 1 || holders[0].rejected.includes(key)) continue;
+    const card = holders[0];
+    const evidence = match.kind === 'email' ? 'Their Open Media account uses this email' : 'Their Open Media account uses this number';
+    next.set(card.id, { ...card, links: [...card.links, { ref: account, method: 'auto', evidence, linkedAt: now }], updatedAt: now });
+    changed.add(card.id);
+  }
+  const out = cards.map((card) => next.get(card.id)!);
+  return { cards: out, changed: out.filter((card) => changed.has(card.id)) };
 }
 
 /** The viewer's own card, if they made one. */
@@ -337,9 +435,7 @@ export function cardRefs(card: ContactCard): IdentityRef[] {
 
 /** All identities on the same card as `ref` (including `ref`). */
 export function linkedIdentities(cards: ContactCard[], ref: IdentityRef): IdentityRef[] {
-  const card = cardFor(cards, ref);
-  const refs = card ? cardRefs(card) : [];
-  return refs.some((item) => refKey(item) === refKey(ref)) ? refs : [ref, ...refs];
+  return identitiesOf(cardFor(cards, ref), ref);
 }
 
 /**

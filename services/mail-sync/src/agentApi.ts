@@ -623,6 +623,22 @@ export class Account {
     return { saved: cards.length };
   }
 
+  /**
+   * Which of the addresses and numbers on your contacts belong to Open Media accounts (ADR 0037),
+   * so a contact saved by email or phone connects to the person's account. Only exact, confirmed
+   * matches from people who allow it; the database enforces the privacy rules.
+   */
+  async discoverContacts(body: Record<string, unknown>) {
+    const list = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.length <= 320) : [];
+    const emails = list(body.emails);
+    const phones = list(body.phones);
+    if (emails.length + phones.length > 500) throw new AgentError(400, 'bad_request', 'Send at most 500 addresses and numbers at a time.');
+    if (!emails.length && !phones.length) return { data: [] };
+    if (!(await withinLimit(this.env.PUBLIC_API_RATE_LIMITER, `discover:${this.userId}`))) throw new AgentError(429, 'rate_limited', 'Too many contact lookups in a short time. Wait a minute and try again.');
+    const data = await this.rpc<{ kind: 'email' | 'phone'; value: string; handle: string }[]>('open_media_discover_contacts', { p_emails: emails, p_phones: phones });
+    return { data: data ?? [] };
+  }
+
   async deleteContact(id: string) {
     if (!uuid.test(id)) throw new AgentError(404, 'not_found', 'Contact not found.');
     await this.rest('DELETE', `/rest/v1/contact_cards?id=eq.${id}`);
@@ -954,7 +970,7 @@ export class Account {
   }
 
   async setIdentity(body: Record<string, unknown>) {
-    const change: Record<string, string> = {};
+    const change: Record<string, string | boolean> = {};
     if (body.nameDisclosure !== undefined) {
       if (!['handle_only', 'declared', 'verified_legal'].includes(String(body.nameDisclosure))) throw new AgentError(400, 'bad_request', 'nameDisclosure must be handle_only, declared or verified_legal.');
       change.name_disclosure = String(body.nameDisclosure);
@@ -963,7 +979,11 @@ export class Account {
       if (!['public', 'private'].includes(String(body.visibility))) throw new AgentError(400, 'bad_request', 'visibility must be public or private.');
       change.visibility = String(body.visibility);
     }
-    if (!Object.keys(change).length) throw new AgentError(400, 'bad_request', 'Send nameDisclosure and/or visibility.');
+    if (body.discoverable !== undefined) {
+      if (typeof body.discoverable !== 'boolean') throw new AgentError(400, 'bad_request', 'discoverable must be true or false.');
+      change.discoverable = body.discoverable;
+    }
+    if (!Object.keys(change).length) throw new AgentError(400, 'bad_request', 'Send nameDisclosure, visibility and/or discoverable.');
     await this.rest('PATCH', `/rest/v1/profiles?id=eq.${this.userId}`, change);
     if (change.name_disclosure === 'verified_legal') {
       const [row] = await this.rest<{ legal_name_ciphertext: string | null }[]>('GET', `/rest/v1/identity_verifications?user_id=eq.${this.userId}&select=legal_name_ciphertext`);
@@ -1785,6 +1805,7 @@ function baseOpenApi(origin: string) {
         get: { summary: 'Your contacts (private; stored encrypted)', security: bearer, responses: { 200: ok('Your contact cards'), 401: error } },
         put: { summary: 'Create or replace contact cards by id (up to 500)', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'array', maxItems: 500, items: { type: 'object', required: ['id', 'name', 'phones', 'emails', 'links', 'rejected', 'nicknames', 'notes'], properties: { id: { type: 'string', format: 'uuid' }, source: { type: 'string', enum: ['device', 'manual'] }, name: { type: 'string' }, nicknames: { type: 'array', items: { type: 'string' } }, phones: { type: 'array', items: { type: 'string' } }, emails: { type: 'array', items: { type: 'string' } }, handles: { type: 'array', items: { type: 'object', required: ['network', 'handle'], properties: { network: { type: 'string' }, handle: { type: 'string' } } } }, notes: { type: 'string' }, links: { type: 'array', items: { type: 'object' } }, rejected: { type: 'array', items: { type: 'string' } }, updatedAt: { type: 'string' } } } } } } }, responses: { 200: ok('Saved'), 400: error, 401: error } },
       },
+      '/v1/me/contacts/discover': { post: { summary: 'Which of these emails and numbers (yours to look up, up to 500) belong to Open Media accounts: exact confirmed matches from people who allow it, as their handles', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { emails: { type: 'array', items: { type: 'string' } }, phones: { type: 'array', items: { type: 'string', description: 'With the country code, such as +15550001234' } } } } } } }, responses: { 200: ok('Matching handles'), 400: error, 401: error, 429: error } } },
       '/v1/me/contacts/{id}': { delete: { summary: 'Delete one of your contact cards', security: bearer, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], responses: { 200: ok('Deleted'), 404: error, 401: error } } },
       '/v1/me/linked-accounts': { put: { summary: 'Set the open-network accounts shown on your public profile (public, up to 8)', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'array', maxItems: 8, items: { type: 'object', required: ['network', 'handle'], properties: { network: { type: 'string', enum: ['farcaster', 'lens', 'hive', 'deso'] }, handle: { type: 'string', pattern: '^[A-Za-z0-9._-]{1,64}$' } } } } } } }, responses: { 200: ok('Saved'), 400: error, 401: error } } },
       '/v1/me/professional': {
@@ -1826,7 +1847,7 @@ function baseOpenApi(origin: string) {
       },
       '/v1/me/identity': {
         get: { summary: 'Your identity tier, tick, shown name, privacy and verification status', security: bearer, responses: { 200: ok('Your identity'), 401: error } },
-        put: { summary: 'Choose the name others see and whether your account is private', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { nameDisclosure: { type: 'string', enum: ['handle_only', 'declared', 'verified_legal'] }, visibility: { type: 'string', enum: ['public', 'private'] } } } } } }, responses: { 200: ok('Updated identity'), 400: error, 401: error, 409: error } },
+        put: { summary: 'Choose the name others see, whether your account is private, and whether people who have your email or number can find you', security: bearer, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { nameDisclosure: { type: 'string', enum: ['handle_only', 'declared', 'verified_legal'] }, visibility: { type: 'string', enum: ['public', 'private'] }, discoverable: { type: 'boolean' } } } } } }, responses: { 200: ok('Updated identity'), 400: error, 401: error, 409: error } },
       },
       '/v1/me/verification': { post: { summary: 'Start identity verification with Stripe Identity (returns a link to open)', security: bearer, responses: { 201: ok('Verification link'), 401: error, 503: error } } },
       '/v1/me/follows': {
@@ -2129,6 +2150,7 @@ export async function handleAgentRequest(request: Request, env: AgentEnv, intern
     if (request.method === 'DELETE' && path === '/v1/me') return json(await account.deleteAccount(body.confirmation), 0);
     if (request.method === 'GET' && path === '/v1/me/contacts') return json(await account.contacts(), 0);
     if (request.method === 'PUT' && path === '/v1/me/contacts') return json(await account.saveContacts(Array.isArray(raw) ? raw : body.cards), 0);
+    if (request.method === 'POST' && path === '/v1/me/contacts/discover') return json(await account.discoverContacts(body), 0);
     const contactMatch = path.match(/^\/v1\/me\/contacts\/([^/]+)$/);
     if (request.method === 'DELETE' && contactMatch) return json(await account.deleteContact(decodeURIComponent(contactMatch[1])), 0);
     if (request.method === 'PUT' && path === '/v1/me/linked-accounts') return json(await account.setLinkedAccounts(Array.isArray(raw) ? raw : body.accounts), 0);

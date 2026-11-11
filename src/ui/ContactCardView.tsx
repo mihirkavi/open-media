@@ -119,7 +119,7 @@ export function ContactCardView({ contacts, card, self, meName, target, publicNa
           <View style={styles.linkIcon}><Ionicons name={linkIcon(link.ref)} size={16} color={colors.text} /></View>
           <View style={styles.grow}>
             <Text numberOfLines={1} style={styles.linkName}>{describe(link.ref)}</Text>
-            <Text numberOfLines={1} style={styles.linkWhy}>{link.method === 'auto' ? `Linked automatically · ${link.evidence.toLowerCase()}` : 'Linked by you'}</Text>
+            <Text numberOfLines={1} style={styles.linkWhy}>{link.method === 'auto' ? `Linked automatically · ${link.evidence.charAt(0).toLowerCase()}${link.evidence.slice(1)}` : 'Linked by you'}</Text>
           </View>
           <Pressable accessibilityRole="button" accessibilityLabel={`Unlink ${describe(link.ref)}`} disabled={Boolean(busy)} onPress={() => act('undo', () => contacts.undo(card.id, link.ref))} hitSlop={8} style={styles.quietButton}><Text style={styles.quietButtonText}>Unlink</Text></Pressable>
         </View>)}

@@ -2,7 +2,7 @@ import { getSupabaseClient } from '../auth/supabase';
 import { getAPIURL, request } from '../connectors/mailApiConnector';
 import { fetchAuthorPosts } from '../connectors/networkAuthors';
 import { NetworkId } from '../domain/networkPosts';
-import { ContactCard, IdentityRef, isContactCard } from '../domain/people';
+import { AccountMatch, ContactCard, IdentityRef, isContactCard } from '../domain/people';
 import { SocialPost } from '../domain/posts';
 import { isEmptyProfessional, parseProfessional, ProfessionalProfile } from '../domain/professionalProfile';
 import { readVisibleFields, resumeUrl as resumeUrlFor } from '../domain/profileFields';
@@ -111,6 +111,22 @@ export async function saveContactCards(cards: ContactCard[]): Promise<void> {
   }
 }
 
+/**
+ * Which of these emails and numbers belong to Open Media accounts (ADR 0037): exact, confirmed
+ * matches from people who allow it, answered by the server 500 at a time.
+ */
+export async function discoverAccounts(emails: string[], phones: string[]): Promise<AccountMatch[]> {
+  const items = [...emails.map((value) => ({ kind: 'email' as const, value })), ...phones.map((value) => ({ kind: 'phone' as const, value }))];
+  const matches: AccountMatch[] = [];
+  for (let index = 0; index < items.length; index += 500) {
+    const chunk = items.slice(index, index + 500);
+    const body = { emails: chunk.filter((item) => item.kind === 'email').map((item) => item.value), phones: chunk.filter((item) => item.kind === 'phone').map((item) => item.value) };
+    const result = await request<{ data: AccountMatch[] }>('/v1/me/contacts/discover', { method: 'POST', body }, 'Could not look up your contacts.');
+    matches.push(...result.data.filter((item) => (item.kind === 'email' || item.kind === 'phone') && typeof item.value === 'string' && typeof item.handle === 'string'));
+  }
+  return matches;
+}
+
 export async function deleteContactCard(id: string): Promise<void> {
   await request(`/v1/me/contacts/${encodeURIComponent(id)}`, { method: 'DELETE' }, 'Could not delete the contact.');
 }
@@ -129,6 +145,8 @@ export interface MyIdentity {
   shownName: string;
   nameDisclosure: 'handle_only' | 'declared' | 'verified_legal';
   visibility: 'public' | 'private';
+  /** Whether people who have your email or number can find your account (ADR 0037). On unless turned off. */
+  discoverable?: boolean;
   verification: { provider: string; status: 'pending' | 'verified' | 'failed' | 'expired' | 'revoked'; legalNameShown: boolean } | null;
   pendingRequests: number;
   verificationAvailable?: boolean;
@@ -167,7 +185,7 @@ export function loadMyIdentity(): Promise<MyIdentity> {
   return request<MyIdentity>('/v1/me/identity', {}, 'Could not load your identity settings.');
 }
 
-export function saveMyIdentity(change: { nameDisclosure?: MyIdentity['nameDisclosure']; visibility?: MyIdentity['visibility'] }): Promise<MyIdentity> {
+export function saveMyIdentity(change: { nameDisclosure?: MyIdentity['nameDisclosure']; visibility?: MyIdentity['visibility']; discoverable?: boolean }): Promise<MyIdentity> {
   return request<MyIdentity>('/v1/me/identity', { method: 'PUT', body: change }, 'Could not save that.');
 }
 

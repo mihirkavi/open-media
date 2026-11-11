@@ -1,7 +1,7 @@
 import { normalizeEmail, normalizePhone } from './contactCleaning';
 import { bridgedSourceOf } from './bridgedChats';
 import { Conversation, MessageSource, Person } from './models';
-import { cardFor, ContactCard, contactLabel, contactName, ContactHandle, encounterForConversation, HandleNetwork, normalizeHandle, isMine, refForParticipant, sameEmail, samePhone, selfCard, selfLabel } from './people';
+import { ContactCard, contactLabel, contactName, ContactHandle, ContactQuery, encounterForConversation, HandleNetwork, IdentityRef, normalizeHandle, isMine, refForParticipant, resolveContact, sameEmail, samePhone, savedName, selfCard, selfLabel } from './people';
 
 export { fullerName } from './people';
 
@@ -22,23 +22,31 @@ export function canReply(conversation: Conversation): boolean {
 }
 
 /**
+ * Who a conversation is with, as a question for `resolveContact` (ADR 0037): its identity, the
+ * contact it is already shown under, and, for email, every address the sender wrote from. A merged
+ * conversation is asked about through its newest channel. Groups have no single person.
+ */
+export function contactQueryFor(conversation: Conversation): ContactQuery | undefined {
+  const channel = conversation.channels?.[0] ?? conversation;
+  const encounter = encounterForConversation(channel);
+  if (!encounter) return undefined;
+  const alsoKnownAs: IdentityRef[] = channel.email
+    ? channel.participants[0].identities.filter((identity) => identity.kind === 'email').map((identity) => ({ kind: 'email', address: identity.value }))
+    : [];
+  return { ref: encounter.ref, cardId: conversation.contactId, alsoKnownAs };
+}
+
+/**
  * The contact a conversation belongs to, if it is one-to-one and exactly one contact holds it.
  * An email thread can carry several addresses of the same sender (a company writing from two
  * mailboxes, an alias): any of them counts, as long as they all point at the same contact.
  */
 export function contactForConversation(cards: ContactCard[], conversation: Conversation): ContactCard | undefined {
   if (conversation.email?.recipients && conversation.email.recipients.length > 1) return undefined;
-  const encounter = encounterForConversation(conversation);
-  if (!encounter) return undefined;
-  const direct = cardFor(cards, encounter.ref);
-  if (direct || !conversation.email) return direct;
-  const found = new Map<string, ContactCard>();
-  for (const identity of conversation.participants[0].identities) {
-    if (identity.kind !== 'email') continue;
-    const card = cardFor(cards, { kind: 'email', address: identity.value });
-    if (card) found.set(card.id, card);
-  }
-  return found.size === 1 ? [...found.values()][0] : undefined;
+  const query = contactQueryFor(conversation);
+  if (!query) return undefined;
+  const resolved = resolveContact(cards, query);
+  return resolved.mine ? undefined : resolved.card;
 }
 
 /**
@@ -52,7 +60,7 @@ function withContactNames(conversation: Conversation, cards: ContactCard[]): Con
   const renamed = new Map<string, { from: string; to: string }>();
   const participants = conversation.participants.map((person) => {
     const ref = refForParticipant(conversation, person);
-    const name = ref ? contactName(cardFor(cards, ref)) : '';
+    const name = ref ? savedName(cards, { ref }) : '';
     if (!name || name === person.name) return person;
     changed = true;
     renamed.set(person.id, { from: person.name, to: name });
@@ -279,7 +287,7 @@ export function recipientSuggestions(emailed: RecipientSuggestion[], cards: Cont
   const own = new Set((mine?.emails ?? []).map(normalizeEmail));
   for (const item of emailed) {
     if (own.has(normalizeEmail(item.address))) continue;
-    const name = contactName(cardFor(cards, { kind: 'email', address: item.address }));
+    const name = savedName(cards, { ref: { kind: 'email', address: item.address } });
     add(name ? { ...item, name, initials: initialsOf(name) } : item);
   }
   const me = selfLabel(profileName);

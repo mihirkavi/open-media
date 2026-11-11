@@ -5,7 +5,7 @@ import { Loader } from './Loader';
 
 import { FollowStatus, followPerson, loadPublicPerson, loadTimeline, PublicPerson, resumeUrl, sourcesFor, TimelineSource, unfollowPerson } from '../data/peopleService';
 import { networks } from '../domain/networkPosts';
-import { cardFor, ContactCard, contactName, IdentityRef, isMine, linkedIdentities, refKey, selfCard, selfLabel, shownName } from '../domain/people';
+import { ContactCard, contactName, identitiesOf, IdentityRef, refKey, resolveContact, selfCard, selfLabel, shownName } from '../domain/people';
 import { SocialPost } from '../domain/posts';
 import { initialsFor } from '../domain/publicPosts';
 import { fieldDefinition, fieldDisplay, fieldHref, publicProfileUrl } from '../domain/profileFields';
@@ -48,11 +48,14 @@ function PersonView({ target, viewerId, onBack, onClose, onMessage }: PersonProf
   const handle = target.ref.kind === 'open_media' || target.ref.kind === 'network' ? target.ref.handle.replace(/^@/, '') : undefined;
   // Your own profile, or one of your own addresses or accounts: it shows your own card (ADR 0023).
   const me = people?.me;
-  const mine = Boolean(contacts && isMine(contacts.cards, target.ref)) || Boolean(me && target.ref.kind === 'open_media' && target.ref.handle.replace(/^@/, '').toLowerCase() === me.handle.toLowerCase());
-  const opened = target.cardId ? contacts?.cards.find((item) => item.id === target.cardId) ?? (target.draft?.id === target.cardId ? target.draft : undefined) : undefined;
-  const isDraft = Boolean(target.draft && opened === target.draft);
-  const card = contacts ? (mine ? selfCard(contacts.cards) : opened ?? cardFor(contacts.cards, target.ref)) : undefined;
-  const refs = contacts ? linkedIdentities(contacts.cards, target.ref) : [target.ref];
+  // A new contact stays a draft until Done saves it (ADR 0036).
+  const isDraft = Boolean(target.draft && !contacts?.cards.some((item) => item.id === target.draft?.id));
+  // Which contact this is, asked the one way every screen asks (ADR 0037).
+  const resolved = contacts && !isDraft ? resolveContact(contacts.cards, target) : undefined;
+  const ownHandle = Boolean(me && target.ref.kind === 'open_media' && target.ref.handle.replace(/^@/, '').toLowerCase() === me.handle.toLowerCase());
+  const mine = Boolean(resolved?.mine) || ownHandle;
+  const card = contacts ? (isDraft ? target.draft : mine ? selfCard(contacts.cards) : resolved?.card) : undefined;
+  const refs = mine ? [target.ref] : identitiesOf(card, target.ref);
   const omHandle = (refs.find((ref) => ref.kind === 'open_media') as Extract<IdentityRef, { kind: 'open_media' }> | undefined)?.handle;
 
   useEffect(() => {

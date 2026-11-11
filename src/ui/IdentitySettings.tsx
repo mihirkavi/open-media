@@ -71,6 +71,14 @@ export function IdentitySettings({ handle }: { handle: string }) {
           <Text style={styles.hint}>{identity.visibility === 'private' ? 'Your posts are hidden from everyone else, including the public API and AI agents. Your handle, shown name and photo stay visible so people can find you.' : 'Anyone can read your posts, with or without an account.'}</Text>
         </View>
         <View style={[styles.block, styles.divider]}>
+          <Text style={styles.label}>Who can find you by your email or number</Text>
+          <View style={styles.options}>
+            {option('People who have it', identity.discoverable !== false, () => run('discoverable', () => saveMyIdentity({ discoverable: true })))}
+            {option('No one', identity.discoverable === false, () => run('discoverable', () => saveMyIdentity({ discoverable: false })))}
+          </View>
+          <Text style={styles.hint}>{identity.discoverable === false ? 'Someone who saved your email or number still sees only what they saved. Your Open Media account is not connected to it.' : 'Someone who already saved your email or number sees it is your Open Media account. Your email and number are never shown to anyone.'}</Text>
+        </View>
+        <View style={[styles.block, styles.divider]}>
           <Text style={styles.label}>Name others see</Text>
           <View style={styles.options}>
             {option(`@${handle}`, identity.nameDisclosure === 'handle_only', () => run('name', () => saveMyIdentity({ nameDisclosure: 'handle_only' })))}

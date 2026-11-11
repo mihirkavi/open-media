@@ -16,8 +16,7 @@ import { applyMyReaction, myReaction } from "../domain/reactions";
 import { replyCountLabel, replyCounts, replyThread } from "../domain/replyThreads";
 import { ReactionBadges, TapbackBar } from "./MessageReactions";
 import { Conversation, Message, MessageAttachment, MessageReaction, PeopleFilter, Person } from "../domain/models";
-import { encounterForConversation } from "../domain/people";
-import { canReply, channelOf, defaultChannel } from "../domain/contactMerge";
+import { canReply, channelOf, contactQueryFor, defaultChannel } from "../domain/contactMerge";
 import { conversationTitle, filterConversations } from "../domain/selectors";
 import { ThemeColors } from "../theme";
 import { useOpenMediaTheme } from "../themeContext";
@@ -2764,9 +2763,14 @@ function createStyles(colors: ThemeColors) {
 }
 
 /** The person a one-to-one thread is with, for opening their profile; groups open the first member. */
+/**
+ * Who the thread heading opens: the contact this conversation is shown under (its `contactId`),
+ * found by the same question Messages asked (ADR 0037), so the profile always shows that contact.
+ */
 function threadTarget(conversation: Conversation, person?: Person): PersonTarget {
   // Open Media AI has no profile to open.
   if (isAiConversation(conversation)) return { ref: { kind: "network", network: "open-media-ai", handle: "" } as unknown as PersonTarget["ref"], name: conversationTitle(conversation) };
-  const encounter = encounterForConversation(conversation);
-  return { ref: encounter?.ref ?? { kind: 'open_media', handle: person?.identities.find((identity) => identity.source === 'open_media')?.value.replace(/^@/, '') ?? '' }, name: conversationTitle(conversation), avatarUrl: person?.avatarUrls?.[0] };
+  const query = contactQueryFor(conversation);
+  const ref = query?.ref ?? { kind: "open_media" as const, handle: person?.identities.find((identity) => identity.source === "open_media")?.value.replace(/^@/, "") ?? "" };
+  return { ...query, ref, cardId: conversation.contactId, name: conversationTitle(conversation), avatarUrl: person?.avatarUrls?.[0] };
 }

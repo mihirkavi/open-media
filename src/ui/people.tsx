@@ -2,9 +2,9 @@ import { createContext, PropsWithChildren, useCallback, useContext, useEffect, u
 import { Image, Platform, Pressable, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
 
 import { readDeviceContacts } from '../contacts/deviceContacts';
-import { deleteContactCard, loadContactCards, loadPublicPerson, PublicPerson, saveContactCards } from '../data/peopleService';
+import { deleteContactCard, discoverAccounts, loadContactCards, loadPublicPerson, PublicPerson, saveContactCards } from '../data/peopleService';
 import { networks } from '../domain/networkPosts';
-import { cardFor, ContactCard, confirmLink, contactName, Encounter, IdentityRef, importDeviceContacts, LinkSuggestion, reconcile, refKey, rejectSuggestion, unlink } from '../domain/people';
+import { ContactCard, ContactQuery, confirmLink, discoveryRequest, Encounter, IdentityRef, importDeviceContacts, linkDiscoveredAccounts, LinkSuggestion, reconcile, refKey, rejectSuggestion, savedName, unlink } from '../domain/people';
 import { SocialPost } from '../domain/posts';
 import { WebFeedPostInfo } from '../domain/webFeeds';
 import { ThemeColors } from '../theme';
@@ -18,12 +18,14 @@ import { VerifiedSeal, personVerification } from './VerifiedSeal';
  * Search is a PersonLink. Tapping opens the unified profile; on desktop web, hovering briefly
  * shows a small preview. Keyboard and screen readers use the same link.
  */
-export interface PersonTarget {
-  ref: IdentityRef;
+/**
+ * Who to open. It is a `ContactQuery` (ADR 0037): the identity, and the contact already matched
+ * (`cardId`) when the place it was opened from knows it, such as Contacts (ADR 0036) or a
+ * conversation shown under a contact's name. The profile resolves it with `resolveContact`.
+ */
+export interface PersonTarget extends ContactQuery {
   name?: string;
   avatarUrl?: string;
-  /** Opened from Contacts: this card, even when it holds no email, number or handle yet (ADR 0036). */
-  cardId?: string;
   /** Open with the card's editor showing (a new contact). */
   editing?: boolean;
   /** A new contact not saved yet: Done saves it, Cancel discards it (ADR 0036). */
@@ -117,6 +119,22 @@ export function useContactsStore(enabled: boolean, encounters: Encounter[]): Con
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, ready, encounterKey]);
 
+  // Contacts saved by email or number connect to the person's Open Media account (ADR 0037).
+  // Asked again only when the emails and numbers that are not yet connected change.
+  const discovery = discoveryRequest(cards);
+  const discoveryKey = [...discovery.emails, ...discovery.phones].sort().join('|');
+  useEffect(() => {
+    if (!enabled || !ready || !discoveryKey) return;
+    let active = true;
+    discoverAccounts(discovery.emails, discovery.phones).then((matches) => {
+      if (!active || !matches.length) return;
+      const result = linkDiscoveredAccounts(cardsRef.current, matches);
+      if (result.changed.length) apply(result.cards, result.changed);
+    }).catch(() => undefined); // Discovery is a convenience: contacts work without it.
+    return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, ready, discoveryKey]);
+
   const update = useCallback(async (cardId: string, change: (card: ContactCard) => ContactCard) => {
     const card = cardsRef.current.find((item) => item.id === cardId);
     if (!card) return;
@@ -156,7 +174,7 @@ export function useContactsStore(enabled: boolean, encounters: Encounter[]): Con
 /** The name the viewer saved for this person, when they have one (ADR 0023). */
 export function useSavedName(ref: IdentityRef): string | undefined {
   const cards = useContext(PeopleContext)?.contacts?.cards;
-  return useMemo(() => (cards?.length ? contactName(cardFor(cards, ref)) || undefined : undefined), [cards, refKey(ref)]);
+  return useMemo(() => (cards?.length ? savedName(cards, { ref }) || undefined : undefined), [cards, refKey(ref)]);
 }
 
 export function newId(): string {
