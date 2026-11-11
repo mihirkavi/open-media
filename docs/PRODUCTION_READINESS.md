@@ -17,6 +17,10 @@ This checklist defines “production ready” for the current onboarding private
 - [x] Local browser flow: magic-link onboarding, callback cleanup, profile creation, profile search, direct conversation, send, realtime receive, account export, and responsive layout.
 - [x] Latest signed iOS Store build finished successfully: build 9, EAS `f5916bd3-c316-487a-bbed-f6085bc38fcc`.
 
+## Farcaster as a full network (ADR 0039; deployed 2026-11-11)
+
+- [x] Owner said "yes please!" to push, deploy and TestFlight. Pushed `f6d2304`; built it from a clean checkout and deployed Worker `convo-mail-sync` version `9e225f7d-066a-4159-b4f7-1279306590f9` (rollback `bdefbf04-5e56-4e72-9f59-b48d4fad9c5f`). No migration. Live: openmedia.site serves the clean build's bundle (`index-f57cd2c8…`), `/v1/posts` 200. `/v1/cross-posting/status` still reports `farcaster: false`: writing waits for `FARCASTER_APP_FID` and `FARCASTER_APP_MNEMONIC`.
+
 ## Contact resolver and contact discovery (ADR 0037; deployed 2026-11-10)
 
 - [x] Owner said "yes please push and deploy". Pushed `a40b02e` to `main`. Applied `20261123120000_contact_discovery.sql` with `npx supabase db push --linked` after a dry run (only that migration was pending). Built the web app and deployed Worker `convo-mail-sync` version `c97d9e8b-5df5-4d0a-b366-f8e0aabe3333` (rollback `f940b35e-3c11-4a87-aa3f-242c84368a44`) with Node 22 (Wrangler refuses Node 20). Live: `/v1/posts` 200; `POST /v1/me/contacts/discover` without a token 401.
