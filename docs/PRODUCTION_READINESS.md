@@ -17,6 +17,10 @@ This checklist defines “production ready” for the current onboarding private
 - [x] Local browser flow: magic-link onboarding, callback cleanup, profile creation, profile search, direct conversation, send, realtime receive, account export, and responsive layout.
 - [x] Latest signed iOS Store build finished successfully: build 9, EAS `f5916bd3-c316-487a-bbed-f6085bc38fcc`.
 
+## Chat close leaves the list shifted on iPhone (ADR 0040 fix; deployed 2026-11-11)
+
+- [x] Found on an iPhone running build 22 (tested through iPhone Mirroring): closing a chat left the Messages list a third of the way to the left. Profile push, partial and full edge swipes were correct on device. Owner said "push and deploy". Pushed `fe94617`; deployed from a clean checkout as Worker `convo-mail-sync` version `fe6c9bab-e9a5-46ab-9ad9-237be98e5467` (rollback `28d57347-b7e5-4937-99b9-28e4752fde82`). Live: openmedia.site serves the clean build's bundle (`index-47a20ec6…`), `/v1/posts` 200. TestFlight build 23 (EAS `030aef75-550d-40b8-b6ce-a60d5a6b5c2a`) from the same commit.
+
 ## Native page transitions and haptics (ADR 0040; deployed 2026-11-11)
 
 - [x] Owner said "push deploy and push to testflight please". Pushed `ae4b636`; built it from a clean checkout and deployed Worker `convo-mail-sync` version `28d57347-b7e5-4937-99b9-28e4752fde82` (rollback `be6b5453-3884-41d4-8a5e-437958e4c85b`). Live: openmedia.site serves the clean build's bundle (`index-9011ca41…`), `/v1/posts` 200. TestFlight build 22 (EAS `73bb5630-14a3-469d-85bb-09a162cfdecc`) from the same commit carries the new native modules (`expo-haptics`, `react-native-gesture-handler`).
