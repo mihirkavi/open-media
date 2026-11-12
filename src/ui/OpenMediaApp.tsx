@@ -59,7 +59,7 @@ const OpenMediaMessages = lazyComponent(() => import("./OpenMediaMessages").then
 const OpenMediaProfile = lazyComponent(() => import("./OpenMediaUtilities").then((module) => module.OpenMediaProfile));
 const OpenMediaSettings = lazyComponent(() => import("./OpenMediaUtilities").then((module) => module.OpenMediaSettings));
 import { PeopleProvider, PersonTarget, useContactsStore } from "./people";
-import { createLayerSlot, LayerSlotContext, LayerSlotView, StackBase, StackPage, useStackEntries, useStackMotion } from "./stack";
+import { createLayerSlot, LayerSlotContext, LayerSlotView, type SlotState, StackBase, StackPage, useStackEntries, useStackMotion } from "./stack";
 import { PersonProfile } from "./PersonProfile";
 import { ContactsPage } from "./ContactsPage";
 import { encounterForConversation, ownEmails } from "../domain/people";
@@ -485,7 +485,7 @@ export function OpenMediaApp({
   });
   const [openConversationId, setOpenConversationId] = useState<string>();
   // An open conversation on a phone brings its own header, and the tabs would only crowd the composer.
-  const [threadOpen, setThreadOpen] = useState(false);
+  const [threadState, setThreadState] = useState<SlotState>("closed");
   // A question asked from Ask or search, sent in the AI chat once Messages opens it.
   const [aiAsk, setAiAsk] = useState<{ text: string; at: number }>();
   const encounters = useMemo(
@@ -656,7 +656,6 @@ export function OpenMediaApp({
             onReport={reportConversation}
             openConversationId={openConversationId}
             aiAsk={aiAsk}
-            onThreadOpenChange={setThreadOpen}
           />
       );
       case "search": return (
@@ -722,7 +721,7 @@ export function OpenMediaApp({
   // Which pages are on screen, bottom to top, so each knows the page that covers it.
   const visibleLayers = [
     ...pages.entries.filter((entry) => entry.item.dest).map((entry) => ({ key: entry.key, shown: pages.motionOf(entry.key).shown, leaving: entry.leaving })),
-    ...(threadOpen ? [{ key: "thread", shown: threadMotion.shown, leaving: false }] : []),
+    ...(threadState !== "closed" ? [{ key: "thread", shown: threadMotion.shown, leaving: threadState === "leaving" }] : []),
     ...pages.entries.filter((entry) => entry.item.target).map((entry) => ({ key: entry.key, shown: pages.motionOf(entry.key).shown, leaving: entry.leaving })),
   ];
   const topKey = [...visibleLayers].reverse().find((layer) => !layer.leaving)?.key;
@@ -756,7 +755,7 @@ export function OpenMediaApp({
               <View style={styles.content}>{screenFor(entry.item.dest!)}</View>
             </StackPage>
           ))}
-          <LayerSlotView slot={threadSlot} motion={threadMotion} covering={coveringOf("thread")} top={topKey === "thread"} onOpenChange={setThreadOpen} />
+          <LayerSlotView slot={threadSlot} motion={threadMotion} covering={coveringOf("thread")} top={topKey === "thread"} onStateChange={setThreadState} />
           {pages.entries.filter((entry) => entry.item.target).map((entry) => (
             <StackPage key={entry.key} motion={pages.motionOf(entry.key)} leaving={entry.leaving} top={entry.key === topKey} covering={coveringOf(entry.key)} onBack={closePerson} onExited={() => pages.exited(entry.key)}>
               <Header destination={destination} avatarUrl={profile.avatarUrl} back onNavigate={navigate} onBack={closePerson} />

@@ -41,3 +41,4 @@ We checked Apple's guidance and React Native's options (2026-11-11):
 - Two native modules join the app (`expo-haptics`, `react-native-gesture-handler`), so phones need a new build. TestFlight builds include them.
 - A covered page stays mounted. That costs memory, but lists are virtualized and video pauses.
 - The swipe is native, but the page stack is still React. Moving to `react-native-screens` native stack would give UIKit's own transitions, at the cost of replacing the state-based navigation.
+- With the native driver, a transform whose animation is detached keeps its last value. A covered page therefore always follows an animated value (a resting zero when nothing covers it), and the Messages thread counts as covering until it has finished sliding out (`LayerSlotView` reports open, leaving, closed). Found on an iPhone in build 22: closing a chat left the list a third of the way to the left.

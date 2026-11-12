@@ -55,9 +55,12 @@ export function useStackMotion(): StackMotion {
 }
 
 /** How a page moves when the page above it (`covering`) comes in: a third to the left. */
+// Uncovered pages still follow an animated zero: with the native driver, a transform whose
+// animation is detached keeps its last value, which left a page stuck a third to the left.
+const uncovered = new Animated.Value(0);
 function coveredStyle(covering: AnimatedNumber | undefined, width: number) {
-  if (!covering || reduceMotion) return undefined;
-  return { transform: [{ translateX: covering.interpolate({ inputRange: [0, 1], outputRange: [0, -width * parallax] }) }] };
+  if (reduceMotion) return undefined;
+  return { transform: [{ translateX: (covering ?? uncovered).interpolate({ inputRange: [0, 1], outputRange: [0, -width * parallax] }) }] };
 }
 
 /**
@@ -218,16 +221,24 @@ export function useSlotLayer(layer: SlotLayer | undefined) {
   return Boolean(slot);
 }
 
-/** Draws the slot's page as a stack page, sliding it out when the screen lets go. */
-export function LayerSlotView({ slot, motion, covering, top, onOpenChange }: { slot: LayerSlot; motion: StackMotion; covering?: AnimatedNumber; top: boolean; onOpenChange: (open: boolean) => void }) {
+export type SlotState = 'open' | 'leaving' | 'closed';
+/**
+ * Draws the slot's page as a stack page, sliding it out when the screen lets go. `onStateChange`
+ * reports 'leaving' while it slides out and 'closed' only once it is gone, so the page underneath
+ * keeps following it all the way back.
+ */
+export function LayerSlotView({ slot, motion, covering, top, onStateChange }: { slot: LayerSlot; motion: StackMotion; covering?: AnimatedNumber; top: boolean; onStateChange: (state: SlotState) => void }) {
   const layer = useSyncExternalStore(slot.subscribe, slot.get, slot.get);
   const [shown, setShown] = useState<SlotLayer>();
-  const changed = useRef(onOpenChange);
-  changed.current = onOpenChange;
+  const changed = useRef(onStateChange);
+  changed.current = onStateChange;
+  const open = Boolean(layer);
+  useEffect(() => { if (layer) setShown(layer); }, [layer]);
   useEffect(() => {
-    if (layer) setShown(layer);
-    changed.current(Boolean(layer));
-  }, [layer]);
+    if (open) changed.current('open');
+    else if (shown) changed.current('leaving');
+    else changed.current('closed');
+  }, [open, Boolean(shown)]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!shown) return null;
   return <StackPage motion={motion} leaving={!layer} top={top && Boolean(layer)} covering={covering} onBack={shown.onBack} onExited={() => setShown(undefined)}>
     {layer?.node ?? shown.node}
