@@ -6,6 +6,11 @@
 - Keep connector support claims aligned with working code. Mock or proposed connectors must be labeled clearly.
 - Keep generated output inside this repository or an operating-system temporary directory.
 
+## Finding code (knowledge graph)
+
+- Before grepping or reading whole files, query the graph: `python3 scripts/knowledge-graph/kg.py overview | search <words> | sym <name> | file <path> | impact <name|path> | path <a> <b> | table <name> | route <prefix> | adr <n>`. Then read only the lines you need (`kg.py body <name>`).
+- It rebuilds itself when `.ts`/`.tsx`/`.sql`/`.md` files change. Details and limits: `scripts/knowledge-graph/README.md`.
+
 ## Cross-platform verification (required for every change)
 
 Open Media ships as one app on web, iOS, and Android. A change is not done until it is tested on every platform it can affect, not just the one it was written on.

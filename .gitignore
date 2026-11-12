@@ -61,3 +61,6 @@ services/mail-sync/.env
 packages/*/dist/
 packages/python/build/
 packages/python/*.egg-info/
+
+# Knowledge graph (npm run kg:build)
+.knowledge/
