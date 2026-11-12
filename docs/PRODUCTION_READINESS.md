@@ -17,6 +17,10 @@ This checklist defines “production ready” for the current onboarding private
 - [x] Local browser flow: magic-link onboarding, callback cleanup, profile creation, profile search, direct conversation, send, realtime receive, account export, and responsive layout.
 - [x] Latest signed iOS Store build finished successfully: build 9, EAS `f5916bd3-c316-487a-bbed-f6085bc38fcc`.
 
+## Native page transitions and haptics (ADR 0040; deployed 2026-11-11)
+
+- [x] Owner said "push deploy and push to testflight please". Pushed `ae4b636`; built it from a clean checkout and deployed Worker `convo-mail-sync` version `28d57347-b7e5-4937-99b9-28e4752fde82` (rollback `be6b5453-3884-41d4-8a5e-437958e4c85b`). Live: openmedia.site serves the clean build's bundle (`index-9011ca41…`), `/v1/posts` 200. TestFlight build 22 (EAS `73bb5630-14a3-469d-85bb-09a162cfdecc`) from the same commit carries the new native modules (`expo-haptics`, `react-native-gesture-handler`).
+
 ## Farcaster as a full network (ADR 0039; deployed 2026-11-11)
 
 - [x] Owner said "yes please!" to push, deploy and TestFlight. Pushed `f6d2304`; built it from a clean checkout and deployed Worker `convo-mail-sync` version `9e225f7d-066a-4159-b4f7-1279306590f9` (rollback `bdefbf04-5e56-4e72-9f59-b48d4fad9c5f`). No migration. Live: openmedia.site serves the clean build's bundle (`index-f57cd2c8…`), `/v1/posts` 200. `/v1/cross-posting/status` still reports `farcaster: false`: writing waits for `FARCASTER_APP_FID` and `FARCASTER_APP_MNEMONIC`.
