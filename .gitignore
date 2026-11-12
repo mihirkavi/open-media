@@ -64,3 +64,6 @@ packages/python/*.egg-info/
 
 # Knowledge graph (npm run kg:build)
 .knowledge/
+
+# Obsidian vault settings (local editor state)
+.obsidian/
