@@ -17,6 +17,10 @@ This checklist defines “production ready” for the current onboarding private
 - [x] Local browser flow: magic-link onboarding, callback cleanup, profile creation, profile search, direct conversation, send, realtime receive, account export, and responsive layout.
 - [x] Latest signed iOS Store build finished successfully: build 9, EAS `f5916bd3-c316-487a-bbed-f6085bc38fcc`.
 
+## Chats stop opening after a swipe-close on iPhone (ADR 0040 fix; deployed 2026-11-11)
+
+- [x] Build 23 verified on an iPhone through iPhone Mirroring: closing a chat with Back or a swipe now returns the list fully in place. New bug found there: after a chat was swiped closed, no chat would open. Pushed `f60c597`; deployed from a clean checkout as Worker `convo-mail-sync` version `86f17f58-852f-4ec5-abbd-ca17870e6980` (rollback `fe6c9bab-e9a5-46ab-9ad9-237be98e5467`). Live: openmedia.site serves the clean build's bundle (`index-1ee05330…`), `/v1/posts` 200. TestFlight build 24 (EAS `dbf101a6-e4b1-4cd6-98be-e0504ff34e09`).
+
 ## Chat close leaves the list shifted on iPhone (ADR 0040 fix; deployed 2026-11-11)
 
 - [x] Found on an iPhone running build 22 (tested through iPhone Mirroring): closing a chat left the Messages list a third of the way to the left. Profile push, partial and full edge swipes were correct on device. Owner said "push and deploy". Pushed `fe94617`; deployed from a clean checkout as Worker `convo-mail-sync` version `fe6c9bab-e9a5-46ab-9ad9-237be98e5467` (rollback `28d57347-b7e5-4937-99b9-28e4752fde82`). Live: openmedia.site serves the clean build's bundle (`index-47a20ec6…`), `/v1/posts` 200. TestFlight build 23 (EAS `030aef75-550d-40b8-b6ce-a60d5a6b5c2a`) from the same commit.
