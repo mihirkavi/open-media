@@ -13,6 +13,7 @@ import { useMixedFeed } from './useMixedFeed';
 import { TranslationNote, useTranslation } from './useTranslation';
 import { VerifiedTickWithCard, personVerification } from './VerifiedSeal';
 import { Loader } from './Loader';
+import { usePageActive } from './stack';
 
 /**
  * Clips: the same canonical posts as Feed, shown as an immersive vertical stream of short videos
@@ -58,6 +59,8 @@ export function ClipsView({ sessionKey, lens = rawLens, lensContext }: { session
   const scroller = useRef<FlatList<SocialPost>>(null);
   const [height, setHeight] = useState(0);
   const [active, setActive] = useState(0);
+  // A page pushed over Clips (a profile, Settings) pauses the clip until Clips is in front again.
+  const pageActive = usePageActive();
   activeRef.current = active;
   const [muted, setMuted] = useState(true);
   const [failed, setFailed] = useState<Set<string>>(() => new Set());
@@ -77,7 +80,7 @@ export function ClipsView({ sessionKey, lens = rawLens, lensContext }: { session
   // Virtualized with a fixed row height: only the clips around the one being watched exist at all
   // (players for ±1, posters and overlays for a few more), so a long session never piles up
   // full-screen images and overlays. Rows are memoized, so changing clips re-renders three rows, not all.
-  const renderClip = useCallback<ListRenderItem<SocialPost>>(({ item, index }) => <Clip post={item} lens={lens} lensContext={lensContext} height={height} active={index === active} mounted={Math.abs(index - active) <= 1} muted={muted} onToggleMute={toggleMute} onFailed={markFailed} />, [lens, lensContext, height, active, muted, toggleMute, markFailed]);
+  const renderClip = useCallback<ListRenderItem<SocialPost>>(({ item, index }) => <Clip post={item} lens={lens} lensContext={lensContext} height={height} active={index === active && pageActive} mounted={Math.abs(index - active) <= 1} muted={muted} onToggleMute={toggleMute} onFailed={markFailed} />, [lens, lensContext, height, active, pageActive, muted, toggleMute, markFailed]);
   const clipLayout = useCallback((_: ArrayLike<SocialPost> | null | undefined, index: number) => ({ length: height, offset: height * index, index }), [height]);
 
   return <View style={styles.screen} onLayout={onLayout}>

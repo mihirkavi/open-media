@@ -3,6 +3,7 @@ import { GestureResponderEvent, Platform, RefreshControl, ScrollView, StyleProp,
 
 import { useOpenMediaTheme } from '../themeContext';
 import { Loader } from './Loader';
+import { lightHaptic } from './haptics';
 
 const trigger = 64;
 
@@ -23,6 +24,7 @@ export function PullToRefresh({ onRefresh, style, contentContainerStyle, childre
 
   const refresh = () => {
     if (!onRefresh || refreshing) return;
+    if (Platform.OS !== 'web') lightHaptic();
     setRefreshing(true);
     onRefresh().catch(() => undefined).finally(() => { setRefreshing(false); setPull(0); });
   };

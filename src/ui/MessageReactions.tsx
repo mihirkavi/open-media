@@ -8,6 +8,7 @@ import { MessageReaction } from "../domain/models";
 import { describeReaction, myReaction, summarizeReactions, tapbacks } from "../domain/reactions";
 import { ThemeColors } from "../theme";
 import { useOpenMediaTheme } from "../themeContext";
+import { selectionHaptic } from './haptics';
 
 /**
  * The tapback bar, like iMessage: six quick reactions in a floating pill above the bubble, the
@@ -57,7 +58,7 @@ export function TapbackBar({
               accessibilityRole="menuitem"
               accessibilityLabel={emoji === mine ? `Remove ${emoji}` : `React with ${emoji}`}
               accessibilityState={{ selected: emoji === mine }}
-              onPress={() => onReact(emoji)}
+              onPress={() => { selectionHaptic(); onReact(emoji); }}
               style={({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) => [
                 styles.choice,
                 emoji === mine && styles.choiceMine,

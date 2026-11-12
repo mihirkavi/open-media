@@ -8,6 +8,7 @@ import { SwipeToToggleRead } from "./SwipeToToggleRead";
 import { receiptLabel, receiptOf } from "../domain/receipts";
 import { PersonLink, PersonTarget, useSavedName } from "./people";
 import { Text, TextInput } from "./Text";
+import { useSlotLayer } from "./stack";
 
 import { bridgedSourceOf } from "../connectors/bridgesConnector";
 import { attachmentURL } from "../connectors/mailApiConnector";
@@ -33,6 +34,7 @@ import { AiThinking } from "./AiThinking";
 import { jumboEmojiCount, mediaPreview, parseMessageMedia } from "../domain/messageMedia";
 import { lazyComponent, whenIdle } from "./lazyComponent";
 import { JumboEmoji, MessageMediaView } from "./MessageMediaView";
+import { lightHaptic, mediumHaptic, selectionHaptic } from "./haptics";
 
 interface Props {
   conversations: Conversation[];
@@ -150,8 +152,7 @@ export function OpenMediaMessages({
   const threadFullScreen = compact && Boolean(selected) && !composing;
   useEffect(() => { onThreadOpenChange?.(threadFullScreen); }, [threadFullScreen]);
   useEffect(() => () => onThreadOpenChange?.(false), []);
-  if (threadFullScreen && selected)
-    return (
+  const thread = threadFullScreen && selected ? (
       <MessageThread
         key={selected.id}
         conversation={selected}
@@ -164,7 +165,11 @@ export function OpenMediaMessages({
         onSetBlocked={onSetBlocked}
         onReport={onReport}
       />
-    );
+    ) : undefined;
+  // On phones the thread slides in over the whole app, list, header and tabs alike, the way Messages
+  // on iPhone does it (ADR 0040); the list stays put underneath, scroll position and all.
+  const slotted = useSlotLayer(thread && selected ? { key: selected.id, node: thread, onBack: () => setSelectedId(undefined) } : undefined);
+  if (thread && !slotted) return thread;
   return (
     <View style={styles.layout}>
       <View style={[styles.list, compact && styles.listCompact]}>
@@ -177,7 +182,7 @@ export function OpenMediaMessages({
                 accessibilityRole="button"
                 accessibilityLabel="Unread only"
                 accessibilityState={{ selected: unreadOnly }}
-                onPress={() => setUnreadOnly((value) => !value)}
+                onPress={() => { selectionHaptic(); setUnreadOnly((value) => !value); }}
                 style={({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) => [styles.unreadButton, unreadOnly && styles.unreadButtonActive, (hovered || pressed) && !unreadOnly && styles.unreadButtonHover]}
               >
                 <Ionicons
@@ -221,7 +226,7 @@ export function OpenMediaMessages({
                 key={filter}
                 accessibilityRole="button"
                 accessibilityState={{ selected: peopleFilter === filter }}
-                onPress={() => setPeopleFilter(filter)}
+                onPress={() => { if (filter !== peopleFilter) selectionHaptic(); setPeopleFilter(filter); }}
                 style={[
                   styles.chip,
                   peopleFilter === filter && styles.chipActive,
@@ -579,6 +584,7 @@ function MessageThread({
   };
   const submit = () => {
     if (!body.trim()) return;
+    lightHaptic();
     send(body.trim());
     setBody("");
   };
@@ -1704,7 +1710,7 @@ function MessageBubble({
         if (event.nativeEvent.actionName === "react") onOpen(true);
       }}
       // Long-press opens the tapback bar, which also has Reply; without reactions it replies at once.
-      onLongPress={() => (canReact ? onOpen(true) : onReply())}
+      onLongPress={() => { mediumHaptic(); if (canReact) onOpen(true); else onReply(); }}
       delayLongPress={320}
       onHoverIn={() => setHovered(true)}
       onHoverOut={() => setHovered(false)}

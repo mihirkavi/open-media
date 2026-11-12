@@ -8,6 +8,7 @@ import { Platform } from 'react-native';
 
 import { passkeyBridgePath } from './src/domain/passkeyBridge';
 import { AppErrorBoundary } from './src/ui/AppErrorBoundary';
+import { GestureRoot } from './src/ui/edgeSwipe';
 import { lazyComponent } from './src/ui/lazyComponent';
 import { OpenMediaEntry } from './src/ui/OpenMediaEntry';
 import { OpenMediaThemeProvider, useOpenMediaTheme } from './src/themeContext';
@@ -38,5 +39,5 @@ export default function App() {
   // On the web, agents in the person's browser can search and read through WebMCP.
   useEffect(() => registerWebMcpTools(), []);
   if (!loaded && !error) return null;
-  return <AppErrorBoundary><SafeAreaProvider><OpenMediaThemeProvider><ThemedApp /></OpenMediaThemeProvider></SafeAreaProvider></AppErrorBoundary>;
+  return <AppErrorBoundary><GestureRoot><SafeAreaProvider><OpenMediaThemeProvider><ThemedApp /></OpenMediaThemeProvider></SafeAreaProvider></GestureRoot></AppErrorBoundary>;
 }

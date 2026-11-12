@@ -16,6 +16,7 @@ import { Text, TextInput } from './Text';
 import { useCrossPosting } from './useCrossPosting';
 import { TranslationNote, useTranslation } from './useTranslation';
 import { Loader } from './Loader';
+import { lightHaptic } from './haptics';
 
 const zero: PostEngagement = { replies: 0, reposts: 0, likes: 0, liked: false, reshared: false };
 
@@ -69,6 +70,7 @@ export function PostActions({ post, signedIn, children }: { post: SocialPost; si
     // Farcaster lets Open Media take a like or recast back (ADR 0039); other networks are undone there.
     if (route.via === 'network' && active && !(await canUndoOnNetwork(route.network))) { setNotice(`${kind === 'like' ? 'Liked' : 'Reshared'} on ${networks[route.network].displayName}. To undo it, use ${networks[route.network].displayName}.`); return; }
     const before = engagement;
+    if (!active) lightHaptic();
     setEngagement(applyInteraction(engagement, kind, !active)); setNotice(''); setBusy(kind);
     try {
       if (route.via === 'open-media') setEngagement(await (kind === 'like' ? setPostLike(post.id, !active) : setPostReshare(post.id, !active)));

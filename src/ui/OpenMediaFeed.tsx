@@ -31,12 +31,14 @@ import { ThemeColors } from '../theme';
 import { useOpenMediaTheme } from '../themeContext';
 import { ClipVideo } from './ClipVideo';
 import { reportVisibleMedia, usePlayback } from './usePlayback';
+import { usePageActive } from './stack';
 import { canRecordVideo, pickVideo } from './pickVideo';
 import { useCrossPosting } from './useCrossPosting';
 import { TranslationNote, useTranslation } from './useTranslation';
 import type { FeedSourceStatus } from './useMixedFeed';
 import { VerifiedSeal, personVerification } from './VerifiedSeal';
 import { WebFeedCard } from './WebFeedCard';
+import { errorHaptic, selectionHaptic, successHaptic } from './haptics';
 
 export interface FeedViewer { id: string; initials: string }
 
@@ -128,6 +130,9 @@ export function FeedView({ lens, lenses, onLensChange, lensContext, posts, loadi
   const rowContext = useMemo(() => ({ lens, lensContext: rankingContext, viewer, onDeletePost, onReportPost }), [lens, rankingContext, viewer, onDeletePost, onReportPost]);
   const renderPost = useCallback<ListRenderItem<SocialPost>>(({ item }) => <PostCard post={item} mode={rowContext.lens} lensContext={rowContext.lensContext} viewer={rowContext.viewer} onDelete={rowContext.onDeletePost} onReport={rowContext.onReportPost} />, [rowContext]);
   // A playing video that scrolls out of view pauses (FlatList requires these two to never change).
+  // A page pushed over the Feed (ADR 0040) pauses its video, as iOS does behind a pushed screen.
+  const pageActive = usePageActive();
+  useEffect(() => { if (!pageActive) reportVisibleMedia([]); }, [pageActive]);
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => reportVisibleMedia(viewableItems.map((token) => String(token.key)))).current;
   // iOS moves focused fields above the keyboard through the scroll view's insets; Android (edge to edge) needs the screen to shrink.
   return <KeyboardAvoidingView style={styles.screen} behavior={Platform.OS === 'android' ? 'height' : undefined}>
@@ -213,6 +218,8 @@ function Composer({ viewer, open, onOpenChange, onPublished }: { viewer: FeedVie
   const draftVideo = video ? draftCrossPostVideo(video) : undefined;
   const finish = (outcomes: CrossPostOutcome[], text: string, postId: string, sent?: CrossPostVideo) => {
     // Keep the per-network result open when something was skipped, failed, or arrived differently.
+    if (outcomes.some((outcome) => outcome.status === 'failed')) errorHaptic();
+    else successHaptic();
     if (outcomes.some((outcome) => outcome.status !== 'published' || outcome.message)) setRetry({ body: text, postId, outcomes, video: sent });
     else { setRetry(undefined); setNotice(outcomeSummary(outcomes)); onOpenChange(false); }
   };
@@ -364,7 +371,7 @@ export function FeedPicker({ value, lenses = [], onChange }: { value: string; le
   const custom = lenses.filter((item) => item.id !== ownCopyId(relevantLens) && (!item.builtIn || (item.id !== 'relevant' && item.id !== 'raw')));
   const third = custom.find((item) => item.id === value) ?? custom.find((item) => !item.builtIn);
   const choices = [first, { id: 'raw', name: 'Raw' }, ...(third ? [{ id: third.id, name: third.name }] : [])];
-  return <View accessibilityRole="tablist" accessibilityLabel="Feed lens" style={styles.segment}>{choices.map((choice) => <Pressable key={choice.id} accessibilityRole="tab" accessibilityLabel={choice.id === third?.id ? `${choice.name}, your lens` : choice.name} accessibilityState={{ selected: value === choice.id }} onPress={() => onChange(choice.id)} style={[styles.segmentButton, value === choice.id && styles.segmentActive]}><Text numberOfLines={1} style={[styles.segmentText, choice.id === third?.id && styles.segmentCustom, value === choice.id && styles.segmentTextActive]}>{choice.name}</Text></Pressable>)}</View>;
+  return <View accessibilityRole="tablist" accessibilityLabel="Feed lens" style={styles.segment}>{choices.map((choice) => <Pressable key={choice.id} accessibilityRole="tab" accessibilityLabel={choice.id === third?.id ? `${choice.name}, your lens` : choice.name} accessibilityState={{ selected: value === choice.id }} onPress={() => { if (value !== choice.id) selectionHaptic(); onChange(choice.id); }} style={[styles.segmentButton, value === choice.id && styles.segmentActive]}><Text numberOfLines={1} style={[styles.segmentText, choice.id === third?.id && styles.segmentCustom, value === choice.id && styles.segmentTextActive]}>{choice.name}</Text></Pressable>)}</View>;
 }
 
 type PostCardProps = { post: SocialPost; mode: FeedMode | FeedLens; lensContext?: LensContext; viewer?: FeedViewer; onDelete?: (postId: string) => Promise<void>; onReport?: (postId: string, reason: PostReportReason) => Promise<void> };

@@ -1,6 +1,6 @@
 import Ionicons from "./Icon";
 import { useThemedStyles } from './useThemedStyles';
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState, Image, Platform, Pressable, StyleSheet, View, useWindowDimensions } from "react-native";
 import { Text } from "./Text";
 
@@ -59,6 +59,7 @@ const OpenMediaMessages = lazyComponent(() => import("./OpenMediaMessages").then
 const OpenMediaProfile = lazyComponent(() => import("./OpenMediaUtilities").then((module) => module.OpenMediaProfile));
 const OpenMediaSettings = lazyComponent(() => import("./OpenMediaUtilities").then((module) => module.OpenMediaSettings));
 import { PeopleProvider, PersonTarget, useContactsStore } from "./people";
+import { createLayerSlot, LayerSlotContext, LayerSlotView, StackBase, StackPage, useStackEntries, useStackMotion } from "./stack";
 import { PersonProfile } from "./PersonProfile";
 import { ContactsPage } from "./ContactsPage";
 import { encounterForConversation, ownEmails } from "../domain/people";
@@ -132,6 +133,11 @@ export function OpenMediaApp({
       ? (initialDestination as PrimaryDestination)
       : "feed",
   );
+  // Pages pushed over the tab on phones, bottom to top (ADR 0040): Profile, then Contacts, and so on.
+  const [pageTrail, setPageTrail] = useState<Destination[]>(primary.some((item) => item.id === initialDestination) ? [] : [initialDestination]);
+  // The Messages thread is drawn above the header and tabs through this slot, and slides with this value.
+  const threadSlot = useMemo(() => createLayerSlot(), []);
+  const threadMotion = useStackMotion();
   // Messages is one tap away, so fetch its code once the first screen is up.
   useEffect(() => whenIdle(() => { OpenMediaMessages.preload().catch(() => undefined); }), []);
   // Browser back/forward moves between sections.
@@ -565,6 +571,7 @@ export function OpenMediaApp({
     if (primary.some((item) => item.id === next))
       setLastPrimary(next as PrimaryDestination);
     setDestination(next);
+    setPageTrail((trail) => primary.some((item) => item.id === next) ? [] : trail.includes(next) ? trail.slice(0, trail.indexOf(next) + 1) : [...trail, next]);
     writeDestinationToURL(next);
     // Going somewhere by hand starts at the top; only openSetting below lands on one setting.
     setSettingsFocus(undefined);
@@ -599,38 +606,10 @@ export function OpenMediaApp({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aiActions]);
 
-  const chatFullScreen = threadOpen && !person && destination === "messages";
-  return (
-    <PeopleProvider value={people}>
-    <View style={[styles.app, compact && styles.appCompact]}>
-      {!compact ? (
-        <DesktopRail
-          destination={destination}
-          avatarUrl={profile.avatarUrl}
-          onNavigate={navigate}
-          onCompose={startPost}
-        />
-      ) : null}
-      <View style={styles.content}>
-        {compact && !chatFullScreen ? (
-          <Header
-            destination={destination}
-            avatarUrl={profile.avatarUrl}
-            back={Boolean(person)}
-            onNavigate={navigate}
-            onBack={person ? closePerson : destination === "contacts" ? () => navigate("profile") : () => navigate(lastPrimary)}
-          />
-        ) : null}
-        {person ? (
-          <PersonProfile
-            target={person}
-            viewerId={currentUserId}
-            onBack={compact ? undefined : closePerson}
-            onClose={closePerson}
-            onMessage={messageMode === "open_media" ? (handle) => { messagePerson(handle).catch(() => undefined); } : undefined}
-          />
-        ) : null}
-        {!person && destination === "feed" ? (
+  // Each screen, wherever it is shown: in the desktop layout, or on phones as a tab or a pushed page.
+  const screenFor = (dest: Destination): ReactNode => {
+    switch (dest) {
+      case "feed": return (
           <FeedView
             lens={lenses.lens}
             lenses={lenses.lenses}
@@ -653,9 +632,9 @@ export function OpenMediaApp({
             onDeletePost={canPost ? removeOwnPost : undefined}
             onReportPost={canPost ? reportPost : undefined}
           />
-        ) : null}
-        {!person && destination === "clips" ? <ClipsView sessionKey={currentUserId} lens={lenses.lens} lensContext={lenses.context} /> : null}
-        {!person && destination === "messages" ? (
+      );
+      case "clips": return <ClipsView sessionKey={currentUserId} lens={lenses.lens} lensContext={lenses.context} />;
+      case "messages": return (
           <OpenMediaMessages
             conversations={personConversations}
             loading={messagesLoading}
@@ -679,8 +658,8 @@ export function OpenMediaApp({
             aiAsk={aiAsk}
             onThreadOpenChange={setThreadOpen}
           />
-        ) : null}
-        {!person && destination === "search" ? (
+      );
+      case "search": return (
           <SearchView
             initialQuery={searchQuery}
             posts={feed.posts}
@@ -693,8 +672,8 @@ export function OpenMediaApp({
             onAsk={aiRecords !== null && messageMode === "open_media" ? (text) => { setAiAsk({ text, at: Date.now() }); setOpenConversationId(aiConversationId); navigate("messages"); } : undefined}
             onDismiss={() => navigate(lastPrimary)}
           />
-        ) : null}
-        {!person && destination === "profile" ? (
+      );
+      case "profile": return (
           <OpenMediaProfile
             profile={profile}
             onNavigate={navigate}
@@ -703,11 +682,11 @@ export function OpenMediaApp({
             onProfileChange={onProfileChange}
             focus={profileFocus}
           />
-        ) : null}
-        {!person && destination === "contacts" ? (
+      );
+      case "contacts": return (
           <ContactsPage handle={profile.handle} onBack={compact ? undefined : () => navigate("profile")} />
-        ) : null}
-        {!person && destination === "settings" ? (
+      );
+      case "settings": return (
           <OpenMediaSettings
             focus={settingsFocus}
             onOpenSetting={openSetting}
@@ -716,17 +695,83 @@ export function OpenMediaApp({
             posts={feed.posts}
             onMailSynced={onMailSynced}
           />
-        ) : null}
-      </View>
-      {compact && primary.some((item) => item.id === destination) && !chatFullScreen ? (
-        <MobileTabs
-          destination={destination as PrimaryDestination}
+      );
+    }
+  };
+  const personScreen = (target: PersonTarget) => (
+          <PersonProfile
+            target={target}
+            viewerId={currentUserId}
+            onBack={compact ? undefined : closePerson}
+            onClose={closePerson}
+            onMessage={messageMode === "open_media" ? (handle) => { messagePerson(handle).catch(() => undefined); } : undefined}
+          />
+  );
+  // Phones (ADR 0040): the tab is the base page; Profile, Settings, Contacts and Search are pushed
+  // on it, the Messages thread slides over them, and a person's profile goes on top.
+  const pageItems = [
+    ...pageTrail.map((dest) => ({ key: `page:${dest}`, dest, target: undefined as PersonTarget | undefined })),
+    ...(person ? [{ key: "person", dest: undefined as Destination | undefined, target: person }] : []),
+  ];
+  const pages = useStackEntries(pageItems, (item) => item.key);
+  const basePrimary = primary.some((item) => item.id === destination) ? destination : lastPrimary;
+  const pageBack = (dest: Destination) => () => {
+    const at = pageTrail.indexOf(dest);
+    navigate(at > 0 ? pageTrail[at - 1] : lastPrimary);
+  };
+  // Which pages are on screen, bottom to top, so each knows the page that covers it.
+  const visibleLayers = [
+    ...pages.entries.filter((entry) => entry.item.dest).map((entry) => ({ key: entry.key, shown: pages.motionOf(entry.key).shown, leaving: entry.leaving })),
+    ...(threadOpen ? [{ key: "thread", shown: threadMotion.shown, leaving: false }] : []),
+    ...pages.entries.filter((entry) => entry.item.target).map((entry) => ({ key: entry.key, shown: pages.motionOf(entry.key).shown, leaving: entry.leaving })),
+  ];
+  const topKey = [...visibleLayers].reverse().find((layer) => !layer.leaving)?.key;
+  const firstCovering = visibleLayers[0]?.shown;
+  const coveringOf = (key: string) => {
+    const at = visibleLayers.findIndex((layer) => layer.key === key);
+    return at >= 0 ? visibleLayers[at + 1]?.shown : undefined;
+  };
+  return (
+    <PeopleProvider value={people}>
+    <LayerSlotContext.Provider value={compact ? threadSlot : null}>
+    <View style={[styles.app, compact && styles.appCompact]}>
+      {!compact ? (
+        <DesktopRail
+          destination={destination}
+          avatarUrl={profile.avatarUrl}
           onNavigate={navigate}
           onCompose={startPost}
         />
       ) : null}
+      {compact ? (
+        <View style={styles.content}>
+          <StackBase covering={firstCovering} covered={Boolean(topKey)}>
+            <Header destination={basePrimary} avatarUrl={profile.avatarUrl} back={false} onNavigate={navigate} onBack={() => navigate(lastPrimary)} />
+            <View style={styles.content}>{screenFor(basePrimary)}</View>
+            <MobileTabs destination={basePrimary as PrimaryDestination} onNavigate={navigate} onCompose={startPost} />
+          </StackBase>
+          {pages.entries.filter((entry) => entry.item.dest).map((entry) => (
+            <StackPage key={entry.key} motion={pages.motionOf(entry.key)} leaving={entry.leaving} top={entry.key === topKey} covering={coveringOf(entry.key)} onBack={pageBack(entry.item.dest!)} onExited={() => pages.exited(entry.key)}>
+              <Header destination={entry.item.dest!} avatarUrl={profile.avatarUrl} back onNavigate={navigate} onBack={pageBack(entry.item.dest!)} />
+              <View style={styles.content}>{screenFor(entry.item.dest!)}</View>
+            </StackPage>
+          ))}
+          <LayerSlotView slot={threadSlot} motion={threadMotion} covering={coveringOf("thread")} top={topKey === "thread"} onOpenChange={setThreadOpen} />
+          {pages.entries.filter((entry) => entry.item.target).map((entry) => (
+            <StackPage key={entry.key} motion={pages.motionOf(entry.key)} leaving={entry.leaving} top={entry.key === topKey} covering={coveringOf(entry.key)} onBack={closePerson} onExited={() => pages.exited(entry.key)}>
+              <Header destination={destination} avatarUrl={profile.avatarUrl} back onNavigate={navigate} onBack={closePerson} />
+              <View style={styles.content}>{personScreen(entry.item.target!)}</View>
+            </StackPage>
+          ))}
+        </View>
+      ) : (
+        <View style={styles.content}>
+          {person ? personScreen(person) : screenFor(destination)}
+        </View>
+      )}
 
     </View>
+    </LayerSlotContext.Provider>
     </PeopleProvider>
   );
 }
