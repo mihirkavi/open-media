@@ -15,17 +15,18 @@ import { useOpenMediaTheme } from '../themeContext';
 import { BrandMark } from './BrandMark';
 import { LandingPage, PublicPage } from './LandingPage';
 import { PeopleProvider, PersonTarget, usePeople } from './people';
-import { PersonProfile } from './PersonProfile';
 import { MobileTabs, OpenMediaApp } from './OpenMediaApp';
-import { ClipsView } from './ClipsView';
 import { AskMark } from './AiMark';
 import { SocialPost } from '../domain/posts';
 import { FeedView } from './OpenMediaFeed';
-import { SearchView } from './SearchView';
 import { useFeedLenses } from './useFeedLenses';
 import { useMixedFeed } from './useMixedFeed';
 import { Loader } from './Loader';
-import { lazyComponent } from './lazyComponent';
+import { lazyComponent, whenIdle } from './lazyComponent';
+// Tabs and pages opened after the first screen load on demand (and are preloaded when idle).
+const ClipsView = lazyComponent(() => import('./ClipsView').then((module) => module.ClipsView));
+const SearchView = lazyComponent(() => import('./SearchView').then((module) => module.SearchView));
+const PersonProfile = lazyComponent(() => import('./PersonProfile').then((module) => module.PersonProfile));
 
 // Reached from links on the landing page, so their code loads only when opened.
 const MissionPage = lazyComponent(() => import('./MissionPage').then((module) => module.MissionPage));
@@ -159,6 +160,8 @@ function PublicSite({ onSignIn }: { onSignIn: () => void }) {
   });
   const people = useMemo(() => ({ open: (target: PersonTarget) => { setPerson(target); showProfileAddress(target); } }), []);
   const closePerson = () => { setPerson(undefined); leaveProfileAddress(); };
+  // The guest tabs open instantly: their code downloads once the first page is idle.
+  useEffect(() => whenIdle(() => { for (const screen of [ClipsView, SearchView, PersonProfile]) screen.preload().catch(() => undefined); }), []);
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof window === 'undefined') return;
     const onHash = () => setPage(pageFromHash());

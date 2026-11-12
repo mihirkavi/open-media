@@ -36,6 +36,9 @@ if (result.status !== 0) process.exit(result.status ?? 1);
 mkdirSync(join(root, '.web-dist', 'brand'), { recursive: true });
 for (const file of ['logo-light.png', 'logo-dark.png']) copyFileSync(join(root, 'assets', 'brand', file), join(root, '.web-dist', 'brand', file));
 addStartupHints(join(root, '.web-dist'), [env.EXPO_PUBLIC_SUPABASE_URL, env.EXPO_PUBLIC_OPEN_MEDIA_API_URL]);
+// The content-hashed JavaScript is served by Cloudflare's asset service without running the Worker
+// (wrangler.jsonc run_worker_first), so the year-long cache rule the Worker gives it lives here too.
+writeFileSync(join(root, '.web-dist', '_headers'), '/_expo/static/*\n  Cache-Control: public, max-age=31536000, immutable\n');
 console.log(`Built .web-dist for ${env.EXPO_PUBLIC_OPEN_MEDIA_API_URL}`);
 
 /**
@@ -58,7 +61,10 @@ function addStartupHints(dist: string, origins: string[]) {
   const hints = [
     ...new Set(origins.map((origin) => new URL(origin).origin)).values(),
   ].map((origin) => `<link rel="preconnect" href="${origin}" crossorigin />`)
-    .concat(fonts.sort().map((font) => `<link rel="preload" href="${encodeURI(font)}" as="font" type="font/ttf" crossorigin />`));
+    // Each path part is encoded the way expo-font requests it (`@expo-google-fonts` becomes
+    // `%40expo-google-fonts`); with any other spelling the browser sees two different URLs and
+    // downloads every font twice.
+    .concat(fonts.sort().map((font) => `<link rel="preload" href="${font.split('/').map(encodeURIComponent).join('/')}" as="font" type="font/ttf" crossorigin />`));
   const page = join(dist, 'index.html');
   const html = readFileSync(page, 'utf8');
   if (!html.includes('</head>')) throw new Error('index.html has no </head> to add startup hints to.');

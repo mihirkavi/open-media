@@ -104,6 +104,9 @@ export function matrixUserFor(userId: string, env: BridgesEnv): string {
   return `@om_${hex}:${env.BRIDGES_SERVER_NAME}`;
 }
 
+/** Matrix users this isolate already registered or found in use; bounded. */
+const registeredUsers = new Set<string>();
+
 export class Bridges {
   private readonly mxid: string;
 
@@ -112,8 +115,15 @@ export class Bridges {
     this.mxid = matrixUserFor(userId, env);
   }
 
-  /** Creates this person's Matrix user the first time it's needed. */
+  /** Creates this person's Matrix user the first time it's needed (once per isolate, not on every 5 s poll). */
   async ensureUser(): Promise<void> {
+    if (registeredUsers.has(this.mxid)) return;
+    await this.registerUser();
+    if (registeredUsers.size >= 5000) registeredUsers.clear();
+    registeredUsers.add(this.mxid);
+  }
+
+  private async registerUser(): Promise<void> {
     const response = await fetch(`${this.env.BRIDGES_HOMESERVER_URL}/_matrix/client/v3/register`, {
       method: 'POST',
       headers: { authorization: `Bearer ${this.env.BRIDGES_AS_TOKEN}`, 'content-type': 'application/json' },

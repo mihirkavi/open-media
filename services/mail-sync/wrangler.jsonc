@@ -2,6 +2,8 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "convo-mail-sync",
   "main": "src/worker.ts",
+  // Unminified, the script is about 12 MB; every cold isolate parses all of it before answering.
+  "minify": true,
   "compatibility_date": "2026-08-18",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "vars": {
@@ -28,7 +30,9 @@
   "assets": {
     "directory": "../../.web-dist",
     "binding": "ASSETS",
-    "run_worker_first": true
+    // The app's content-hashed JavaScript skips the Worker entirely (no isolate start-up on the
+    // first page's critical path); its one-year cache header comes from .web-dist/_headers.
+    "run_worker_first": ["/*", "!/_expo/static/*"]
   },
   // Open Media Events (Layer 1): canonical events, plans and preferences.
   "d1_databases": [

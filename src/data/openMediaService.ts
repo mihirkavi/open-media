@@ -227,49 +227,51 @@ export async function loadOpenMediaConversations(
   ).map((row) => row.conversation_id);
   if (!conversationIds.length) return [];
 
-  const [conversationResult, membersResult, messagesResult] = await Promise.all(
-    [
-      client
-        .from("conversations")
-        .select("id, kind, title, created_at, updated_at")
-        .in("id", conversationIds)
-        .order("updated_at", { ascending: false }),
-      client
-        .from("conversation_members")
-        .select("conversation_id, user_id")
-        .in("conversation_id", conversationIds),
-      client
-        .from("messages")
-        .select(
-          "id, conversation_id, sender_id, client_id, body, transport, created_at, reply_to_message_id",
-        )
-        .in("conversation_id", conversationIds)
-        .order("created_at", { ascending: true }),
-    ],
-  );
+  // Everything below depends only on the conversation ids, so it is asked for in one round trip
+  // instead of one request after another (this list reloads on every new message and reaction).
+  const [conversationResult, membersResult, messagesResult, receiptResult, reactionResult, markedResult] = await Promise.all([
+    client
+      .from("conversations")
+      .select("id, kind, title, created_at, updated_at")
+      .in("id", conversationIds)
+      .order("updated_at", { ascending: false }),
+    client
+      .from("conversation_members")
+      .select("conversation_id, user_id")
+      .in("conversation_id", conversationIds),
+    client
+      .from("messages")
+      .select(
+        "id, conversation_id, sender_id, client_id, body, transport, created_at, reply_to_message_id",
+      )
+      .in("conversation_id", conversationIds)
+      .order("created_at", { ascending: true }),
+    // Receipts (ADR 0026): everyone's delivery and read times the caller may see.
+    client.rpc("open_media_conversation_receipts", { p_conversation_ids: conversationIds }),
+    // Reactions (tapbacks). Older servers have no table yet: messages simply show none.
+    client
+      .from("message_reactions")
+      .select("message_id, user_id, emoji, created_at")
+      .in("conversation_id", conversationIds)
+      .order("created_at", { ascending: true }),
+    // Conversations the person marked unread themselves count as unread until opened. Older servers lack it.
+    client.rpc("open_media_marked_unread"),
+  ]);
   if (conversationResult.error) throw conversationResult.error;
   if (membersResult.error) throw membersResult.error;
   if (messagesResult.error) throw messagesResult.error;
-  // Receipts (ADR 0026): everyone's delivery and read times the caller may see. Loading the
-  // conversations is itself delivery, so it is recorded once this list arrives.
-  const { data: receiptData } = await client.rpc("open_media_conversation_receipts", { p_conversation_ids: conversationIds });
-  // Reactions (tapbacks). Older servers have no table yet: messages simply show none.
-  const { data: reactionData } = await client
-    .from("message_reactions")
-    .select("message_id, user_id, emoji, created_at")
-    .in("conversation_id", conversationIds)
-    .order("created_at", { ascending: true });
+  // Loading the conversations is itself delivery, so it is recorded once this list arrives.
+  client.rpc("open_media_mark_delivered").then(() => undefined, () => undefined);
   const reactionsByMessage = new Map<string, MessageReaction[]>();
-  for (const row of (reactionData ?? []) as ReactionRow[]) {
+  for (const row of (reactionResult.data ?? []) as ReactionRow[]) {
     const list = reactionsByMessage.get(row.message_id) ?? [];
     list.push({ emoji: row.emoji, personId: row.user_id, mine: row.user_id === currentUserId, at: row.created_at });
     reactionsByMessage.set(row.message_id, list);
   }
-  const receipts = (receiptData ?? []) as ReceiptRow[];
-  // Conversations the person marked unread themselves count as unread until opened. Older servers lack it.
-  const { data: markedData } = await client.rpc("open_media_marked_unread");
-  const markedUnread = new Set(((markedData ?? []) as string[]).map(String));
-  client.rpc("open_media_mark_delivered").then(() => undefined, () => undefined);
+  // Indexed by conversation (and person), so assembling the list is linear, not conversations × messages.
+  const receipts = new Map<string, ReceiptRow>();
+  for (const row of (receiptResult.data ?? []) as ReceiptRow[]) receipts.set(`${row.conversation_id}:${row.user_id}`, row);
+  const markedUnread = new Set(((markedResult.data ?? []) as string[]).map(String));
 
   const rows = (membersResult.data ?? []) as MembershipRow[];
   const userIds = [...new Set(rows.map((row) => row.user_id))];
@@ -280,24 +282,31 @@ export async function loadOpenMediaConversations(
   const profiles = new Map(
     ((profileData ?? []) as ProfileCard[]).map((card) => [card.id, card]),
   );
-  const messages = (messagesResult.data ?? []) as MessageRow[];
+  const othersByConversation = new Map<string, MembershipRow[]>();
+  for (const row of rows) {
+    if (row.user_id === currentUserId) continue;
+    const list = othersByConversation.get(row.conversation_id) ?? [];
+    list.push(row);
+    othersByConversation.set(row.conversation_id, list);
+  }
+  const messagesByConversation = new Map<string, MessageRow[]>();
+  for (const row of (messagesResult.data ?? []) as MessageRow[]) {
+    const list = messagesByConversation.get(row.conversation_id) ?? [];
+    list.push(row);
+    messagesByConversation.set(row.conversation_id, list);
+  }
 
   return ((conversationResult.data ?? []) as ConversationRow[])
     .map((conversation) => {
-      const participantRows = rows.filter(
-        (row) =>
-          row.conversation_id === conversation.id &&
-          row.user_id !== currentUserId,
-      );
+      const participantRows = othersByConversation.get(conversation.id) ?? [];
       const participants = participantRows
         .map((row) => profiles.get(row.user_id))
         .filter((card): card is ProfileCard => Boolean(card))
         .map(personFromCard);
-      const own = receipts.find((row) => row.conversation_id === conversation.id && row.user_id === currentUserId);
-      const others = participantRows.map((row) => receipts.find((receipt) => receipt.conversation_id === conversation.id && receipt.user_id === row.user_id))
+      const own = receipts.get(`${conversation.id}:${currentUserId}`);
+      const others = participantRows.map((row) => receipts.get(`${conversation.id}:${row.user_id}`))
         .map((receipt) => ({ deliveredAt: receipt?.delivered_at ?? undefined, readAt: receipt?.read_at ?? undefined }));
-      const conversationMessages = applyReceipts(messages
-        .filter((message) => message.conversation_id === conversation.id)
+      const conversationMessages = applyReceipts((messagesByConversation.get(conversation.id) ?? [])
         .map((message) => withReactions(mapMessage(message, currentUserId, participantRows), reactionsByMessage.get(message.id))), others);
       const lastMessage = conversationMessages[conversationMessages.length - 1];
       return {

@@ -1,6 +1,6 @@
 import Ionicons from "./Icon";
 import { useThemedStyles } from './useThemedStyles';
-import { PropsWithChildren, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, PropsWithChildren, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AccessibilityInfo, Animated, Easing, Image, Keyboard, LayoutChangeEvent, Linking, Modal, PanResponder, Platform, Pressable, ScrollView, StyleProp, StyleSheet, TextStyle, View, ViewStyle, useWindowDimensions } from "react-native";
 import { Loader } from "./Loader";
 import { PullToRefresh } from "./PullToRefresh";
@@ -270,47 +270,13 @@ export function OpenMediaMessages({
         ) : filtered.length ? (
           <PullToRefresh onRefresh={onRefresh}>
             {filtered.map((conversation) => (
-              <SwipeToToggleRead
+              <ConversationRow
                 key={conversation.id}
-                unread={conversation.unreadCount > 0}
-                onToggle={onToggleRead && !isAiConversation(conversation) && conversation.messages.length ? () => onToggleRead(conversation) : undefined}
-              >
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`${conversationTitle(conversation)}. ${conversation.unreadCount ? `${conversation.unreadCount} unread. ` : ""}${listPreview(conversation.preview)}`}
-                onPress={() => setSelectedId(conversation.id)}
-                style={({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) => [
-                  styles.row,
-                  onToggleRead && !isAiConversation(conversation) && conversation.messages.length ? styles.rowInSwipe : null,
-                  conversation.unreadCount > 0 && styles.rowUnread,
-                  (hovered || pressed) && styles.rowHover,
-                  selected?.id === conversation.id && styles.rowActive,
-                ]}
-              >
-                <VerifiedAvatar people={conversation.participants} size={48} />
-                <View style={styles.rowCopy}>
-                  <View style={styles.rowTitleLine}>
-                    <Text numberOfLines={1} style={[styles.rowTitle, conversation.unreadCount > 0 && styles.rowTitleUnread]}>
-                      {conversationTitle(conversation)}
-                    </Text>
-                    {conversation.messages[0]?.id === "ai:welcome" ? null : <Text numberOfLines={1} style={[styles.rowTime, conversation.unreadCount > 0 && styles.rowTimeUnread]}>{formatListTime(new Date(conversation.lastMessageAt))}</Text>}
-                  </View>
-                  <View style={styles.previewLine}>
-                    {conversation.channels ? (
-                      <SourceMarker source={conversation.messages[conversation.messages.length - 1]?.source ?? conversation.sourceSummary[0]} />
-                    ) : null}
-                    <Text numberOfLines={2} style={[styles.preview, styles.previewShrink, conversation.unreadCount > 0 && styles.previewUnread]}>
-                      {listPreview(conversation.preview)}
-                    </Text>
-                    {conversation.unreadCount > 0 ? (
-                      <View style={styles.unreadBadge}>
-                        <Text style={styles.unreadBadgeText}>{conversation.unreadCount > 99 ? "99+" : conversation.unreadCount}</Text>
-                      </View>
-                    ) : null}
-                  </View>
-                </View>
-              </Pressable>
-              </SwipeToToggleRead>
+                conversation={conversation}
+                active={selected?.id === conversation.id}
+                onSelect={setSelectedId}
+                onToggleRead={onToggleRead}
+              />
             ))}
           </PullToRefresh>
         ) : unreadOnly && conversations.length ? (
@@ -474,6 +440,66 @@ function SendButton({ ready, reduceMotion, onPress }: { ready: boolean; reduceMo
 
 interface PendingMessage { id: string; threadId: string; conversationId: string; body: string; replyTo?: Message; failed?: string }
 
+/**
+ * One row of the conversation list. Memoized: the list re-renders whenever any conversation, poll
+ * or filter changes, and re-rendering hundreds of rows (each with its own swipe handler) made the
+ * Messages tab slow to respond. A row now renders again only when its own conversation changes.
+ */
+const ConversationRow = memo(function ConversationRow({ conversation, active, onSelect, onToggleRead }: {
+  conversation: Conversation;
+  active: boolean;
+  onSelect: (id: string) => void;
+  onToggleRead?: (conversation: Conversation) => void;
+}) {
+  const { colors } = useOpenMediaTheme();
+  const styles = useThemedStyles(createStyles);
+  const swipeable = Boolean(onToggleRead) && !isAiConversation(conversation) && conversation.messages.length > 0;
+  return (
+    <SwipeToToggleRead
+      unread={conversation.unreadCount > 0}
+      onToggle={swipeable ? () => onToggleRead!(conversation) : undefined}
+    >
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${conversationTitle(conversation)}. ${conversation.unreadCount ? `${conversation.unreadCount} unread. ` : ""}${listPreview(conversation.preview)}`}
+      onPress={() => onSelect(conversation.id)}
+      style={({ hovered, pressed }: { hovered?: boolean; pressed: boolean }) => [
+        styles.row,
+        swipeable ? styles.rowInSwipe : null,
+        conversation.unreadCount > 0 && styles.rowUnread,
+        (hovered || pressed) && styles.rowHover,
+        active && styles.rowActive,
+      ]}
+    >
+      <VerifiedAvatar people={conversation.participants} size={48} />
+      <View style={styles.rowCopy}>
+        <View style={styles.rowTitleLine}>
+          <Text numberOfLines={1} style={[styles.rowTitle, conversation.unreadCount > 0 && styles.rowTitleUnread]}>
+            {conversationTitle(conversation)}
+          </Text>
+          {conversation.messages[0]?.id === "ai:welcome" ? null : <Text numberOfLines={1} style={[styles.rowTime, conversation.unreadCount > 0 && styles.rowTimeUnread]}>{formatListTime(new Date(conversation.lastMessageAt))}</Text>}
+        </View>
+        <View style={styles.previewLine}>
+          {conversation.channels ? (
+            <SourceMarker source={conversation.messages[conversation.messages.length - 1]?.source ?? conversation.sourceSummary[0]} />
+          ) : null}
+          <Text numberOfLines={2} style={[styles.preview, styles.previewShrink, conversation.unreadCount > 0 && styles.previewUnread]}>
+            {listPreview(conversation.preview)}
+          </Text>
+          {conversation.unreadCount > 0 ? (
+            <View style={styles.unreadBadge}>
+              <Text style={styles.unreadBadgeText}>{conversation.unreadCount > 99 ? "99+" : conversation.unreadCount}</Text>
+            </View>
+          ) : null}
+        </View>
+      </View>
+    </Pressable>
+    </SwipeToToggleRead>
+  );
+});
+
+const noChannels: Conversation[] = [];
+
 function MessageThread({
   conversation,
   blockedUserIds,
@@ -522,7 +548,7 @@ function MessageThread({
   const [channelId, setChannelId] = useState(() => defaultChannel(conversation).id);
   const [choosingChannel, setChoosingChannel] = useState(false);
   const via = channelOf(conversation, channelId) ?? defaultChannel(conversation);
-  const channels = conversation.channels ?? [];
+  const channels = conversation.channels ?? noChannels;
   const blocked = via.participants.some((person) => blockedUserIds.includes(person.id));
   const canSend = !blocked && canReply(via);
   const throughMatrix = via.sourceSummary.includes("matrix");
@@ -625,7 +651,7 @@ function MessageThread({
     // deliver only reads the latest props through onSend.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ask?.at]);
-  const waiting = pending.filter((item) => item.threadId === conversation.id);
+  const waiting = useMemo(() => pending.filter((item) => item.threadId === conversation.id), [pending, conversation.id]);
   // A message you just sent (and Open Media AI's drawing while it answers) scroll into view at once.
   useEffect(() => {
     if (!waiting.length) return;
@@ -740,94 +766,11 @@ function MessageThread({
           }),
     [timeReveal],
   );
-  return (
-    <View ref={threadRef} style={[styles.thread, keyboardInset ? { paddingBottom: keyboardInset } : null]}>
-      <View style={[styles.threadHeader, compactThread && styles.threadHeaderCompact]}>
-        {/* Both sides keep the same width, so the picture and name sit in the true centre. */}
-        <View style={styles.threadSide}>
-          {onBack ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Back to messages"
-              hitSlop={6}
-              onPress={onBack}
-              style={({ pressed }) => [styles.back, pressed && styles.backPressed]}
-            >
-              <Ionicons name="chevron-back" size={24} color={colors.text} />
-            </Pressable>
-          ) : null}
-        </View>
-        <GroupAwareHeading group={groupEmail} target={threadTarget(conversation, otherPerson)} label={`Open ${conversationTitle(conversation)}’s profile`} style={styles.threadHeadingLink}>
-        <View style={styles.threadHeading}>
-          <VerifiedAvatar people={conversation.participants} size={compactThread ? 40 : 44} />
-          <View style={styles.threadNameLine}>
-            <Text numberOfLines={1} style={styles.threadTitle}>
-              {conversationTitle(conversation)}
-            </Text>
-            {groupEmail ? null : <Ionicons name="chevron-forward" size={12} color={colors.textTertiary} style={styles.threadNameChevron} />}
-          </View>
-          <Text numberOfLines={1} style={styles.threadMeta}>
-            {channels.length
-              ? channelsMeta(channels)
-              : blocked
-              ? "Blocked · messaging paused"
-              : isAiConversation(conversation)
-              ? "Every AI you use, in one chat · private to you"
-              : bridged
-              ? `${bridgedName} · through Open Media’s chat bridge`
-              : throughMatrix
-              ? "Matrix · local development sandbox"
-              : conversation.email
-                ? emailMeta(conversation, otherPerson)
-                : canSend
-                  ? "Open Media · private to conversation members"
-                  : "Imported conversation · reply unavailable"}
-          </Text>
-          {groupEmail && conversation.email ? <GroupEmailPeople people={conversation.participants} ownAddress={conversation.email.accountEmail} /> : null}
-        </View>
-        </GroupAwareHeading>
-        <View style={styles.threadSide}>
-          {channelPerson &&
-          !conversation.groupTitle &&
-          via.sourceSummary.includes("open_media") ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Conversation safety"
-              hitSlop={6}
-              onPress={() => {
-                setSafetyStatus("");
-                setSafetyOpen(true);
-              }}
-              style={({ pressed }) => [styles.back, pressed && styles.backPressed]}
-            >
-              <Ionicons name="ellipsis-horizontal" size={22} color={colors.text} />
-            </Pressable>
-          ) : null}
-        </View>
-      </View>
-      <View style={styles.threadBody} {...swipePan.panHandlers}>
-      <ScrollView
-        ref={threadScroll}
-        keyboardDismissMode="interactive"
-        keyboardShouldPersistTaps="handled"
-        contentContainerStyle={styles.threadContent}
-        scrollEventThrottle={64}
-        onScroll={(event) => {
-          const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
-          nearBottom.current = contentOffset.y + layoutMeasurement.height >= contentSize.height - 120;
-        }}
-        onContentSizeChange={() => {
-          // A reaction on an older message changes the height too; only follow the end when already there.
-          if (scrolledOnce.current && !nearBottom.current) return;
-          threadScroll.current?.scrollToEnd({ animated: scrolledOnce.current && !reduceMotion });
-          scrolledOnce.current = true;
-        }}
-      >
-        {tapbackFor ? (
-          // Anywhere else closes the tapback bar.
-          <Pressable accessibilityLabel="Close reactions" accessibilityRole="button" onPress={() => setTapbackFor(undefined)} style={styles.tapbackBackdrop} />
-        ) : null}
-        {conversation.messages.length || waiting.length ? (
+  // The conversation's rows, rebuilt only when what they show changes: typing in the composer
+  // re-renders this component on every keystroke, and laying out and rendering every bubble each
+  // time made long threads lag behind the keyboard.
+  const threadRows = useMemo(() => (
+conversation.messages.length || waiting.length ? (
           layoutThread(shownMessages).map((item) =>
             item.kind === "time" ? (
               <Text key={item.key} accessibilityRole="header" style={styles.timeSeparator}>
@@ -966,7 +909,98 @@ function MessageThread({
               {bridged ? bridgedName : throughMatrix ? "Matrix" : "Open Media"}.
             </Text>
           </View>
-        )}
+        )
+  // The handlers used above read only these values (and refs and state setters, which never change).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ), [conversation, shownMessages, waiting, tapbackFor, flashId, reduceMotion, canSend, blocked, via, onReact, onSend, everyone, replyTotals, byId, lastOutboundId, styles, colors, isGroup, channels, touchScreen]);
+  return (
+    <View ref={threadRef} style={[styles.thread, keyboardInset ? { paddingBottom: keyboardInset } : null]}>
+      <View style={[styles.threadHeader, compactThread && styles.threadHeaderCompact]}>
+        {/* Both sides keep the same width, so the picture and name sit in the true centre. */}
+        <View style={styles.threadSide}>
+          {onBack ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Back to messages"
+              hitSlop={6}
+              onPress={onBack}
+              style={({ pressed }) => [styles.back, pressed && styles.backPressed]}
+            >
+              <Ionicons name="chevron-back" size={24} color={colors.text} />
+            </Pressable>
+          ) : null}
+        </View>
+        <GroupAwareHeading group={groupEmail} target={threadTarget(conversation, otherPerson)} label={`Open ${conversationTitle(conversation)}’s profile`} style={styles.threadHeadingLink}>
+        <View style={styles.threadHeading}>
+          <VerifiedAvatar people={conversation.participants} size={compactThread ? 40 : 44} />
+          <View style={styles.threadNameLine}>
+            <Text numberOfLines={1} style={styles.threadTitle}>
+              {conversationTitle(conversation)}
+            </Text>
+            {groupEmail ? null : <Ionicons name="chevron-forward" size={12} color={colors.textTertiary} style={styles.threadNameChevron} />}
+          </View>
+          <Text numberOfLines={1} style={styles.threadMeta}>
+            {channels.length
+              ? channelsMeta(channels)
+              : blocked
+              ? "Blocked · messaging paused"
+              : isAiConversation(conversation)
+              ? "Every AI you use, in one chat · private to you"
+              : bridged
+              ? `${bridgedName} · through Open Media’s chat bridge`
+              : throughMatrix
+              ? "Matrix · local development sandbox"
+              : conversation.email
+                ? emailMeta(conversation, otherPerson)
+                : canSend
+                  ? "Open Media · private to conversation members"
+                  : "Imported conversation · reply unavailable"}
+          </Text>
+          {groupEmail && conversation.email ? <GroupEmailPeople people={conversation.participants} ownAddress={conversation.email.accountEmail} /> : null}
+        </View>
+        </GroupAwareHeading>
+        <View style={styles.threadSide}>
+          {channelPerson &&
+          !conversation.groupTitle &&
+          via.sourceSummary.includes("open_media") ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Conversation safety"
+              hitSlop={6}
+              onPress={() => {
+                setSafetyStatus("");
+                setSafetyOpen(true);
+              }}
+              style={({ pressed }) => [styles.back, pressed && styles.backPressed]}
+            >
+              <Ionicons name="ellipsis-horizontal" size={22} color={colors.text} />
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
+      <View style={styles.threadBody} {...swipePan.panHandlers}>
+      <ScrollView
+        ref={threadScroll}
+        keyboardDismissMode="interactive"
+        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={styles.threadContent}
+        scrollEventThrottle={64}
+        onScroll={(event) => {
+          const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
+          nearBottom.current = contentOffset.y + layoutMeasurement.height >= contentSize.height - 120;
+        }}
+        onContentSizeChange={() => {
+          // A reaction on an older message changes the height too; only follow the end when already there.
+          if (scrolledOnce.current && !nearBottom.current) return;
+          threadScroll.current?.scrollToEnd({ animated: scrolledOnce.current && !reduceMotion });
+          scrolledOnce.current = true;
+        }}
+      >
+        {tapbackFor ? (
+          // Anywhere else closes the tapback bar.
+          <Pressable accessibilityLabel="Close reactions" accessibilityRole="button" onPress={() => setTapbackFor(undefined)} style={styles.tapbackBackdrop} />
+        ) : null}
+        {threadRows}
       </ScrollView>
       {focusedThread.length ? (
         <ThreadFocus

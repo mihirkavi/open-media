@@ -9,7 +9,7 @@
  *   most four pages and /resume.json are read, each with a size and time limit. Pages are read as
  *   data (src/domain/portfolioExtract.ts) and nothing on them is followed as an instruction.
  */
-import { getDocumentProxy } from 'unpdf';
+import type { getDocumentProxy } from 'unpdf';
 
 import { fromLinkedInPdf, LinkedInPdfError, PdfLine } from '../../../src/domain/linkedInPdf';
 import { extractPortfolio, FetchedPage, relatedPageLinks } from '../../../src/domain/portfolioExtract';
@@ -36,7 +36,8 @@ export async function pdfLines(bytes: Uint8Array): Promise<PdfLine[]> {
   if (bytes.byteLength > pdfLimitBytes) throw new ProfileImportError(413, 'That PDF is larger than 2 MB. LinkedIn’s profile PDF is usually under 200 KB.');
   if (!(bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46)) throw new ProfileImportError(400, 'That file isn’t a PDF.');
   let pdf: Awaited<ReturnType<typeof getDocumentProxy>>;
-  try { pdf = await getDocumentProxy(bytes.slice(), { disableFontFace: true }); }
+  // pdf.js is the largest thing in the Worker; it loads only when someone imports a PDF.
+  try { pdf = await (await import('unpdf')).getDocumentProxy(bytes.slice(), { disableFontFace: true }); }
   catch { throw new ProfileImportError(400, 'That PDF couldn’t be opened. Save it from LinkedIn again and retry.'); }
   const lines: PdfLine[] = [];
   try {

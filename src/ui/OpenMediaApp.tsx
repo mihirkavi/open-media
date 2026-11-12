@@ -44,13 +44,16 @@ import { useFeedLenses } from "./useFeedLenses";
 import { initialsFor } from "../domain/publicPosts";
 import { ThemeColors } from "../theme";
 import { useOpenMediaTheme } from "../themeContext";
-import { ClipsView } from "./ClipsView";
 import { AskMark } from "./AiMark";
-import { SearchView } from "./SearchView";
 import type { SettingFocus } from "./SettingAnchor";
 import { settingForSection } from "../domain/settings";
 import { FeedView } from "./OpenMediaFeed";
 import { lazyComponent, whenIdle } from "./lazyComponent";
+// Tabs and pages opened after the first screen load on demand (and are preloaded when idle).
+const ClipsView = lazyComponent(() => import("./ClipsView").then((module) => module.ClipsView));
+const SearchView = lazyComponent(() => import("./SearchView").then((module) => module.SearchView));
+const PersonProfile = lazyComponent(() => import("./PersonProfile").then((module) => module.PersonProfile));
+const ContactsPage = lazyComponent(() => import("./ContactsPage").then((module) => module.ContactsPage));
 import { useMixedFeed } from "./useMixedFeed";
 
 // Screens that aren't the first thing people see load on demand, keeping the first page small on
@@ -60,8 +63,6 @@ const OpenMediaProfile = lazyComponent(() => import("./OpenMediaUtilities").then
 const OpenMediaSettings = lazyComponent(() => import("./OpenMediaUtilities").then((module) => module.OpenMediaSettings));
 import { PeopleProvider, PersonTarget, useContactsStore } from "./people";
 import { createLayerSlot, LayerSlotContext, LayerSlotView, type SlotState, StackBase, StackPage, useStackEntries, useStackMotion } from "./stack";
-import { PersonProfile } from "./PersonProfile";
-import { ContactsPage } from "./ContactsPage";
 import { encounterForConversation, ownEmails } from "../domain/people";
 import { mergeByContact, recipientSuggestions } from "../domain/contactMerge";
 import { AiAction, AiRecord, aiConversation, aiConversationId, isAiConversation } from "../domain/aiChat";
@@ -139,7 +140,7 @@ export function OpenMediaApp({
   const threadSlot = useMemo(() => createLayerSlot(), []);
   const threadMotion = useStackMotion();
   // Messages is one tap away, so fetch its code once the first screen is up.
-  useEffect(() => whenIdle(() => { OpenMediaMessages.preload().catch(() => undefined); }), []);
+  useEffect(() => whenIdle(() => { for (const screen of [OpenMediaMessages, ClipsView, SearchView, PersonProfile]) screen.preload().catch(() => undefined); }), []);
   // Browser back/forward moves between sections.
   useEffect(() => {
     if (Platform.OS !== "web" || typeof window === "undefined") return;
@@ -190,6 +191,9 @@ export function OpenMediaApp({
   const [messagesError, setMessagesError] = useState("");
   const [blockedUserIds, setBlockedUserIds] = useState<string[]>([]);
   const refreshSequence = useRef(0);
+  // What the last load returned, so a reload that changed nothing doesn't re-render the app.
+  const nativeSignature = useRef("");
+  const blockedSignature = useRef("");
   // One people-first inbox: Open Media chats and email, newest first.
   const conversations = useMemo(
     () =>
@@ -234,8 +238,16 @@ export function OpenMediaApp({
             ]);
       if (sequence === refreshSequence.current) {
         setMessagesError("");
-        setNativeConversations(next);
-        setBlockedUserIds(blocked);
+        const signature = JSON.stringify(next);
+        if (signature !== nativeSignature.current) {
+          nativeSignature.current = signature;
+          setNativeConversations(next);
+        }
+        const blockedKey = blocked.join(",");
+        if (blockedKey !== blockedSignature.current) {
+          blockedSignature.current = blockedKey;
+          setBlockedUserIds(blocked);
+        }
       }
     } catch (error) {
       if (sequence === refreshSequence.current)
@@ -256,6 +268,7 @@ export function OpenMediaApp({
     const channels = conversation.channels ?? [conversation];
     const ids = channels.filter((channel) => channel.sourceSummary.includes("open_media") && !channel.email).map((channel) => channel.id);
     if (ids.length) {
+      nativeSignature.current = ""; // the next load applies the server's state again
       setNativeConversations((current) => current.map((item) => (ids.includes(item.id) && item.unreadCount ? { ...item, unreadCount: 0 } : item)));
       ids.forEach((id) => { markConversationRead(id).catch(() => undefined); });
     }
@@ -295,6 +308,7 @@ export function OpenMediaApp({
       setBridgedConversations((current) => current.map((item) => (item.id === channel.id ? { ...item, unreadCount: Math.max(1, item.unreadCount) } : item)));
       markBridgedChatUnread(channel.id).catch(() => undefined);
     } else if (channel.sourceSummary.includes("open_media")) {
+      nativeSignature.current = "";
       setNativeConversations((current) => current.map((item) => (item.id === channel.id ? { ...item, unreadCount: Math.max(1, item.unreadCount) } : item)));
       markConversationUnread(channel.id).catch(() => undefined);
     }
@@ -319,8 +333,26 @@ export function OpenMediaApp({
       const timer = setInterval(refreshMessages, 3000);
       return () => clearInterval(timer);
     }
-    const channel = subscribeToOpenMediaMessages(refreshMessages);
+    // A burst of inserts and reactions (a busy group, someone tapping reactions) becomes one
+    // reload, and a reload never starts while another is still running.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let running = false;
+    let again = false;
+    let stopped = false;
+    const run = async () => {
+      timer = undefined;
+      if (running) { again = true; return; }
+      running = true;
+      try { await refreshMessages(); } finally {
+        running = false;
+        if (again) { again = false; schedule(); }
+      }
+    };
+    const schedule = () => { if (!timer && !stopped) timer = setTimeout(run, 200); };
+    const channel = subscribeToOpenMediaMessages(schedule);
     return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
       unsubscribeFromOpenMediaMessages(channel);
     };
   }, [messageMode, refreshMessages]);

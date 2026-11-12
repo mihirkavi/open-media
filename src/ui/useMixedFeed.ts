@@ -44,7 +44,7 @@ export function useMixedFeed(sessionKey?: string, kind: FeedKind = 'feed') {
       if (current !== generation.current) return;
       setState((existing) => {
         const previous = append ? existing[id].posts : [];
-        const merged = [...previous, ...page.posts.filter((post) => !previous.some((item) => item.id === post.id))];
+        const merged = [...previous, ...withoutIds(page.posts, previous)];
         return { ...existing, [id]: { posts: merged, cursor: page.cursor, loading: false, error: '' } };
       });
     } catch {
@@ -92,7 +92,7 @@ export function useMixedFeed(sessionKey?: string, kind: FeedKind = 'feed') {
     const newest = new Map<string, number>();
     shown.forEach((post) => newest.set(post.provenance.connectorId, Math.max(newest.get(post.provenance.connectorId) ?? 0, Date.parse(post.createdAt) || 0)));
     const fresh = arrivals.filter((post) => (Date.parse(post.createdAt) || 0) >= (newest.get(post.provenance.connectorId) ?? 0) - 60_000);
-    if (fresh.length) setPending((existing) => [...fresh.filter((post) => !existing.some((item) => item.id === post.id)), ...existing]);
+    if (fresh.length) setPending((existing) => [...withoutIds(fresh, existing), ...existing]);
   }, [openMedia.fetchLatest, shown, fetchPage, webFeeds.fetchLatest]);
 
   const checkRef = useRef(checkForNewPosts);
@@ -125,7 +125,7 @@ export function useMixedFeed(sessionKey?: string, kind: FeedKind = 'feed') {
       const next = { ...existing };
       networkConnectors.forEach((connector) => {
         const incoming = bySource.get(connector.id);
-        if (incoming) next[connector.id] = { ...existing[connector.id], posts: [...incoming.filter((post) => !existing[connector.id].posts.some((item) => item.id === post.id)), ...existing[connector.id].posts] };
+        if (incoming) next[connector.id] = { ...existing[connector.id], posts: [...withoutIds(incoming, existing[connector.id].posts), ...existing[connector.id].posts] };
       });
       return next;
     });
@@ -178,6 +178,12 @@ function useWebFeeds(sessionKey: string | undefined) {
     lastCheck.current = Date.now();
     return (await loadWebFeedItems()).posts;
   }, [sessionKey, following]);
-  const addPosts = useCallback((incoming: SocialPost[]) => setPosts((existing) => [...incoming.filter((post) => !existing.some((item) => item.id === post.id)), ...existing]), []);
+  const addPosts = useCallback((incoming: SocialPost[]) => setPosts((existing) => [...withoutIds(incoming, existing), ...existing]), []);
   return { posts, following, loading, error, reload, fetchLatest, addPosts };
+}
+
+/** The posts in `incoming` that `existing` doesn't have yet, in linear time (pages and polls merge often). */
+function withoutIds(incoming: SocialPost[], existing: readonly { id: string }[]): SocialPost[] {
+  const known = new Set(existing.map((item) => item.id));
+  return incoming.filter((post) => !known.has(post.id));
 }

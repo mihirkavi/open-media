@@ -21,6 +21,23 @@ Each finding is marked **Confirmed** (the code path was read end to end) or **Pl
 | A `StyleSheet` was built per component instance (94 places) | `useThemedStyles`: built once per theme |
 | The translation cache grew forever | Bounded to 600 entries |
 
+## 1b. Fixed 2026-11-11: profiled responsiveness pass
+
+Measured with Playwright at 4× CPU throttling (local stack, a synthetic 400-message chat) and against production.
+
+| Measured problem | Before | After | Fix |
+|---|---|---|---|
+| Typing in a long chat (P3) | ~1,150 ms per keystroke | ~30 ms | `MessageThread` memoizes its rows (`threadRows`); keystrokes re-render only the composer |
+| A new message appearing (P1) | ~660 ms | ~170 ms | `loadOpenMediaConversations` sends its six queries at once instead of one after another, and assembles in linear time; realtime bursts coalesce into one reload (200 ms, never overlapping) |
+| Reloads that changed nothing re-rendered the app (P1, P10) | every insert, every 3 s in Matrix mode | only on change | `nativeSignature` / `blockedSignature` in `OpenMediaApp` |
+| Conversation list re-rendered every row (P4, partly) | all rows on any change | only the changed row | `ConversationRow` is `memo`; still not virtualized |
+| First-page web JavaScript (P11) | 1.64 MB | 1.47 MB | Clips, Search, PersonProfile and Contacts are `lazyComponent`s, preloaded when idle |
+| Fonts downloaded twice | 2× each Instrument Serif file | 1× | preload hints use the same `%40` spelling as expo-font |
+| Worker script (cold isolate start-up; first API calls took 1.3–1.7 s) | 12.0 MB | 7.4 MB | `minify: true`; pdf.js (`unpdf`) loads only for PDF imports |
+| Hashed JS waited for the Worker | Worker ran first | served directly | `run_worker_first: ["/*", "!/_expo/static/*"]` + `.web-dist/_headers` |
+| Feed merges (P13) | O(n²) | O(n) | `withoutIds` in `useMixedFeed` |
+| Bridge polls re-registered the Matrix user (P2, partly) | every 5 s | once per isolate | `registeredUsers` in `bridges.ts`; the full initial `/sync` remains |
+
 ## 2. Remaining performance and memory findings
 
 | # | Sev | Where | Issue | Fix |
