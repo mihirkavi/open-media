@@ -103,7 +103,7 @@ export interface DiscoveryRequest {
 }
 
 const PROVIDER_TIMEOUT_MS = 12_000;
-const USER_AGENT = 'Mozilla/5.0 (compatible; OpenMediaEvents/0.1; +https://github.com/mihirkavi/open-media)';
+const USER_AGENT = 'Mozilla/5.0 (compatible; OpenMediaEvents/0.1; +https://github.com/Manifest-Startup/open-media)';
 
 export class ProviderRouter {
   private readonly luma = new LumaDiscoveryClient({ userAgent: USER_AGENT, timeoutMs: 9_000 });

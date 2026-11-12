@@ -80,14 +80,14 @@ function printPosts(posts: Post[]) {
 
 function mcpConfig(target: string | undefined, baseUrl: string) {
   if (target === 'codex') {
-    return `# ~/.codex/config.toml\n[mcp_servers.open-media]\nurl = "${baseUrl}/open/mcp"\n\n[mcp_servers.open-media-account]\nurl = "${baseUrl}/me/mcp"\nbearer_token_env_var = "OPEN_MEDIA_TOKEN"\n\n# Or install the plugin: codex plugin marketplace add mihirkavi/open-media`;
+    return `# ~/.codex/config.toml\n[mcp_servers.open-media]\nurl = "${baseUrl}/open/mcp"\n\n[mcp_servers.open-media-account]\nurl = "${baseUrl}/me/mcp"\nbearer_token_env_var = "OPEN_MEDIA_TOKEN"\n\n# Or install the plugin: codex plugin marketplace add Manifest-Startup/open-media`;
   }
   return JSON.stringify({
     mcpServers: {
       'open-media': { type: 'http', url: `${baseUrl}/open/mcp` },
       'open-media-account': { type: 'http', url: `${baseUrl}/me/mcp`, headers: { Authorization: 'Bearer ${OPEN_MEDIA_TOKEN}' } },
     },
-  }, null, 2) + '\n\n// Or install the plugin: /plugin install open-media --marketplace mihirkavi/open-media';
+  }, null, 2) + '\n\n// Or install the plugin: /plugin install open-media --marketplace Manifest-Startup/open-media';
 }
 
 // ─── The saved session (~/.config/open-media/session.json, readable only by you) ───

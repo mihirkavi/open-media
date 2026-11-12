@@ -8,8 +8,8 @@
   "files": ["dist", "README.md"],
   "engines": { "node": ">=18" },
   "homepage": "https://api.openmedia.site/developers",
-  "repository": { "type": "git", "url": "git+https://github.com/mihirkavi/open-media.git", "directory": "packages/cli" },
-  "bugs": { "url": "https://github.com/mihirkavi/open-media/issues" },
+  "repository": { "type": "git", "url": "git+https://github.com/Manifest-Startup/open-media.git", "directory": "packages/cli" },
+  "bugs": { "url": "https://github.com/Manifest-Startup/open-media/issues" },
   "keywords": ["open-media", "cli", "social", "farcaster", "lens", "hive", "deso", "mcp", "agents"],
   "scripts": {
     "build": "esbuild src/cli.ts --bundle --platform=node --format=esm --target=node18 --outfile=dist/cli.js",

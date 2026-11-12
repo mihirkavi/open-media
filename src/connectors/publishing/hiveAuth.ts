@@ -16,7 +16,7 @@ export interface HiveAuthSession { account: string; token: string; key: string; 
 
 type ServerMessage = { cmd: string; uuid?: string; expire?: number; data?: string; error?: string; message?: string };
 
-const appInfo = { name: 'Open Media', description: 'Post once, publish everywhere.', icon: 'https://raw.githubusercontent.com/mihirkavi/open-media/main/assets/icon.png' };
+const appInfo = { name: 'Open Media', description: 'Post once, publish everywhere.', icon: 'https://raw.githubusercontent.com/Manifest-Startup/open-media/main/assets/icon.png' };
 
 function encrypt(value: unknown, key: string) {
   return hiveAuthEncrypt(JSON.stringify(value), key, getRandomBytes(8));

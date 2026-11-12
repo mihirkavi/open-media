@@ -11,8 +11,8 @@
   "sideEffects": false,
   "engines": { "node": ">=18" },
   "homepage": "https://api.openmedia.site/developers",
-  "repository": { "type": "git", "url": "git+https://github.com/mihirkavi/open-media.git", "directory": "packages/sdk" },
-  "bugs": { "url": "https://github.com/mihirkavi/open-media/issues" },
+  "repository": { "type": "git", "url": "git+https://github.com/Manifest-Startup/open-media.git", "directory": "packages/sdk" },
+  "bugs": { "url": "https://github.com/Manifest-Startup/open-media/issues" },
   "keywords": ["open-media", "social", "farcaster", "lens", "hive", "deso", "feed", "search", "mcp", "sdk"],
   "scripts": {
     "build": "tsc -p tsconfig.json",

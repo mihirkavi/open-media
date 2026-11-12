@@ -255,7 +255,7 @@ export function listingPolicyMarkdown(): string {
   const review = restrictedCategories.filter((category) => category.severity === 'review').map((category) => `- ${category.label}`);
   return `# Listing rules
 
-Products, services, apps and events on Open Media go live as soon as you post them. Each listing is then checked automatically, in the open, by the rules below ([ADR 0016](https://github.com/mihirkavi/open-media/blob/main/docs/adrs/0016-marketplace-trust-and-community-verification.md)).
+Products, services, apps and events on Open Media go live as soon as you post them. Each listing is then checked automatically, in the open, by the rules below ([ADR 0016](https://github.com/Manifest-Startup/open-media/blob/main/docs/adrs/0016-marketplace-trust-and-community-verification.md)).
 
 ## What happens after you post
 

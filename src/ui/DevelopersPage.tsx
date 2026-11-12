@@ -94,7 +94,7 @@ export function DevelopersPage({ chrome, signedIn, onNavigate, onSignIn, onBack 
       </Section>
 
       <Section title="Ground rules" styles={styles}>
-        <Text style={styles.description}>Open Media’s own public posts and profiles may be read and indexed freely, preferably through the API. Messages, email and contacts are never public. Agents must identify themselves as agents and never pose as people. Other networks’ content keeps its source and links back to it. The code is open source: <Text accessibilityRole="link" onPress={() => { Linking.openURL(sourceRepository).catch(() => undefined); }} style={styles.link}>github.com/mihirkavi/open-media</Text>.</Text>
+        <Text style={styles.description}>Open Media’s own public posts and profiles may be read and indexed freely, preferably through the API. Messages, email and contacts are never public. Agents must identify themselves as agents and never pose as people. Other networks’ content keeps its source and links back to it. The code is open source: <Text accessibilityRole="link" onPress={() => { Linking.openURL(sourceRepository).catch(() => undefined); }} style={styles.link}>github.com/Manifest-Startup/open-media</Text>.</Text>
       </Section>
     </View>
     {chrome === 'public' && onNavigate ? <PublicFooter onNavigate={onNavigate} /> : null}

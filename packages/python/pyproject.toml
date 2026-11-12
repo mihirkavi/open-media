@@ -15,8 +15,8 @@ classifiers = ["License :: OSI Approved :: MIT License", "Programming Language :
 [project.urls]
 Homepage = "https://api.openmedia.site/developers"
 Documentation = "https://api.openmedia.site/docs"
-Repository = "https://github.com/mihirkavi/open-media"
-Issues = "https://github.com/mihirkavi/open-media/issues"
+Repository = "https://github.com/Manifest-Startup/open-media"
+Issues = "https://github.com/Manifest-Startup/open-media/issues"
 
 [tool.setuptools]
 packages = ["open_media"]

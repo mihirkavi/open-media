@@ -193,4 +193,4 @@ export const agentInterfaces = {
   ],
 };
 
-export const sourceRepository = 'https://github.com/mihirkavi/open-media';
+export const sourceRepository = 'https://github.com/Manifest-Startup/open-media';

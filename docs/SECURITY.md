@@ -4,7 +4,7 @@ How Open Media protects accounts and data, what was reviewed, and what is still 
 
 ## Reporting a problem
 
-Please report vulnerabilities privately through [GitHub security advisories](https://github.com/mihirkavi/open-media/security/advisories/new), not in public issues.
+Please report vulnerabilities privately through [GitHub security advisories](https://github.com/Manifest-Startup/open-media/security/advisories/new), not in public issues.
 
 ## How data is protected
 
