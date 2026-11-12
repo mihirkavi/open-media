@@ -108,7 +108,9 @@ export function StackPage({ motion, leaving, onBack, onExited, covering, top, ch
       : fade
         ? Animated.timing(motion.progress, { toValue: leaving ? 0 : 1, duration: 220, useNativeDriver: native })
         : Animated.spring(motion.progress, { toValue: leaving ? 0 : 1, ...pushSpring, useNativeDriver: native });
-    animation.start(({ finished }) => { if (finished && leaving) exited.current(); });
+    // A swipe leaves `drag` at the full width. The Messages thread reuses its motion for the next
+    // chat, which would otherwise open off-screen yet block touches, so a gone page lets go of it.
+    animation.start(({ finished }) => { if (finished && leaving) { motion.drag.setValue(0); exited.current(); } });
     return () => animation.stop();
   }, [leaving, fade, motion]);
 
