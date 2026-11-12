@@ -32,7 +32,7 @@ Measured with Playwright at 4× CPU throttling (local stack, a synthetic 400-mes
 | Reloads that changed nothing re-rendered the app (P1, P10) | every insert, every 3 s in Matrix mode | only on change | `nativeSignature` / `blockedSignature` in `OpenMediaApp` |
 | Conversation list re-rendered every row (P4, partly) | all rows on any change | only the changed row | `ConversationRow` is `memo`; still not virtualized |
 | First-page web JavaScript (P11) | 1.64 MB | 1.47 MB | Clips, Search, PersonProfile and Contacts are `lazyComponent`s, preloaded when idle |
-| Fonts downloaded twice | 2× each Instrument Serif file | 1× | preload hints use the same `%40` spelling as expo-font |
+| Fonts downloaded twice | 2× each Instrument Serif file | still 2× (open) | preload hints now use expo-font's `%40` spelling, but production still requests the `@` spelling too; find the other requester |
 | Worker script (cold isolate start-up; first API calls took 1.3–1.7 s) | 12.0 MB | 7.4 MB | `minify: true`; pdf.js (`unpdf`) loads only for PDF imports |
 | Hashed JS waited for the Worker | Worker ran first | served directly | `run_worker_first: ["/*", "!/_expo/static/*"]` + `.web-dist/_headers` |
 | Feed merges (P13) | O(n²) | O(n) | `withoutIds` in `useMixedFeed` |
