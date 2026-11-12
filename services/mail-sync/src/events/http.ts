@@ -155,5 +155,5 @@ function landingPage(origin: string): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Open Media Events</title>
 <style>:root{color-scheme:light dark}body{font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-width:640px;margin:8vh auto;padding:0 16px}code{font-size:14px}</style></head>
 <body><h1>Open Media Events</h1><p>An agent-agnostic event discovery and planning service. Connect an MCP client to <code>${origin}/mcp</code> (OAuth 2.1). REST operations are documented at <a href="/v1/events/openapi.json">/v1/events/openapi.json</a>.</p>
-<p>Source: <a href="https://github.com/mihirkavi/open-media/tree/main/docs/events">github.com/mihirkavi/open-media</a>.</p></body></html>`;
+<p>Source: <a href="https://github.com/Manifest-Startup/open-media/tree/main/docs/events">github.com/Manifest-Startup/open-media</a>.</p></body></html>`;
 }

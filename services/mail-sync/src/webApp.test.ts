@@ -127,7 +127,7 @@ test('the homepage HTML carries readable text, JSON-LD and Link headers for agen
   const jsonLd = JSON.parse(page.match(/<script type="application\/ld\+json">(.*?)<\/script>/s)![1]) as { '@graph': { '@type': string; sameAs?: string[] }[] };
   const types = jsonLd['@graph'].map((item) => item['@type']);
   for (const type of ['Organization', 'WebSite', 'SoftwareApplication']) assert.ok(types.includes(type), type);
-  assert.ok(jsonLd['@graph'].find((item) => item['@type'] === 'Organization')!.sameAs!.includes('https://github.com/mihirkavi/open-media'));
+  assert.ok(jsonLd['@graph'].find((item) => item['@type'] === 'Organization')!.sameAs!.includes('https://github.com/Manifest-Startup/open-media'));
   // The readable text lives inside the app's root element, which React replaces when the app starts.
   const root = page.slice(page.indexOf('<div id="root">'), page.indexOf('<script src="/_expo'));
   const text = root.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();

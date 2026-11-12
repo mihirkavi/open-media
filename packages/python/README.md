@@ -1,6 +1,6 @@
 # open-media (Python)
 
-The official Python client for the [Open Media](https://github.com/mihirkavi/open-media) API. No dependencies; Python 3.9+.
+The official Python client for the [Open Media](https://github.com/Manifest-Startup/open-media) API. No dependencies; Python 3.9+.
 
 ```bash
 pip install open-media

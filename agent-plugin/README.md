@@ -26,14 +26,14 @@ Results show the way Open Media looks, black and white and content first: posts,
 
 | Where | How |
 |---|---|
-| **Claude Code** | `claude plugin marketplace add mihirkavi/open-media` then `claude plugin install open-media@open-media` |
-| **Codex** | `codex plugin marketplace add mihirkavi/open-media` then `codex plugin add open-media@open-media` |
+| **Claude Code** | `claude plugin marketplace add Manifest-Startup/open-media` then `claude plugin install open-media@open-media` |
+| **Codex** | `codex plugin marketplace add Manifest-Startup/open-media` then `codex plugin add open-media@open-media` |
 | **Claude, ChatGPT (connectors)** | Add a custom connector with `https://api.openmedia.site/account/mcp` and sign in with Open Media |
-| **VS Code** | Command palette → *Chat: Install Plugin from Source* → `mihirkavi/open-media`, or [add the MCP server](vscode:mcp/install?%7B%22name%22%3A%22open-media%22%2C%22type%22%3A%22http%22%2C%22url%22%3A%22https%3A//api.openmedia.site/account/mcp%22%7D) |
-| **Cursor** | Plugins → install from `mihirkavi/open-media`, or [add the MCP server](cursor://anysphere.cursor-deeplink/mcp/install?name=open-media&config=eyJ1cmwiOiJodHRwczovL2FwaS5vcGVubWVkaWEuc2l0ZS9hY2NvdW50L21jcCJ9) |
+| **VS Code** | Command palette → *Chat: Install Plugin from Source* → `Manifest-Startup/open-media`, or [add the MCP server](vscode:mcp/install?%7B%22name%22%3A%22open-media%22%2C%22type%22%3A%22http%22%2C%22url%22%3A%22https%3A//api.openmedia.site/account/mcp%22%7D) |
+| **Cursor** | Plugins → install from `Manifest-Startup/open-media`, or [add the MCP server](cursor://anysphere.cursor-deeplink/mcp/install?name=open-media&config=eyJ1cmwiOiJodHRwczovL2FwaS5vcGVubWVkaWEuc2l0ZS9hY2NvdW50L21jcCJ9) |
 | **Antigravity** | `agy plugin install ./agent-plugin` from a clone of the repository |
-| **Gemini CLI** | `gemini extensions install https://github.com/mihirkavi/open-media` |
-| **Skills only** | `npx skills add mihirkavi/open-media` |
+| **Gemini CLI** | `gemini extensions install https://github.com/Manifest-Startup/open-media` |
+| **Skills only** | `npx skills add Manifest-Startup/open-media` |
 
 Then try **`/open-media:catch-up`**, **`/open-media:inbox`**, **`/open-media:feed`**, **`/open-media:post`**, **`/open-media:algorithm`** or **`/open-media:follow`** in Claude Code, or just ask.
 
@@ -88,6 +88,6 @@ One plugin folder serves every catalog (ADR 0027):
 
 Name, version and servers are kept equal across all of them by a test, and no file holds a token.
 
-- **Source:** [github.com/mihirkavi/open-media](https://github.com/mihirkavi/open-media)
+- **Source:** [github.com/Manifest-Startup/open-media](https://github.com/Manifest-Startup/open-media)
 - **Links:** [Privacy](https://api.openmedia.site/privacy) · [Terms](https://api.openmedia.site/terms) · [Support](https://api.openmedia.site/contact)
 - **License:** MIT.

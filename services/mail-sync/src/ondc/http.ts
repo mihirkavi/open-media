@@ -209,7 +209,7 @@ function participantInfo(env: OndcEnv, cfg: Config | undefined) {
     domains: Object.entries(ondcCategories).map(([code, name]) => ({ code, name })),
     actions: { answered: [...answered], notYet: [...beckn].filter((action) => !answered.has(action)) },
     ...keys,
-    docs: 'https://github.com/mihirkavi/open-media/blob/main/docs/adrs/0015-ondc-seller-app.md',
+    docs: 'https://github.com/Manifest-Startup/open-media/blob/main/docs/adrs/0015-ondc-seller-app.md',
   };
 }
 

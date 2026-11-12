@@ -1,6 +1,6 @@
 # open-media-sdk
 
-The official TypeScript client for the [Open Media](https://github.com/mihirkavi/open-media) API. Read one feed and search across Open Media, Farcaster, Lens, Hive and DeSo, find Bay Area events, and act for a person with their own token. No dependencies; works in Node 18+, Deno, Bun, browsers and Workers.
+The official TypeScript client for the [Open Media](https://github.com/Manifest-Startup/open-media) API. Read one feed and search across Open Media, Farcaster, Lens, Hive and DeSo, find Bay Area events, and act for a person with their own token. No dependencies; works in Node 18+, Deno, Bun, browsers and Workers.
 
 ```bash
 npm install open-media-sdk

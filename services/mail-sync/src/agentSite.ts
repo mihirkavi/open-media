@@ -19,7 +19,7 @@ import { boostLimits, builtInLenses, describeLensRules, forbiddenSignals, lensFo
 export const siteVersion = '1.2.0';
 /** When the site's pages last changed (sitemap lastmod and Markdown frontmatter). */
 export const siteUpdated = '2026-10-27';
-const assets = 'https://raw.githubusercontent.com/mihirkavi/open-media/main/assets';
+const assets = 'https://raw.githubusercontent.com/Manifest-Startup/open-media/main/assets';
 export const iconUrl = `${assets}/brand/logo-light.png`;
 const coverUrl = `${assets}/brand/cover.png`;
 const aiBots = /(GPTBot|ChatGPT-User|OAI-SearchBot|ClaudeBot|Claude-User|Claude-SearchBot|anthropic-ai|PerplexityBot|Perplexity-User|Google-Extended|Applebot-Extended|CCBot|Bytespider|meta-externalagent)/i;
