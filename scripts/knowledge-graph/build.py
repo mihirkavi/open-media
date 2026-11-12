@@ -28,7 +28,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 OUT_DIR = ROOT / ".knowledge"
 DB_PATH = OUT_DIR / "graph.sqlite"
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 
 
 def git(*args: str) -> str:
@@ -79,6 +79,8 @@ SQL_FN = re.compile(r"create\s+(?:or\s+replace\s+)?function\s+([\w.\"]+)\s*\(", 
 SQL_ALTER_ADD = re.compile(r"alter\s+table\s+(?:only\s+)?(?:if\s+exists\s+)?([\w.\"]+)\s+add\s+column\s+(?:if\s+not\s+exists\s+)?(\w+)", re.I)
 SQL_ALTER = re.compile(r"alter\s+table\s+(?:only\s+)?(?:if\s+exists\s+)?([\w.\"]+)", re.I)
 SQL_POLICY = re.compile(r"create\s+policy\s+\"?([^\"\n]+?)\"?\s+on\s+([\w.\"]+)", re.I)
+SQL_TOUCH = re.compile(r"(?:create\s+(?:unique\s+)?index\s+(?:concurrently\s+)?(?:if\s+not\s+exists\s+)?\w*\s*on\s+(?:only\s+)?|create\s+(?:or\s+replace\s+)?(?:constraint\s+)?trigger\s+\w+\s+(?:before|after|instead\s+of)\s+[\w\s,]+?\s+on\s+|create\s+policy\s+\"?[^\"\n]+?\"?\s+on\s+|(?:grant|revoke)\s+[\w\s,()]+?\s+on\s+(?:table\s+)?|comment\s+on\s+(?:table|column)\s+|drop\s+policy\s+(?:if\s+exists\s+)?\"?[^\"\n]+?\"?\s+on\s+)([\w.\"]+)", re.I)
+SQL_GRANT_FN = re.compile(r"(?:grant|revoke)\s+execute\s+on\s+function\s+([\w.\"]+)", re.I)
 SQL_REF = re.compile(r"references\s+([\w.\"]+)", re.I)
 SQL_BODY_TABLE = re.compile(r"\b(?:from|join|into|update)\s+([a-z_][\w.]*)", re.I)
 SQL_KEYWORDS = {"constraint", "primary", "unique", "check", "foreign", "exclude", "like"}
@@ -133,6 +135,10 @@ def parse_sql(files: list[str]):
                 t["cols"].append(m.group(2))
         for m in SQL_ALTER.finditer(text):
             edges.append((f, f"table:{bare(m.group(1))}", "ALTERS"))
+        for m in SQL_TOUCH.finditer(text):
+            edges.append((f, f"table:{bare(m.group(1))}", "TOUCHES"))
+        for m in SQL_GRANT_FN.finditer(text):
+            edges.append((f, f"sqlfn:{bare(m.group(1))}", "TOUCHES"))
         for m in SQL_POLICY.finditer(text):
             name = bare(m.group(2))
             if name in tables:
@@ -155,7 +161,7 @@ def parse_sql(files: list[str]):
     for name, fn in fns.items():
         nodes.append(dict(id=f"sqlfn:{name}", kind="sqlfn", name=name, file=fn["file"], start=fn["line"], end=fn["end"], sig=fn["sig"], doc=""))
     known = {n["id"] for n in nodes}
-    edges = [e for e in edges if e[1] in known or e[1].startswith("table:")]
+    edges = [e for e in edges if e[1] in known or e[1].startswith(("table:", "sqlfn:"))]
     return nodes, edges
 
 
@@ -197,6 +203,11 @@ def parse_docs(md_files: list[str], tracked: set[str], sym_by_name: dict[str, li
                     out.add(f"table:{tok.lower()}")
         for m in ADR_REF.finditer(text):
             out.add(f"adr:{int(m.group(1)):04d}")
+        for word in set(re.findall(r"\b[A-Za-z_$][\w$]{7,}\b", text)):
+            if re.search(r"[a-z][A-Z]", word):
+                ids = sym_by_name.get(word, [])
+                if 0 < len(ids) <= 3:
+                    out.update(ids)
         return out
 
     for f in sorted(md_files):
@@ -323,6 +334,8 @@ def build(quiet: bool = False) -> None:
                     edges.add((f, a, "CITES"))
 
     edges = {e for e in edges if e[0] in nodes and e[1] in nodes}
+    strong = {(s, d) for s, d, r in edges if r in {"CALLS", "RENDERS", "USES_TYPE", "EXTENDS", "IMPLEMENTS"}}
+    edges = {e for e in edges if not (e[2] == "REFERENCES" and (e[0], e[1]) in strong)}
 
     # ------------------------------------------------ ranking + communities
     import networkx as nx
@@ -330,7 +343,7 @@ def build(quiet: bool = False) -> None:
     g = nx.DiGraph()
     for s, d, r in edges:
         if r in {"CALLS", "RENDERS", "USES_TYPE", "IMPORTS", "EXTENDS", "IMPLEMENTS", "USES_TABLE", "CALLS_RPC", "REFERENCES", "HANDLES"}:
-            g.add_edge(s, d)
+            g.add_edge(s, d)  # REFERENCES here means a schema FK or a plain value reference
     rank = nx.pagerank(g, alpha=0.85, max_iter=200) if g.number_of_nodes() else {}
 
     def file_of(nid: str) -> str | None:
@@ -346,7 +359,7 @@ def build(quiet: bool = False) -> None:
     fg.add_nodes_from(code_files)
     weights: dict = collections.defaultdict(float)
     for s, d, r in edges:
-        if r in {"IMPORTS", "CALLS", "RENDERS", "USES_TYPE", "EXTENDS"}:
+        if r in {"IMPORTS", "CALLS", "RENDERS", "USES_TYPE", "EXTENDS", "REFERENCES"}:
             a, b = file_of(s), file_of(d)
             if a and b and a != b:
                 weights[tuple(sorted((a, b)))] += 1.0 if r == "IMPORTS" else 0.25

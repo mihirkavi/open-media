@@ -15,6 +15,8 @@
   kg.py adr <number|words>       decision status, sections, code it names, code citing it
   kg.py area [n]                 architecture areas (communities) and their summary cards
   kg.py stats
+  kg.py viz [name] [--level area|file|symbol] [-d 2]   interactive HTML graph (opens in the browser)
+  kg.py export obsidian|graphml  Obsidian vault (.knowledge/vault) or GraphML for Gephi
 
 The graph rebuilds automatically when tracked files changed (about 9 s); pass --no-refresh to skip.
 """
@@ -31,7 +33,7 @@ sys.path.insert(0, str(HERE))
 import build  # noqa: E402
 
 ROOT = build.ROOT
-CODE_RELS = ("CALLS", "RENDERS", "USES_TYPE", "EXTENDS", "IMPLEMENTS")
+CODE_RELS = ("CALLS", "RENDERS", "USES_TYPE", "EXTENDS", "IMPLEMENTS", "REFERENCES")
 SYMBOL_KINDS = ("function", "component", "class", "method", "interface", "type", "enum", "const")
 
 
@@ -79,13 +81,15 @@ class Graph:
             rows = self.q("select * from nodes where kind in ('file','test-file','migration','doc') and (id=? or id like ?) order by length(id)", q, f"%{q}")
             if rows:
                 return rows[0], rows[1:5]
+        rows = self.q(f"select * from nodes where name=?{kind_sql} and kind not in ('section','test') order by exported desc, rank desc", q, *kargs)
+        if rows:
+            return rows[0], rows[1:5]
         stem = self.q("select * from nodes where kind in ('file','test-file') and (name like ? or name like ?) order by length(id)", f"{q}.ts", f"{q}.tsx")
         if stem and not kinds:
             return stem[0], stem[1:5]
-        for coll in ("", " collate nocase"):
-            rows = self.q(f"select * from nodes where name=?{coll}{kind_sql} and kind not in ('section','test') order by exported desc, rank desc", q, *kargs)
-            if rows:
-                return rows[0], rows[1:5]
+        rows = self.q(f"select * from nodes where name=? collate nocase{kind_sql} and kind not in ('section','test') order by exported desc, rank desc", q, *kargs)
+        if rows:
+            return rows[0], rows[1:5]
         hits = self.search(q, limit=5, kinds=kinds)
         if hits:
             return hits[0], hits[1:5]
@@ -186,14 +190,16 @@ def cmd_sym(g: Graph, args) -> None:
         return cmd_adr(g, [nid])
     listing(g, "called/rendered by", g.inc(nid, ("CALLS", "RENDERS")), 12)
     listing(g, "calls/renders", g.out(nid, ("CALLS", "RENDERS")), 12)
+    listing(g, "referenced by", g.inc(nid, ("REFERENCES",)), 10)
+    listing(g, "references", g.out(nid, ("REFERENCES",)), 8)
     listing(g, "used as type by", g.inc(nid, ("USES_TYPE",)), 10)
     listing(g, "uses types", g.out(nid, ("USES_TYPE", "EXTENDS", "IMPLEMENTS")), 8)
     listing(g, "data", g.out(nid, ("USES_TABLE", "CALLS_RPC")), 10, lambda r: f"{r['kind']} {r['name']}")
     listing(g, "handles routes", g.out(nid, ("HANDLES",)), 15, lambda r: r["name"])
     tests = g.tests_for_file(n["file"])
-    named = g.q("select * from nodes where kind='test' and name like ? order by file limit 8", f"%{n['name'].split('.')[-1]}%")
+    named = [r for r in g.inc(nid, ("TESTS",)) if r["kind"] == "test"]
     listing(g, "test files covering its file", [g.node(t) for t in tests], 6, lambda r: r["id"])
-    listing(g, "test cases naming it", named, 8, lambda r: f"{clip(r['name'], 90)}  {g.loc(r)}")
+    listing(g, "test cases exercising it", named, 8, lambda r: f"{clip(r['name'], 90)}  {g.loc(r)}")
     listing(g, "docs mentioning it", g.inc(nid, ("MENTIONS",)), 6, lambda r: f"{clip(r['name'], 80)}  {g.loc(r)}")
 
 
@@ -374,7 +380,7 @@ def cmd_table(g: Graph, args) -> None:
     nid = n["id"]
     listing(g, "references", g.out(nid, ("REFERENCES",)), 15, lambda r: r["name"])
     listing(g, "referenced by", g.inc(nid, ("REFERENCES",)), 15, lambda r: r["name"])
-    listing(g, "migrations", g.inc(nid, ("DEFINES", "ALTERS")), 15, lambda r: r["id"])
+    listing(g, "migrations", g.inc(nid, ("DEFINES", "ALTERS", "TOUCHES")), 20, lambda r: r["id"])
     sqlfns = [r for r in g.inc(nid, ("USES_TABLE",)) if r["kind"] == "sqlfn"]
     listing(g, "sql functions using it", sqlfns if n["kind"] == "table" else [], 15, lambda r: r["name"])
     code = [r for r in g.inc(nid, ("USES_TABLE", "CALLS_RPC")) if r["kind"] != "sqlfn"]
@@ -434,10 +440,26 @@ def cmd_stats(g: Graph, args) -> None:
         print(f"{r['key']}: {r['value']}")
 
 
+def cmd_viz(g: Graph, args) -> None:
+    import viz
+    viz.write_html(g, args)
+
+
+def cmd_export(g: Graph, args) -> None:
+    import viz
+    what = args[0] if args else ""
+    if what == "obsidian":
+        viz.export_obsidian(g)
+    elif what == "graphml":
+        viz.export_graphml(g)
+    else:
+        sys.exit("usage: kg.py export obsidian|graphml")
+
+
 COMMANDS = {
     "overview": cmd_overview, "search": cmd_search, "s": cmd_search, "sym": cmd_sym, "body": cmd_body,
     "file": cmd_file, "callers": cmd_callers, "callees": cmd_callees, "impact": cmd_impact, "path": cmd_path,
-    "table": cmd_table, "route": cmd_route, "adr": cmd_adr, "area": cmd_area, "stats": cmd_stats,
+    "table": cmd_table, "route": cmd_route, "adr": cmd_adr, "area": cmd_area, "stats": cmd_stats, "viz": cmd_viz, "export": cmd_export,
 }
 
 

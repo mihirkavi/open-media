@@ -211,7 +211,20 @@ for (const sf of program.getSourceFiles()) {
     }
   }
 
+  let currentTest: string | undefined;
   const visit = (n: ts.Node) => {
+    // Plain references: values passed around, read or spread (callbacks, style sheets, lookup tables).
+    // build.py drops a REFERENCES edge when a stronger CALLS/RENDERS/USES_TYPE edge exists for the pair.
+    if (ts.isIdentifier(n) && !(n.parent && (ts.isImportSpecifier(n.parent) || ts.isImportClause(n.parent) || ts.isExportSpecifier(n.parent)))) {
+      const declName = n.parent && (n.parent as ts.NamedDeclaration).name === n;
+      const sym = ts.isShorthandPropertyAssignment(n.parent) ? checker.getShorthandAssignmentValueSymbol(n.parent) : checker.getSymbolAtLocation(n);
+      const target = declName ? undefined : resolve(sym);
+      if (target) {
+        const from = enclosing(n) ?? file;
+        if (from !== target) edge(from, target, 'REFERENCES');
+        if (currentTest) edge(currentTest, target, 'TESTS');
+      }
+    }
     // Calls and `new`.
     if (ts.isCallExpression(n) || ts.isNewExpression(n)) {
       const callee = n.expression;
@@ -221,7 +234,14 @@ for (const sf of program.getSourceFiles()) {
 
       // Test cases: test('name', ...), it(...), describe(...).
       if (isTest && ts.isCallExpression(n) && ts.isIdentifier(callee) && /^(test|it|describe)$/.test(callee.text) && n.arguments[0] && ts.isStringLiteralLike(n.arguments[0])) {
-        emit({ t: 'test', file, name: clip(n.arguments[0].text, 200), line: line(sf, n.getStart(sf)) });
+        const testLine = line(sf, n.getStart(sf));
+        emit({ t: 'test', file, name: clip(n.arguments[0].text, 200), line: testLine });
+        // Everything the test body touches is linked from this test case (innermost test wins).
+        const outer = currentTest;
+        currentTest = `${file}::${testLine}`;
+        ts.forEachChild(n, visit);
+        currentTest = outer;
+        return;
       }
       // Database access: .from('table') / .rpc('fn') / rest/v1/<table> strings.
       if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(callee) && n.arguments[0] && ts.isStringLiteralLike(n.arguments[0])) {
